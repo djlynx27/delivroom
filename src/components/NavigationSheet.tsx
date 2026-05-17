@@ -8,7 +8,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { useI18n } from '@/contexts/I18nContext';
-import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/venueCoordinates';
+import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/hotspots';
 import { X } from 'lucide-react';
 
 interface NavigationSheetProps {

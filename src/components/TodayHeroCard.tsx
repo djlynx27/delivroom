@@ -4,7 +4,7 @@ import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SwipeToAccept } from '@/components/SwipeToAccept';
 import { Button } from '@/components/ui/button';
 import type { ScoreFactors } from '@/hooks/useDemandScores';
-import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/venueCoordinates';
+import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/hotspots';
 import { Clock } from 'lucide-react';
 
 interface HeroZone {

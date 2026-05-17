@@ -4,7 +4,7 @@ import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { getDemandLevel } from '@/lib/demandUtils';
 import { scoreAllZones, type WeatherCondition } from '@/lib/scoringEngine';
-import { getGoogleMapsNavUrl } from '@/lib/venueCoordinates';
+import { getGoogleMapsNavUrl } from '@/lib/hotspots';
 import { useMemo } from 'react';
 
 function getBorderClass(level: ReturnType<typeof getDemandLevel>) {

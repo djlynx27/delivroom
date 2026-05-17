@@ -31,7 +31,7 @@ import {
   getGoogleMapsNavUrl,
   getWazeNavUrl,
   launchGoogleMapsNavigation,
-} from '@/lib/venueCoordinates';
+} from '@/lib/hotspots';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
