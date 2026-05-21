@@ -62,6 +62,9 @@ jobs:
 
       # Bubblewrap CLI a besoin de connaître les paths JDK + Android SDK,
       # sinon il prompt interactivement et le build CI échoue (exit 130).
+      # Il valide aussi la présence de <sdk>/tools ou <sdk>/bin à la racine
+      # du SDK, alors que les runners GH ne fournissent que cmdline-tools/.
+      # On symlink pour satisfaire la validation.
       - name: Configure Bubblewrap (non-interactive)
         run: |
           mkdir -p ~/.bubblewrap
@@ -73,8 +76,14 @@ jobs:
           EOF
           echo "Bubblewrap config:"
           cat ~/.bubblewrap/config.json
-          echo "ANDROID_HOME contents:"
-          ls -la "${ANDROID_HOME}" || true
+          # Symlink cmdline-tools/latest/bin -> <sdk>/bin pour passer la
+          # validation bubblewrap qui cherche <sdk>/tools ou <sdk>/bin.
+          CLT_BIN=$(find "${ANDROID_HOME}/cmdline-tools" -maxdepth 2 -name bin -type d | head -1)
+          if [ -n "$CLT_BIN" ] && [ ! -e "${ANDROID_HOME}/bin" ]; then
+            ln -sf "$CLT_BIN" "${ANDROID_HOME}/bin"
+            echo "Symlinked $CLT_BIN -> ${ANDROID_HOME}/bin"
+          fi
+          ls -la "${ANDROID_HOME}/bin" || true
 
       # Restaurer le keystore depuis le secret base64
       - name: Restore keystore
