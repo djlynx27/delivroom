@@ -42,3 +42,6 @@ test-results/
 playwright-report/
 coverage/
 .env*.local
+
+# CI artifacts téléchargés localement
+artifacts/
