@@ -5,6 +5,7 @@ import { PwaInstallBanner } from '@/components/PwaInstallBanner';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/contexts/I18nContext';
+import { useAnonAuth } from '@/hooks/useAnonAuth';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
 import {
@@ -78,12 +79,40 @@ class AppErrorBoundary extends Component<
 
 function AppContent() {
   const location = useLocation();
+  const { status: authStatus, error: authError } = useAnonAuth();
   // Hide NearestHotspot on Today screen since hero card already shows best zone + distance
   const showNearestHotspot =
     location.pathname !== '/today' &&
     location.pathname !== '/' &&
     location.pathname !== '/events' &&
     !location.pathname.startsWith('/admin');
+
+  if (authStatus === 'loading') {
+    return (
+      <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]" />
+    );
+  }
+
+  if (authStatus === 'error') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4 pt-[env(safe-area-inset-top)]">
+        <div className="max-w-sm text-center space-y-3">
+          <h1 className="text-xl font-display font-bold">
+            Connexion impossible
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            {authError ?? 'Auth anonyme indisponible.'}
+          </p>
+          <button
+            className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            onClick={() => window.location.reload()}
+          >
+            Réessayer
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]">
