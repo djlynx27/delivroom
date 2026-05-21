@@ -4,49 +4,40 @@
   "name": "Delivroom — Chauffeur",
   "launcherName": "Delivroom",
   "display": "standalone",
-  "orientation": "portrait",
-  "themeColor": "#0a0a1a",
-  "navigationColor": "#0a0a1a",
-  "navigationColorDark": "#0a0a1a",
-  "navigationDividerColor": "#0a0a1a",
-  "navigationDividerColorDark": "#0a0a1a",
-  "backgroundColor": "#0a0a1a",
+  "themeColor": "#0A0A1A",
+  "themeColorDark": "#000000",
+  "navigationColor": "#0A0A1A",
+  "navigationColorDark": "#0A0A1A",
+  "navigationDividerColor": "#0A0A1A",
+  "navigationDividerColorDark": "#0A0A1A",
+  "backgroundColor": "#0A0A1A",
   "enableNotifications": true,
   "startUrl": "/",
   "iconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
   "maskableIconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
   "monochromeIconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
+  "splashScreenFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "delivroom"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 2,
   "shortcuts": [
     {
       "name": "Aujourd'hui",
       "shortName": "Aujourd'hui",
       "url": "/",
-      "icons": [
-        {
-          "src": "https://delivroom.vercel.app/pwa-icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
+      "chosenIconUrl": "https://delivroom.vercel.app/pwa-icon-192.png"
     },
     {
       "name": "Mes revenus",
       "shortName": "Revenus",
       "url": "/revenue",
-      "icons": [
-        {
-          "src": "https://delivroom.vercel.app/pwa-icon-192.png",
-          "sizes": "192x192"
-        }
-      ]
+      "chosenIconUrl": "https://delivroom.vercel.app/pwa-icon-192.png"
     }
   ],
-  "appVersion": "1.0.0",
-  "appVersionCode": 1,
-  "signingKey": {
-    "path": "./android.keystore",
-    "alias": "delivroom"
-  },
-  "splashScreenFadeOutDuration": 300,
+  "generatorApp": "bubblewrap-cli",
   "fallbackType": "chromeos",
   "features": {},
   "alphaDependencies": {
@@ -55,7 +46,11 @@
   "enableSiteSettingsShortcut": true,
   "isChromeOSOnly": false,
   "isMetaQuest": false,
-  "fullyImmersive": false,
   "minSdkVersion": 21,
-  "targetSdkVersion": 34
+  "orientation": "portrait",
+  "fingerprints": [],
+  "additionalTrustedOrigins": [],
+  "retainedBundles": [],
+  "displayOverride": [],
+  "appVersion": "1.0.0"
 }
