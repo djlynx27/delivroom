@@ -112,15 +112,15 @@ jobs:
             console.log('patched version', m.appVersion, 'code', m.appVersionCode);
           "
 
-      # Build l'APK et l'AAB (bundle Play Store)
+      # Build l'APK et l'AAB (bundle Play Store).
+      # Bubblewrap lit les passwords via env vars BUBBLEWRAP_KEYSTORE_PASSWORD
+      # et BUBBLEWRAP_KEY_PASSWORD (les flags CLI ne sont plus supportés).
+      # Le keystore path + alias sont déjà dans twa-manifest.json.
       - name: Build APK
-        run: |
-          bubblewrap build \
-            --skipPwaValidation \
-            --keystorePath android.keystore \
-            --keystoreKeyAlias delivroom \
-            --keystorePassword "${{ secrets['ANDROID_KEYSTORE_PASSWORD'] }}" \
-            --keyPassword "${{ secrets['ANDROID_KEY_ALIAS_PASSWORD'] }}"
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+        run: bubblewrap build --skipPwaValidation
 
       # Upload APK comme artifact GitHub
       - name: Upload APK artifact
