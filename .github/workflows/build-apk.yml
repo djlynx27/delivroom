@@ -122,14 +122,17 @@ jobs:
           BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
         run: bubblewrap build --skipPwaValidation
 
-      # Upload APK comme artifact GitHub
-      - name: Upload APK artifact
+      # Upload APK + AAB comme artifact GitHub.
+      # Bubblewrap génère:
+      #  - app-release-signed.apk  (sideload / direct install)
+      #  - app-release-bundle.aab  (upload Play Console)
+      - name: Upload APK + AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: delivroom-apk
           path: |
             app-release-signed.apk
-            app-release.aab
+            app-release-bundle.aab
           if-no-files-found: error
           retention-days: 30
 
@@ -152,7 +155,7 @@ jobs:
             (Developer → Production → Créer une nouvelle version)
           files: |
             app-release-signed.apk
-            app-release.aab
+            app-release-bundle.aab
           draft: false
           prerelease: false
         env:
