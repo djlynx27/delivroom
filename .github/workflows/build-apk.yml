@@ -32,6 +32,11 @@ jobs:
     name: Build & Sign APK
     runs-on: ubuntu-latest
 
+    # Permission requise pour que softprops/action-gh-release@v2 puisse
+    # créer la Release et y attacher les binaires sur push de tag.
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
