@@ -52,6 +52,20 @@ jobs:
       - name: Install Bubblewrap CLI
         run: npm install -g @bubblewrap/cli
 
+      # Bubblewrap CLI a besoin de connaître les paths JDK + Android SDK,
+      # sinon il prompt interactivement et le build CI échoue (exit 130).
+      - name: Configure Bubblewrap (non-interactive)
+        run: |
+          mkdir -p ~/.bubblewrap
+          cat > ~/.bubblewrap/config.json <<EOF
+          {
+            "jdkPath": "${JAVA_HOME}",
+            "androidSdkPath": "${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+          }
+          EOF
+          echo "Bubblewrap config:"
+          cat ~/.bubblewrap/config.json
+
       # Restaurer le keystore depuis le secret base64
       - name: Restore keystore
         run: |
