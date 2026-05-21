@@ -1,23 +1,24 @@
 // Helpers navigation Google Maps / Waze pour hotspots et zones
-export function getGoogleMapsNavUrl(
-  name: string,
-  lat: number,
-  lng: number
-): string {
-  const label = encodeURIComponent(name);
-  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=&travelmode=driving&dir_action=navigate&destination_name=${label}`;
+export function getGoogleMapsNavUrl(_name: string, lat: number, lng: number): string {
+  // Use official Google Maps Directions API URL format for better precision and app intercepting
+  return `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&travelmode=driving`;
 }
 
 export function getWazeNavUrl(_name: string, lat: number, lng: number): string {
   return `https://waze.com/ul?ll=${lat},${lng}&navigate=yes&zoom=17`;
 }
 
-export function launchGoogleMapsNavigation(
-  name: string,
-  lat: number,
-  lng: number
-): void {
-  window.open(getGoogleMapsNavUrl(name, lat, lng), '_blank');
+// Use _system to trigger native Google Maps / Waze app on Android (Capacitor)
+export function openGoogleMapsNav(_name: string, lat: number, lng: number): void {
+  window.open(getGoogleMapsNavUrl(_name, lat, lng), '_system');
+}
+
+export function openWazeNav(_name: string, lat: number, lng: number): void {
+  window.open(getWazeNavUrl(_name, lat, lng), '_system');
+}
+
+export function launchGoogleMapsNavigation(name: string, lat: number, lng: number): void {
+  openGoogleMapsNav(name, lat, lng);
 }
 // Hotspots stratégiques optimisés pour HustleGo (2026)
 // Généré à partir de l'analyse stratégique et logistique
@@ -111,8 +112,8 @@ export const HOTSPOTS: Hotspot[] = [
     id: 'carrefour-laval',
     name: 'Carrefour Laval',
     address: '3035 Boul. le Carrefour (Tim Hortons)',
-    lat: 45.57,
-    lng: -73.7506,
+    lat: 45.5702,
+    lng: -73.7519,
     category: 'Commerce',
     platforms: ['Instacart', 'Uber', 'Skip'],
     egressVelocity: 10,
@@ -173,8 +174,8 @@ export const HOTSPOTS: Hotspot[] = [
     id: 'place-bell',
     name: 'Place Bell (Laval)',
     address: '1700 Rue Jacques-Tétreault',
-    lat: 45.5559,
-    lng: -73.7217,
+    lat: 45.5562,
+    lng: -73.7203,
     category: 'Events',
     platforms: ['Uber', 'Lyft', 'Eva'],
     egressVelocity: 9,

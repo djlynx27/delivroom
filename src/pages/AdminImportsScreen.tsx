@@ -1,39 +1,70 @@
 import { CsvImporter } from '@/components/CsvImporter';
-import { UniversalFileAnalyzer } from '@/components/UniversalFileAnalyzer';
+import { ScreenshotAnalyzer } from '@/components/ScreenshotAnalyzer';
 import { AdminPageShell } from '@/components/admin/AdminPageShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { FileSpreadsheet, Camera, Brain } from 'lucide-react';
 
 export default function AdminImportsScreen() {
   return (
     <AdminPageShell
-      title="Admin · Imports & documents"
-      description="Zone d’ingestion des historiques. C’est ici que les erreurs de parsing ou de mapping peuvent fausser les scores et les revenus."
+      title="Import de données"
+      description="Alimente le moteur d'apprentissage avec tes vraies données de courses pour des suggestions personnalisées."
     >
-      <Card className="bg-card border-border">
+      {/* Explication du flux */}
+      <Card className="bg-primary/10 border-primary/20">
         <CardHeader className="pb-2">
-          <CardTitle className="text-base font-display">
-            Utilisation prudente
+          <CardTitle className="text-sm font-display flex items-center gap-2 text-primary">
+            <Brain className="w-4 h-4" /> Comment ça fonctionne
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground space-y-1.5">
+        <CardContent className="text-xs text-primary/80 space-y-1.5">
           <p>
-            CSV Importer est préférable pour des historiques structurés, mais
-            l’attribution de zone reste heuristique.
+            <span className="font-semibold">Tes données réelles</span> →{' '}
+            <span className="font-semibold">Algorithme d'apprentissage</span> →{' '}
+            <span className="font-semibold">Suggestions personnalisées</span>
           </p>
           <p>
-            Universal File Analyzer reste maintenant en lecture assistée pour
-            les documents de shift ou de kilométrage: il ne doit plus créer de
-            trips automatiquement à partir d’un rapport global.
+            Plus tu importes, plus les scores de zones reflètent <em>ta</em> réalité
+            (horaires, plateforme, type de courses) plutôt que des moyennes théoriques.
           </p>
-          <p>
-            Après chaque import, vérifie un petit échantillon avant de lancer
-            des recalibrages IA.
-          </p>
+          <div className="pt-1 space-y-0.5">
+            <p>• <span className="font-semibold">Lyft CSV</span> : Settings → Earnings → Export dans l'app Lyft</p>
+            <p>• <span className="font-semibold">Imoove / Hypra</span> : Screenshots de tes résumés de course</p>
+          </div>
         </CardContent>
       </Card>
 
-      <UniversalFileAnalyzer />
-      <CsvImporter />
+      {/* Section 1 — Screenshots Imoove/Hypra/Lyft */}
+      <div>
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <Camera className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-bold uppercase tracking-wide text-muted-foreground">
+            Screenshot (Imoove · Hypra · Lyft)
+          </h2>
+        </div>
+        <ScreenshotAnalyzer />
+      </div>
+
+      {/* Section 2 — CSV Lyft */}
+      <div>
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <FileSpreadsheet className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-bold uppercase tracking-wide text-muted-foreground">
+            Fichier CSV (Lyft Export)
+          </h2>
+        </div>
+        <CsvImporter />
+      </div>
+
+      {/* Note de prudence */}
+      <Card className="bg-card border-border">
+        <CardContent className="pt-4 text-xs text-muted-foreground space-y-1">
+          <p>
+            L'attribution de zone est heuristique pour les screenshots sans localisation GPS précise.
+            Vérifie un échantillon après chaque import avant de tirer des conclusions.
+          </p>
+        </CardContent>
+      </Card>
     </AdminPageShell>
   );
 }

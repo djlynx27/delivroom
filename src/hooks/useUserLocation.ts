@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Geolocation } from '@capacitor/geolocation';
+import type { Position } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 
 interface UserLocation {
   latitude: number;
@@ -18,41 +21,52 @@ export interface UserLocationResult {
   refresh: () => Promise<UserLocation | null>;
 }
 
-function getGeolocationErrorMessage(error: GeolocationPositionError) {
-  switch (error.code) {
-    case error.PERMISSION_DENIED:
-      return 'Permission de localisation refusée. Sur Android, ferme les bulles ou overlays puis réessaie.';
-    case error.POSITION_UNAVAILABLE:
-      return 'Signal GPS indisponible. Active la localisation haute précision ou déplace-toi vers une zone dégagée.';
-    case error.TIMEOUT:
-      return 'Le GPS met trop de temps à répondre. Réessaie dans un endroit plus dégagé.';
-    default:
-      return error.message || 'Impossible de récupérer la position actuelle';
-  }
+function getGeolocationErrorMessage(error: any) {
+  if (typeof error === 'string') return error;
+  if (error.message) return error.message;
+  return 'Impossible de récupérer la position actuelle';
 }
 
-function normalizePosition(pos: GeolocationPosition): UserLocation {
+function normalizePosition(pos: Position | GeolocationPosition): UserLocation {
+  // Capacitor Position vs Web GeolocationPosition
+  const coords = pos.coords;
   return {
-    latitude: pos.coords.latitude,
-    longitude: pos.coords.longitude,
-    heading: typeof pos.coords.heading === 'number' ? pos.coords.heading : null,
-    speed: typeof pos.coords.speed === 'number' ? pos.coords.speed : null,
-    accuracy:
-      typeof pos.coords.accuracy === 'number' ? pos.coords.accuracy : null,
+    latitude: coords.latitude,
+    longitude: coords.longitude,
+    heading: typeof coords.heading === 'number' ? coords.heading : null,
+    speed: typeof coords.speed === 'number' ? coords.speed : null,
+    accuracy: typeof coords.accuracy === 'number' ? coords.accuracy : null,
     timestamp: pos.timestamp,
   };
 }
 
-export function requestCurrentPreciseLocation(
+export async function requestCurrentPreciseLocation(
   options?: PositionOptions
 ): Promise<UserLocation> {
-  return new Promise((resolve, reject) => {
-    if (typeof navigator === 'undefined') {
-      reject(new Error('Navigator is not available in this environment'));
-      return;
-    }
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const permissions = await Geolocation.checkPermissions();
+      if (permissions.location !== 'granted') {
+        const request = await Geolocation.requestPermissions();
+        if (request.location !== 'granted') {
+          throw new Error('Permission de localisation refusée');
+        }
+      }
 
-    if (!navigator.geolocation) {
+      const pos = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        ...options,
+      });
+      return normalizePosition(pos);
+    } catch (err) {
+      throw new Error(getGeolocationErrorMessage(err));
+    }
+  }
+
+  // Fallback to Web API
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
       reject(new Error('Geolocation is not supported on this device'));
       return;
     }
@@ -63,14 +77,14 @@ export function requestCurrentPreciseLocation(
       {
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 5000,
+        maximumAge: 0,
         ...options,
       }
     );
   });
 }
 
-export function useUserLocation(intervalMs = 30000): UserLocationResult {
+export function useUserLocation(intervalMs = 10000): UserLocationResult {
   const [location, setLocation] = useState<UserLocation | null>(null);
   const [status, setStatus] = useState<UserLocationStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +95,12 @@ export function useUserLocation(intervalMs = 30000): UserLocationResult {
     const now = Date.now();
     const previousLocation = latestLocationRef.current;
 
-    if (now - lastUpdateRef.current < 1500 && lastUpdateRef.current !== 0) {
+    // Throttle updates to avoid UI flicker, but keep it responsive for driving
+    if (now - lastUpdateRef.current < 1000 && lastUpdateRef.current !== 0) {
       return;
     }
 
+    // Ensure we don't process stale updates
     if (
       previousLocation?.timestamp != null &&
       nextLocation.timestamp != null &&
@@ -101,18 +117,6 @@ export function useUserLocation(intervalMs = 30000): UserLocationResult {
   }, []);
 
   const update = useCallback(async () => {
-    if (typeof navigator === 'undefined') {
-      setStatus('error');
-      setError('Navigator is not available in this environment');
-      return null;
-    }
-
-    if (!navigator.geolocation) {
-      setStatus('error');
-      setError('Geolocation is not supported on this device');
-      return null;
-    }
-
     setStatus((prev) => (prev === 'success' ? prev : 'loading'));
 
     try {
@@ -120,8 +124,7 @@ export function useUserLocation(intervalMs = 30000): UserLocationResult {
       applyLocation(nextLocation);
       return nextLocation;
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Unable to get current location';
+      const message = getGeolocationErrorMessage(err);
       if (!latestLocationRef.current) {
         setStatus('error');
       }
@@ -133,32 +136,53 @@ export function useUserLocation(intervalMs = 30000): UserLocationResult {
   useEffect(() => {
     void update();
     const id = setInterval(update, intervalMs);
-    const watchId =
-      typeof navigator !== 'undefined' && navigator.geolocation
-        ? navigator.geolocation.watchPosition(
-            (pos) => applyLocation(normalizePosition(pos)),
-            (watchError) => {
-              if (!latestLocationRef.current) {
-                setStatus('error');
-              }
-              setError(getGeolocationErrorMessage(watchError));
-            },
+
+    let watchId: string | number | null = null;
+
+    const startWatching = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          watchId = await Geolocation.watchPosition(
             {
               enableHighAccuracy: true,
-              maximumAge: 5000,
-              timeout: 15000,
+              requestDaylightSavingsTime: true, // Not relevant but showing usage
+            },
+            (pos, err) => {
+              if (err) {
+                setError(getGeolocationErrorMessage(err));
+              } else if (pos) {
+                applyLocation(normalizePosition(pos));
+              }
             }
-          )
-        : null;
+          );
+        } catch (err) {
+          setError(getGeolocationErrorMessage(err));
+        }
+      } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => applyLocation(normalizePosition(pos)),
+          (watchError) => {
+            setError(getGeolocationErrorMessage(watchError));
+          },
+          {
+            enableHighAccuracy: true,
+            maximumAge: 0,
+            timeout: 15000,
+          }
+        );
+      }
+    };
+
+    void startWatching();
 
     return () => {
       clearInterval(id);
-      if (
-        watchId != null &&
-        typeof navigator !== 'undefined' &&
-        navigator.geolocation
-      ) {
-        navigator.geolocation.clearWatch(watchId);
+      if (watchId !== null) {
+        if (Capacitor.isNativePlatform()) {
+          void Geolocation.clearWatch({ id: watchId as string });
+        } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+          navigator.geolocation.clearWatch(watchId as number);
+        }
       }
     };
   }, [applyLocation, update, intervalMs]);

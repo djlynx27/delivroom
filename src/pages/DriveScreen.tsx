@@ -28,8 +28,8 @@ import {
   setStoredDriverMode,
 } from '@/lib/driverPreferences';
 import {
-  getGoogleMapsNavUrl,
-  getWazeNavUrl,
+  openGoogleMapsNav,
+  openWazeNav,
   launchGoogleMapsNavigation,
 } from '@/lib/hotspots';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
@@ -541,38 +541,17 @@ export default function DriveScreen() {
 
               <div className="space-y-2 pt-2">
                 <Button
-                  asChild
+                  onClick={() => openGoogleMapsNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
                   className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
-                  <a
-                    href={getGoogleMapsNavUrl(
-                      heroZone.name,
-                      heroZone.latitude,
-                      heroZone.longitude
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" /> Google
-                    Maps
-                  </a>
+                  <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" /> Google Maps
                 </Button>
                 <Button
-                  asChild
+                  onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
                   variant="secondary"
                   className="w-full h-16 text-[18px] font-display font-bold gap-2"
                 >
-                  <a
-                    href={getWazeNavUrl(
-                      heroZone.name,
-                      heroZone.latitude,
-                      heroZone.longitude
-                    )}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                  >
-                    <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
-                  </a>
+                  <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
                 </Button>
                 {/* Platform arbitrage for hero zone */}
                 <PlatformArbitrage

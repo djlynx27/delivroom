@@ -10,6 +10,8 @@ import {
 } from 'react';
 import Map, { Layer, Marker, Source, type MapRef } from 'react-map-gl';
 import { LeafletMap } from './LeafletMap';
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
 
@@ -136,24 +138,63 @@ export function MapboxHeatmap({
     applyPos(driverPosition.latitude, driverPosition.longitude);
   }, [applyPos, driverPosition]);
 
-  // GPS: immediate fix via getCurrentPosition + continuous via watchPosition
+  // GPS: immediate fix via Geolocation + continuous via watchPosition
   useEffect(() => {
     if (driverPosition) return;
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => applyPos(pos.coords.latitude, pos.coords.longitude),
-      () => {},
-      { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
-    );
-    const watchId = navigator.geolocation.watchPosition(
-      (pos) => applyPos(pos.coords.latitude, pos.coords.longitude),
-      (error) => {
-        logMapGeolocationIssue('Geolocation watch error:', error.message);
-        setLocationError(error.message);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
-    );
-    return () => navigator.geolocation.clearWatch(watchId);
+
+    let watchId: string | number | null = null;
+
+    const startWatching = async () => {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const pos = await Geolocation.getCurrentPosition({
+            enableHighAccuracy: true,
+            timeout: 6000,
+          });
+          applyPos(pos.coords.latitude, pos.coords.longitude);
+
+          watchId = await Geolocation.watchPosition(
+            { enableHighAccuracy: true, timeout: 10000 },
+            (p, err) => {
+              if (err) {
+                logMapGeolocationIssue('Capacitor watch error:', err.message);
+                setLocationError(err.message);
+              } else if (p) {
+                applyPos(p.coords.latitude, p.coords.longitude);
+              }
+            }
+          );
+        } catch (err: any) {
+          logMapGeolocationIssue('Capacitor location error:', err.message);
+        }
+      } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => applyPos(pos.coords.latitude, pos.coords.longitude),
+          () => {},
+          { enableHighAccuracy: true, timeout: 6000, maximumAge: 30000 }
+        );
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => applyPos(pos.coords.latitude, pos.coords.longitude),
+          (error) => {
+            logMapGeolocationIssue('Web Geolocation watch error:', error.message);
+            setLocationError(error.message);
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+        );
+      }
+    };
+
+    void startWatching();
+
+    return () => {
+      if (watchId !== null) {
+        if (Capacitor.isNativePlatform()) {
+          void Geolocation.clearWatch({ id: watchId as string });
+        } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+          navigator.geolocation.clearWatch(watchId as number);
+        }
+      }
+    };
   }, [applyPos, driverPosition]);
 
   // Fly to center on change

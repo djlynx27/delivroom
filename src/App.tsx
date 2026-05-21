@@ -82,6 +82,7 @@ function AppContent() {
   const showNearestHotspot =
     location.pathname !== '/today' &&
     location.pathname !== '/' &&
+    location.pathname !== '/events' &&
     !location.pathname.startsWith('/admin');
 
   return (

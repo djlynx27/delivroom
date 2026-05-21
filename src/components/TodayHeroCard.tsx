@@ -4,7 +4,7 @@ import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SwipeToAccept } from '@/components/SwipeToAccept';
 import { Button } from '@/components/ui/button';
 import type { ScoreFactors } from '@/hooks/useDemandScores';
-import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/hotspots';
+import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { Clock } from 'lucide-react';
 
 interface HeroZone {
@@ -155,37 +155,17 @@ function HeroNavigationButtons({ heroZone }: { heroZone: HeroZone }) {
   return (
     <>
       <Button
-        asChild
+        onClick={() => openGoogleMapsNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
         className="w-full h-16 text-[18px] font-display font-bold gap-2.5 bg-primary text-primary-foreground hover:bg-primary/90"
       >
-        <a
-          href={getGoogleMapsNavUrl(
-            heroZone.name,
-            heroZone.latitude,
-            heroZone.longitude
-          )}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" /> Google Maps
-        </a>
+        <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" /> Google Maps
       </Button>
       <Button
-        asChild
+        onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
         variant="secondary"
         className="w-full h-16 text-[18px] font-display font-bold gap-2.5"
       >
-        <a
-          href={getWazeNavUrl(
-            heroZone.name,
-            heroZone.latitude,
-            heroZone.longitude
-          )}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
-        </a>
+        <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
       </Button>
     </>
   );

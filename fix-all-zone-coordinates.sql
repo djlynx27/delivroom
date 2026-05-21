@@ -82,8 +82,11 @@ UPDATE zones SET latitude = 45.7015, longitude = -73.6485 WHERE id = 'trb-gt'; -
 UPDATE zones SET latitude = 45.7095, longitude = -73.6295 WHERE id = 'trb-ct'; -- Cégep de Terrebonne
 UPDATE zones SET latitude = 45.734, longitude = -73.4705 WHERE id = 'trb-hp'; -- Hôpital Pierre-Le Gardeur
 
+-- Supprimer la zone lvl-um si elle existe
+DELETE FROM zones WHERE id = 'lvl-um';
+
 -- Vérification des corrections principales
-SELECT id, name, latitude, longitude 
-FROM zones 
+SELECT id, name, latitude, longitude
+FROM zones
 WHERE id IN ('lvl-pb', 'lvl-cl', 'mtl-cb', 'mtl-ch')
 ORDER BY city_id, name;

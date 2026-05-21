@@ -7,6 +7,7 @@ import { useEvents, type AppEvent } from '@/hooks/useEvents';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useUserLocation } from '@/hooks/useUserLocation';
+import { openGoogleMapsNav } from '@/lib/hotspots';
 import { Calendar, Clock, Navigation, Star, Users } from 'lucide-react';
 import { useMemo } from 'react';
 
@@ -54,7 +55,6 @@ function CategoryBadge({ category }: { category: string }) {
 
 function EventCard({ event, isToday }: { event: AppEvent; isToday: boolean }) {
   const { t, locale } = useI18n();
-  const googleUrl = `https://www.google.com/maps/dir/?api=1&destination=${event.latitude},${event.longitude}&travelmode=driving`;
   const now = new Date();
   const endAt = new Date(event.end_at);
   const minutesUntilEnd = Math.round(
@@ -125,13 +125,11 @@ function EventCard({ event, isToday }: { event: AppEvent; isToday: boolean }) {
 
       {!event.is_holiday && (
         <Button
-          asChild
+          onClick={() => openGoogleMapsNav(event.venue, event.latitude, event.longitude)}
           className="w-full h-14 text-[16px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
         >
-          <a href={googleUrl} target="_blank" rel="noopener noreferrer">
-            <Navigation className="w-4 h-4" />
-            {t('navigateTo')} {event.venue}
-          </a>
+          <Navigation className="w-4 h-4" />
+          {t('navigateTo')} {event.venue}
         </Button>
       )}
     </div>

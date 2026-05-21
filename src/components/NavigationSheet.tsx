@@ -8,7 +8,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet';
 import { useI18n } from '@/contexts/I18nContext';
-import { getGoogleMapsNavUrl, getWazeNavUrl } from '@/lib/hotspots';
+import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { X } from 'lucide-react';
 
 interface NavigationSheetProps {
@@ -28,9 +28,6 @@ export function NavigationSheet({
 }: NavigationSheetProps) {
   const { t } = useI18n();
 
-  const googleUrl = getGoogleMapsNavUrl(zoneName, latitude, longitude);
-  const wazeUrl = getWazeNavUrl(zoneName, latitude, longitude);
-
   return (
     <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
       <SheetContent
@@ -49,23 +46,19 @@ export function NavigationSheet({
         </SheetHeader>
         <div className="flex flex-col gap-2 mt-4">
           <Button
-            asChild
+            onClick={() => openGoogleMapsNav(zoneName, latitude, longitude)}
             className="w-full gap-2.5 text-[18px] font-display font-bold h-16 bg-primary text-primary-foreground hover:bg-primary/90"
           >
-            <a href={googleUrl} target="_blank" rel="noopener noreferrer">
-              <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" />
-              Google Maps
-            </a>
+            <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" />
+            Google Maps
           </Button>
           <Button
-            asChild
+            onClick={() => openWazeNav(zoneName, latitude, longitude)}
             variant="secondary"
             className="w-full gap-2.5 text-[18px] font-display font-bold h-16"
           >
-            <a href={wazeUrl} target="_blank" rel="noopener noreferrer">
-              <WazeIcon className="w-6 h-6 flex-shrink-0" />
-              Waze
-            </a>
+            <WazeIcon className="w-6 h-6 flex-shrink-0" />
+            Waze
           </Button>
           <Button
             variant="outline"

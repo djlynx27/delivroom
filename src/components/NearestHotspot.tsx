@@ -4,7 +4,7 @@ import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { getDemandLevel } from '@/lib/demandUtils';
 import { scoreAllZones, type WeatherCondition } from '@/lib/scoringEngine';
-import { getGoogleMapsNavUrl } from '@/lib/hotspots';
+import { openGoogleMapsNav } from '@/lib/hotspots';
 import { useMemo } from 'react';
 
 function getBorderClass(level: ReturnType<typeof getDemandLevel>) {
@@ -127,12 +127,6 @@ export function NearestHotspot() {
 
   const level = getDemandLevel(nearest.score);
   const borderClass = getBorderClass(level);
-  const googleUrl = getGoogleMapsNavUrl(
-    nearest.name,
-    nearest.latitude,
-    nearest.longitude
-  );
-
   return (
     <div className="fixed bottom-[4.5rem] inset-x-0 z-30 px-2">
       <div
@@ -146,15 +140,13 @@ export function NearestHotspot() {
             {nearest.score}/100 · {nearest.distance.toFixed(1)} km
           </span>
         </div>
-        <a
-          href={googleUrl}
-          target="_blank"
-          rel="noopener noreferrer"
+        <button
+          onClick={() => openGoogleMapsNav(nearest.name, nearest.latitude, nearest.longitude)}
           className="flex-shrink-0 flex items-center justify-center gap-1.5 bg-primary text-primary-foreground font-display font-bold text-[14px] rounded-lg h-12 px-3 hover:bg-primary/90 transition-colors"
         >
           <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" />
           GO
-        </a>
+        </button>
       </div>
     </div>
   );

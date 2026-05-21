@@ -16,9 +16,22 @@ import {
 } from '@/components/ui/select';
 import { useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
-import { Camera, Flame, Loader2, MapPin, Upload } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { Camera, CheckCircle2, Flame, Loader2, MapPin, Save, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
+
+const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
+type Platform = (typeof PLATFORMS)[number];
+
+interface ExtractedData {
+  earnings?: number | null;
+  tips?: number | null;
+  distance_km?: number | null;
+  hours_worked?: number | null;
+  trips_count?: number | null;
+  date?: string | null;
+}
 
 interface AnalysisResult {
   zones_detected: {
@@ -28,8 +41,11 @@ interface AnalysisResult {
     color_intensity: string;
   }[];
   overall_demand: string;
-  time_context: string;
+  time_context: string | null;
   notes: string;
+  recommended_target?: string;
+  extracted_data?: ExtractedData;
+  matched_zone_id?: string;
 }
 
 interface AnalyzeScreenshotResponse {
@@ -37,11 +53,7 @@ interface AnalyzeScreenshotResponse {
   analysis?: AnalysisResult;
 }
 
-type ZoneOption = {
-  id: string;
-  name: string;
-  type: string | null;
-};
+type ZoneOption = { id: string; name: string; type: string | null };
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
@@ -49,263 +61,284 @@ function getErrorMessage(error: unknown, fallback: string) {
 }
 
 function getDemandBadgeVariant(demand: string) {
-  if (demand === 'very_high') return 'destructive';
+  if (demand === 'surge' || demand === 'very_high') return 'destructive';
   if (demand === 'high') return 'default';
   if (demand === 'medium') return 'secondary';
   return 'outline';
 }
 
-async function uploadScreenshot(file: File) {
-  const fileName = `${Date.now()}-${file.name}`;
-  const { error: uploadErr } = await supabase.storage
-    .from('driver-screenshots')
-    .upload(fileName, file, { contentType: file.type });
-  if (uploadErr) {
-    throw uploadErr;
-  }
-
-  const { data: urlData } = supabase.storage
-    .from('driver-screenshots')
-    .getPublicUrl(fileName);
-
-  return urlData.publicUrl;
+function sanitizeFilename(name: string): string {
+  return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-async function analyzeScreenshot({
-  file,
-  zoneId,
-  zoneName,
-}: {
-  file: File;
-  zoneId: string;
-  zoneName: string;
-}) {
-  const publicUrl = await uploadScreenshot(file);
-  const { data, error } = await supabase.functions.invoke(
-    'analyze-screenshot',
-    {
-      body: {
-        image_url: publicUrl,
-        zone_id: zoneId,
-        zone_name: zoneName,
-      },
-    }
-  );
-  if (error) {
-    throw error;
+async function uploadScreenshot(file: File): Promise<string> {
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user) {
+    throw new Error('Authentification requise pour uploader un screenshot');
   }
+  const userId = authData.user.id;
+  const objectPath = `${userId}/${Date.now()}-${sanitizeFilename(file.name)}`;
 
+  const { error: uploadError } = await supabase.storage
+    .from('driver-screenshots')
+    .upload(objectPath, file, { contentType: file.type, upsert: false });
+  if (uploadError) throw uploadError;
+
+  const { data: signed, error: signError } = await supabase.storage
+    .from('driver-screenshots')
+    .createSignedUrl(objectPath, 300); // 5 min — suffit pour l'Edge Function
+  if (signError || !signed?.signedUrl) {
+    throw signError ?? new Error('Impossible de générer une URL signée');
+  }
+  return signed.signedUrl;
+}
+
+async function analyzeScreenshot(
+  file: File,
+  zoneId: string | null,
+  zoneName: string | null
+): Promise<AnalysisResult | null> {
+  const signedUrl = await uploadScreenshot(file);
+  const { data, error } = await supabase.functions.invoke('analyze-screenshot', {
+    body: {
+      image_url: signedUrl,
+      zone_id: zoneId ?? undefined,
+      zone_name: zoneName ?? undefined,
+      auto_zone: true,
+    },
+  });
+  if (error) throw error;
   const payload = (data ?? {}) as AnalyzeScreenshotResponse;
-  if (payload.error) {
-    throw new Error(payload.error);
-  }
-
+  if (payload.error) throw new Error(payload.error);
   return payload.analysis ?? null;
 }
 
-function ZoneSelect({
-  zones,
-  zoneId,
-  onZoneChange,
-}: {
-  zones: ZoneOption[];
-  zoneId: string;
-  onZoneChange: (value: string) => void;
-}) {
-  return (
-    <Select value={zoneId} onValueChange={onZoneChange}>
-      <SelectTrigger className="bg-background border-border">
-        <SelectValue placeholder="Zone de référence" />
-      </SelectTrigger>
-      <SelectContent className="bg-card border-border max-h-60">
-        {zones.map((zone) => (
-          <SelectItem key={zone.id} value={zone.id}>
-            {zone.name} —{' '}
-            <span className="text-muted-foreground capitalize">
-              {zone.type}
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function ScreenshotUpload({
-  preview,
-  onFileChange,
-}: {
-  preview: string | null;
-  onFileChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
-}) {
-  return (
-    <label className="flex items-center justify-center gap-2 w-full h-28 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
-      {preview ? (
-        <img
-          src={preview}
-          alt="Preview"
-          className="h-full w-full object-contain rounded-lg"
-        />
-      ) : (
-        <div className="flex flex-col items-center gap-1 text-muted-foreground">
-          <Upload className="w-6 h-6" />
-          <span className="text-xs">Cliquez pour uploader un screenshot</span>
-        </div>
-      )}
-      <input
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={onFileChange}
-      />
-    </label>
-  );
-}
-
-function AnalysisResults({ result }: { result: AnalysisResult }) {
-  return (
-    <div className="space-y-2 pt-2 border-t border-border">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-foreground">
-          Résultat de l'analyse
-        </span>
-        <Badge
-          variant={getDemandBadgeVariant(result.overall_demand)}
-          className="text-xs"
-        >
-          <Flame className="w-3 h-3 mr-1" />
-          {result.overall_demand}
-        </Badge>
-      </div>
-
-      {result.time_context && (
-        <p className="text-xs text-muted-foreground">
-          ⏰ {result.time_context}
-        </p>
-      )}
-
-      {result.zones_detected?.length > 0 && (
-        <div className="space-y-1.5">
-          {result.zones_detected.map((zone, index) => (
-            <div
-              key={`${zone.area}-${index}`}
-              className="bg-background rounded-md border border-border p-2 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-1.5">
-                <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
-                <span className="text-xs font-medium">{zone.area}</span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                {zone.surge_multiplier && (
-                  <span className="text-xs text-muted-foreground">
-                    ×{zone.surge_multiplier}
-                  </span>
-                )}
-                <Badge
-                  variant={getDemandBadgeVariant(zone.demand)}
-                  className="text-[10px] px-1.5 py-0"
-                >
-                  {zone.demand}
-                </Badge>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {result.notes && (
-        <p className="text-xs text-muted-foreground italic">
-          💡 {result.notes}
-        </p>
-      )}
-
-      <p className="text-[10px] text-muted-foreground text-center">
-        Note sauvegardée automatiquement dans driver_notes
-      </p>
-    </div>
-  );
-}
-
 export function ScreenshotAnalyzer() {
+  const qc = useQueryClient();
+  // Fixed: use correct city IDs from DB (mtl, lvl, lng)
   const { data: mtlZones = [] } = useZones('mtl');
-  const { data: lavalZones = [] } = useZones('laval');
-  const { data: longueuilZones = [] } = useZones('longueuil');
-  const allZones: ZoneOption[] = [
-    ...mtlZones,
-    ...lavalZones,
-    ...longueuilZones,
-  ];
+  const { data: lvlZones = [] } = useZones('lvl');
+  const { data: lngZones = [] } = useZones('lng');
+  const allZones: ZoneOption[] = [...mtlZones, ...lvlZones, ...lngZones];
 
   const [zoneId, setZoneId] = useState('');
+  const [platform, setPlatform] = useState<Platform>('lyft');
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
     if (!f) return;
-    if (f.size > 10 * 1024 * 1024) {
-      toast.error('Fichier trop gros (max 10 MB)');
-      return;
-    }
+    if (f.size > 10 * 1024 * 1024) { toast.error('Max 10 MB'); return; }
     setFile(f);
     setResult(null);
+    setSaved(false);
     const reader = new FileReader();
     reader.onload = () => setPreview(reader.result as string);
     reader.readAsDataURL(f);
   }
 
   async function handleAnalyze() {
-    if (!file || !zoneId) {
-      toast.error('Sélectionnez une zone et un screenshot');
-      return;
-    }
-
+    if (!file) { toast.error('Sélectionnez un screenshot'); return; }
     setLoading(true);
     setResult(null);
-
+    setSaved(false);
     try {
-      const zoneName = allZones.find((z) => z.id === zoneId)?.name || 'Unknown';
-      const analysis = await analyzeScreenshot({ file, zoneId, zoneName });
+      const selectedZone = zoneId ? allZones.find(z => z.id === zoneId) : null;
+      const analysis = await analyzeScreenshot(
+        file,
+        zoneId || null,
+        selectedZone?.name ?? null,
+      );
+      // Use matched zone if AI found one (user didn't pick + AI inferred)
+      if (!zoneId && analysis?.matched_zone_id) setZoneId(analysis.matched_zone_id);
       setResult(analysis);
-      toast.success('Analyse terminée — note sauvegardée');
-    } catch (error: unknown) {
-      toast.error(getErrorMessage(error, "Erreur lors de l'analyse"));
+      toast.success('Analyse terminée');
+    } catch (err) {
+      toast.error(getErrorMessage(err, "Erreur lors de l'analyse"));
     } finally {
       setLoading(false);
     }
   }
 
+  async function handleSaveTrip() {
+    if (!result?.extracted_data) return;
+    const { earnings, tips, distance_km, date } = result.extracted_data;
+    if (!earnings && !tips) { toast.error('Aucun revenu détecté dans le screenshot'); return; }
+
+    // Use AI-matched zone if driver didn't manually select one
+    const effectiveZoneId = zoneId || result.matched_zone_id || null;
+
+    setSaving(true);
+    try {
+      const startedAt = date ? new Date(date).toISOString() : new Date().toISOString();
+      const { error } = await supabase.from('trips').insert({
+        zone_id: effectiveZoneId,
+        started_at: startedAt,
+        earnings: earnings ?? null,
+        tips: tips ?? null,
+        distance_km: distance_km ?? null,
+        platform,
+        notes: `Import screenshot — ${result.notes ?? ''}`.slice(0, 500),
+      });
+      if (error) throw error;
+      setSaved(true);
+      qc.invalidateQueries({ queryKey: ['trips-feed'] });
+      qc.invalidateQueries({ queryKey: ['trip-history'] });
+      toast.success('Course sauvegardée — le moteur d\'apprentissage va s\'améliorer');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Erreur lors de la sauvegarde'));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const hasTripData = (result?.extracted_data?.earnings ?? 0) > 0
+    || (result?.extracted_data?.tips ?? 0) > 0;
+  const isTripScreenshot = result?.recommended_target === 'shift'
+    || result?.recommended_target === 'daily'
+    || hasTripData;
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-2">
         <CardTitle className="text-base font-display flex items-center gap-2">
-          <Camera className="w-4 h-4 text-primary" /> Analyse de screenshot
+          <Camera className="w-4 h-4 text-primary" /> Import screenshot
         </CardTitle>
         <CardDescription className="text-xs">
-          Uploadez un screenshot Lyft/Uber pour extraire les zones de surge via
-          l'IA
+          Lyft heatmap (zones de surge) ou rapport de course Imoove/Hypra/Lyft — l'IA extrait les données et les sauvegarde pour améliorer tes suggestions
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <ZoneSelect zones={allZones} zoneId={zoneId} onZoneChange={setZoneId} />
-        <ScreenshotUpload preview={preview} onFileChange={handleFile} />
+        {/* Platform selector */}
+        <Select value={platform} onValueChange={v => setPlatform(v as Platform)}>
+          <SelectTrigger className="bg-background border-border">
+            <SelectValue placeholder="Plateforme" />
+          </SelectTrigger>
+          <SelectContent className="bg-card border-border">
+            {PLATFORMS.map(p => (
+              <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
-        <Button
-          onClick={handleAnalyze}
-          className="w-full gap-2"
-          disabled={loading || !file || !zoneId}
-        >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+        {/* Zone selector */}
+        <Select value={zoneId} onValueChange={setZoneId}>
+          <SelectTrigger className="bg-background border-border">
+            <SelectValue placeholder="Zone de référence (optionnel)" />
+          </SelectTrigger>
+          <SelectContent className="bg-card border-border max-h-60">
+            {allZones.map(zone => (
+              <SelectItem key={zone.id} value={zone.id}>
+                {zone.name}
+                <span className="text-muted-foreground capitalize ml-1 text-xs">— {zone.type}</span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* File upload */}
+        <label className="flex items-center justify-center gap-2 w-full h-28 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
+          {preview ? (
+            <img src={preview} alt="Preview" className="h-full w-full object-contain rounded-lg" />
           ) : (
-            <Camera className="w-4 h-4" />
+            <div className="flex flex-col items-center gap-1 text-muted-foreground">
+              <Upload className="w-6 h-6" />
+              <span className="text-xs">Screenshot JPG/PNG (max 10 MB)</span>
+            </div>
           )}
+          <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
+        </label>
+
+        <Button onClick={handleAnalyze} className="w-full gap-2" disabled={loading || !file}>
+          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Camera className="w-4 h-4" />}
           {loading ? 'Analyse en cours…' : "Analyser avec l'IA"}
         </Button>
 
-        {result && <AnalysisResults result={result} />}
+        {/* Results */}
+        {result && (
+          <div className="space-y-2 pt-2 border-t border-border">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-foreground">Résultat</span>
+              <Badge variant={getDemandBadgeVariant(result.overall_demand)} className="text-xs">
+                <Flame className="w-3 h-3 mr-1" />{result.overall_demand}
+              </Badge>
+            </div>
+
+            {/* Extracted trip data */}
+            {result.extracted_data && (
+              <div className="bg-background rounded-lg border border-border p-3 space-y-1">
+                {result.extracted_data.earnings != null && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Revenus</span>
+                    <span className="font-semibold text-green-400">${result.extracted_data.earnings.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.extracted_data.tips != null && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Tips</span>
+                    <span className="font-semibold text-green-400">${result.extracted_data.tips.toFixed(2)}</span>
+                  </div>
+                )}
+                {result.extracted_data.distance_km != null && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Distance</span>
+                    <span>{result.extracted_data.distance_km.toFixed(1)} km</span>
+                  </div>
+                )}
+                {result.extracted_data.date && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Date</span>
+                    <span>{result.extracted_data.date}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Zone detections */}
+            {result.zones_detected?.length > 0 && (
+              <div className="space-y-1">
+                {result.zones_detected.map((z, i) => (
+                  <div key={`${z.area}-${i}`} className="bg-background rounded-md border border-border p-2 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin className="w-3.5 h-3.5 text-primary shrink-0" />
+                      <span className="text-xs font-medium">{z.area}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      {z.surge_multiplier && <span className="text-xs text-muted-foreground">×{z.surge_multiplier}</span>}
+                      <Badge variant={getDemandBadgeVariant(z.demand)} className="text-[10px] px-1.5 py-0">{z.demand}</Badge>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {result.notes && <p className="text-xs text-muted-foreground italic">💡 {result.notes}</p>}
+
+            {/* Save trip button — shown when earnings were detected */}
+            {isTripScreenshot && !saved && (
+              <Button
+                onClick={handleSaveTrip}
+                variant="outline"
+                className="w-full gap-2 border-green-500/50 text-green-400 hover:bg-green-500/10"
+                disabled={saving}
+              >
+                {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                {saving ? 'Sauvegarde…' : 'Sauvegarder comme course'}
+              </Button>
+            )}
+            {saved && (
+              <div className="flex items-center gap-2 text-green-400 text-sm justify-center">
+                <CheckCircle2 className="w-4 h-4" />
+                Course sauvegardée — algorithme mis à jour
+              </div>
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
