@@ -1,13 +1,13 @@
 ---
 name: demand-forecaster
-description: Prévision de la demande de courses et livraisons pour chauffeurs gig, intégrant météo, événements, heure/jour et données historiques. Utilise ce skill dès que l'utilisateur veut prédire les zones chaudes, anticiper la demande, scorer des zones géographiques, ou construire un modèle de scoring de demande (comme dans HustleGo).
+description: Prévision de la demande de courses et livraisons pour chauffeurs gig, intégrant météo, événements, heure/jour et données historiques. Utilise ce skill dès que l'utilisateur veut prédire les zones chaudes, anticiper la demande, scorer des zones géographiques, ou construire un modèle de scoring de demande (comme dans Delivroom).
 ---
 
 # Demand Forecaster
 
 Modèle de scoring de demande pour chauffeurs gig — Grand Montréal.
 
-## Architecture du scoring (HustleGo)
+## Architecture du scoring (Delivroom)
 
 ```
 Score(zone, t) = Σ wi × facteur_i

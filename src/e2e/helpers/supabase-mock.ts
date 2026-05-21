@@ -1,5 +1,5 @@
 /**
- * supabase-mock.ts — HustleGo E2E helpers
+ * supabase-mock.ts — Delivroom E2E helpers
  *
  * Intercepte toutes les requêtes réseau vers Supabase et retourne
  * des fixtures déterministes pour éviter les appels réseau en tests.

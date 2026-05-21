@@ -1,5 +1,5 @@
 /**
- * today.spec.ts — HustleGo E2E
+ * today.spec.ts — Delivroom E2E
  *
  * Teste le flow principal de TodayScreen :
  *   - Rendu de la hero card (meilleure zone)

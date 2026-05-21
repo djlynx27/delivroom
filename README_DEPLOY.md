@@ -1,4 +1,4 @@
-# HustleGo — Guide de déploiement Vercel
+# Delivroom — Guide de déploiement Vercel
 
 ## 1. Prérequis
 
@@ -76,7 +76,7 @@ Remplacer `REMPLACER_PAR_SHA256_DU_KEYSTORE` par le SHA-256 affiché.
 Format : `AA:BB:CC:DD:...` (32 paires hex séparées par `:`).
 
 **3. Mettre à jour `twa-manifest.json` :**
-Si tu as un domaine custom, changer `host` (ex: `hustlego.app` au lieu de `hustlego.vercel.app`).
+Si tu as un domaine custom, changer `host` (ex: `delivroom.app` au lieu de `delivroom.vercel.app`).
 
 **4. Ajouter les 3 GitHub Secrets :**
 → GitHub → Repo → Settings → Secrets and variables → Actions

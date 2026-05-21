@@ -93,7 +93,7 @@ TOTAL                       41h  ~1 356 $
 
 ```
 Avant chaque shift:
-  Verifier HustleGo --> zones score >= 6
+  Verifier Delivroom --> zones score >= 6
   Verifier meteo --> pluie = plus de demande
   Verifier Ticketmaster --> evenements ce soir
   Plein d'essence si < 1/4 reservoir

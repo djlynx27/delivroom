@@ -1,5 +1,5 @@
 /**
- * surgeEngine.ts — HustleGo
+ * surgeEngine.ts — Delivroom
  *
  * Détecte les surges de demande relative à un baseline 4-semaines,
  * calcule un multiplicateur de prime (1.0–2.5×) et produit un vecteur

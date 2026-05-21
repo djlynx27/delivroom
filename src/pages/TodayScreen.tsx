@@ -117,7 +117,7 @@ export default function TodayScreen() {
         )}
         {canInstall && (
           <Button onClick={install} variant="outline" className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/10 h-12">
-            <Download className="w-5 h-5" /> Installer HustleGo
+            <Download className="w-5 h-5" /> Installer Delivroom
           </Button>
         )}
         {!notifEnabled && (

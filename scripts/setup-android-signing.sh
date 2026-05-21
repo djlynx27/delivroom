@@ -12,11 +12,11 @@
 set -euo pipefail
 
 KEYSTORE_FILE="android.keystore"
-ALIAS="hustlego"
+ALIAS="delivroom"
 
 echo ""
 echo "╔══════════════════════════════════════════════════════════╗"
-echo "║     HustleGo — Génération du keystore Android          ║"
+echo "║     Delivroom — Génération du keystore Android          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -32,7 +32,7 @@ else
     -keyalg RSA \
     -keysize 2048 \
     -validity 10000 \
-    -dname "CN=HustleGo Driver, OU=Mobile, O=HustleGo, L=Montreal, ST=Quebec, C=CA"
+    -dname "CN=Delivroom Driver, OU=Mobile, O=Delivroom, L=Montreal, ST=Quebec, C=CA"
 
   echo ""
   echo "✅ Keystore généré : $KEYSTORE_FILE"

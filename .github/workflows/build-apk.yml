@@ -85,7 +85,7 @@ jobs:
           bubblewrap build \
             --skipPwaValidation \
             --keystorePath android.keystore \
-            --keystoreKeyAlias hustlego \
+            --keystoreKeyAlias delivroom \
             --keystorePassword "${{ secrets['ANDROID_KEYSTORE_PASSWORD'] }}" \
             --keyPassword "${{ secrets['ANDROID_KEY_ALIAS_PASSWORD'] }}"
 
@@ -93,7 +93,7 @@ jobs:
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hustlego-apk
+          name: delivroom-apk
           path: |
             app-release-signed.apk
             app-release.aab
@@ -105,9 +105,9 @@ jobs:
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          name: 'HustleGo ${{ github.ref_name }}'
+          name: 'Delivroom ${{ github.ref_name }}'
           body: |
-            ## HustleGo ${{ github.ref_name }} — Android APK
+            ## Delivroom ${{ github.ref_name }} — Android APK
 
             ### Installation directe (sideload)
             1. Télécharger `app-release-signed.apk`

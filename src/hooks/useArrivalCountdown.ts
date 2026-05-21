@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const ARRIVAL_RADIUS_KM = 0.3; // 300 m
 const COUNTDOWN_SECONDS = 15 * 60; // 15 minutes
-const STORAGE_KEY = 'hustlego_arrival_countdown';
+const STORAGE_KEY = 'delivroom_arrival_countdown';
 
 interface CountdownState {
   zoneId: string;

@@ -48,7 +48,7 @@ serve(async (req) => {
     const vapidPublicKey = getEnv('VAPID_PUBLIC_KEY');
     const vapidPrivateKey = getEnv('VAPID_PRIVATE_KEY');
     const vapidSubject =
-      Deno.env.get('VAPID_SUBJECT') ?? 'mailto:alerts@hustlego.local';
+      Deno.env.get('VAPID_SUBJECT') ?? 'mailto:alerts@delivroom.local';
 
     webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
 
@@ -90,7 +90,7 @@ serve(async (req) => {
       title: payload.title,
       body: payload.body,
       url: payload.url,
-      tag: payload.tag ?? 'hustlego-alert',
+      tag: payload.tag ?? 'delivroom-alert',
     });
 
     let delivered = 0;

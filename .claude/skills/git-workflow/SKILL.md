@@ -7,10 +7,10 @@ description: Gestion de workflows Git — commits conventionnels, branches, PRs,
 
 Workflow Git optimisé pour développeurs solo avec stack IA (Lovable + Cursor + Claude Code).
 
-## Workflow de référence (HustleGo)
+## Workflow de référence (Delivroom)
 
 ```
-Lovable (UI gen)  →  GitHub (djlynx27/HustleGo)  →  Cursor / Claude Code (fixes)
+Lovable (UI gen)  →  GitHub (djlynx27/Delivroom)  →  Cursor / Claude Code (fixes)
                             ↓
                     Vercel / Lovable deploy
 ```

@@ -1,6 +1,6 @@
 ---
 name: typescript-strict
-description: Typage TypeScript avancé — generics, discriminated unions, utility types, type guards, inférence avancée. Utilise ce skill dès que l'utilisateur travaille sur du code TypeScript complexe, demande comment typer correctement une structure, veut éliminer des `any`, ou a des erreurs de type difficiles à résoudre dans un projet React/Vite/TypeScript comme HustleGo.
+description: Typage TypeScript avancé — generics, discriminated unions, utility types, type guards, inférence avancée. Utilise ce skill dès que l'utilisateur travaille sur du code TypeScript complexe, demande comment typer correctement une structure, veut éliminer des `any`, ou a des erreurs de type difficiles à résoudre dans un projet React/Vite/TypeScript comme Delivroom.
 ---
 
 # TypeScript Strict
@@ -28,7 +28,7 @@ Typage avancé TypeScript pour projets React + Supabase.
 }
 ```
 
-## Types fondamentaux — HustleGo
+## Types fondamentaux — Delivroom
 
 ```typescript
 // types/index.ts

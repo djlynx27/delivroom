@@ -41,7 +41,7 @@ interface EarningInsert {
   note?: string | null;
 }
 
-const EARNINGS_STORAGE_KEY = 'hustlego_taxi_earnings';
+const EARNINGS_STORAGE_KEY = 'delivroom_taxi_earnings';
 
 function readStoredEarnings(): Earning[] {
   if (typeof window === 'undefined') return [];
@@ -336,7 +336,7 @@ export function ModeTaxi() {
           <p className="font-medium text-foreground">Mode taxi local</p>
           <p>
             Ce module reste stocké dans ce navigateur et ne nourrit pas encore
-            la base principale de HustleGo.
+            la base principale de Delivroom.
           </p>
           <p>
             Le $/heure affiché plus bas reflète seulement le temps de trajet

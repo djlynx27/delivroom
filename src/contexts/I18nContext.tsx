@@ -65,7 +65,7 @@ const translations: Record<string, Record<Lang, string>> = {
   eventCategoryEvent: { en: 'Event', fr: 'Événement' },
 
   offline: { en: 'Offline', fr: 'Hors ligne' },
-  installApp: { en: 'Install HustleGo', fr: 'Installer HustleGo' },
+  installApp: { en: 'Install Delivroom', fr: 'Installer Delivroom' },
   enableNotifications: {
     en: 'Enable notifications',
     fr: 'Activer les notifications',

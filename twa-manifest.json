@@ -1,8 +1,8 @@
 {
-  "packageId": "app.hustlego.driver",
-  "host": "hustlego.vercel.app",
-  "name": "HustleGo — Chauffeur",
-  "launcherName": "HustleGo",
+  "packageId": "app.delivroom.driver",
+  "host": "delivroom.vercel.app",
+  "name": "Delivroom — Chauffeur",
+  "launcherName": "Delivroom",
   "display": "standalone",
   "orientation": "portrait",
   "themeColor": "#0a0a1a",
@@ -13,9 +13,9 @@
   "backgroundColor": "#0a0a1a",
   "enableNotifications": true,
   "startUrl": "/",
-  "iconUrl": "https://hustlego.vercel.app/pwa-icon-512.png",
-  "maskableIconUrl": "https://hustlego.vercel.app/pwa-icon-512.png",
-  "monochromeIconUrl": "https://hustlego.vercel.app/pwa-icon-512.png",
+  "iconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
+  "maskableIconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
+  "monochromeIconUrl": "https://delivroom.vercel.app/pwa-icon-512.png",
   "shortcuts": [
     {
       "name": "Aujourd'hui",
@@ -23,7 +23,7 @@
       "url": "/",
       "icons": [
         {
-          "src": "https://hustlego.vercel.app/pwa-icon-192.png",
+          "src": "https://delivroom.vercel.app/pwa-icon-192.png",
           "sizes": "192x192"
         }
       ]
@@ -34,7 +34,7 @@
       "url": "/revenue",
       "icons": [
         {
-          "src": "https://hustlego.vercel.app/pwa-icon-192.png",
+          "src": "https://delivroom.vercel.app/pwa-icon-192.png",
           "sizes": "192x192"
         }
       ]
@@ -44,7 +44,7 @@
   "appVersionCode": 1,
   "signingKey": {
     "path": "./android.keystore",
-    "alias": "hustlego"
+    "alias": "delivroom"
   },
   "splashScreenFadeOutDuration": 300,
   "fallbackType": "chromeos",

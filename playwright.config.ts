@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * playwright.config.ts — HustleGo
+ * playwright.config.ts — Delivroom
  *
  * Tests E2E sur les flows critiques chauffeur :
  *   - Navigation entre écrans

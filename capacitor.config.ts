@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.hustlego.app',
-  appName: 'HustleGo',
+  appId: 'com.delivroom.app',
+  appName: 'Delivroom',
   webDir: 'dist'
 };
 

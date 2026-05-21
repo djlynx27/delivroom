@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 /**
- * platform-signal-collector — Edge Function HustleGo
+ * platform-signal-collector — Edge Function Delivroom
  *
  * Collecte les signaux de demande par plateforme (Lyft, DoorDash, Skip, Hypra)
  * pour alimenter le moteur d'arbitrage (PlatformArbitrage).

@@ -1,13 +1,13 @@
 ---
 name: api-integrator
-description: Connexion, wrapping et intégration d'APIs REST/GraphQL tierces dans des projets TypeScript/React. Utilise ce skill dès que l'utilisateur veut connecter une API externe (Ticketmaster, Open-Meteo, Google Maps, Mapbox, Twilio, etc.), créer un wrapper typé, gérer l'authentification API, ou déboguer des appels API. Priorité aux APIs utilisées dans HustleGo.
+description: Connexion, wrapping et intégration d'APIs REST/GraphQL tierces dans des projets TypeScript/React. Utilise ce skill dès que l'utilisateur veut connecter une API externe (Ticketmaster, Open-Meteo, Google Maps, Mapbox, Twilio, etc.), créer un wrapper typé, gérer l'authentification API, ou déboguer des appels API. Priorité aux APIs utilisées dans Delivroom.
 ---
 
 # API Integrator
 
 Intégration propre d'APIs externes dans un projet TypeScript/React.
 
-## APIs prioritaires (HustleGo)
+## APIs prioritaires (Delivroom)
 
 | API | Usage | Auth |
 |---|---|---|

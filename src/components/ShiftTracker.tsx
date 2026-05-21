@@ -29,7 +29,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-const ACTIVE_SHIFT_KEY = 'hustlego_active_shift';
+const ACTIVE_SHIFT_KEY = 'delivroom_active_shift';
 
 type ActiveShift = {
   startedAt: string;
@@ -295,18 +295,18 @@ export function ShiftTracker() {
       setActiveShift(loadActiveShift());
       setNow(new Date());
     };
-    window.addEventListener('hustlego:shift-changed', onShiftChanged);
+    window.addEventListener('delivroom:shift-changed', onShiftChanged);
     return () =>
-      window.removeEventListener('hustlego:shift-changed', onShiftChanged);
+      window.removeEventListener('delivroom:shift-changed', onShiftChanged);
   }, []);
 
   useEffect(() => {
     const onAutoEnd = () => {
       void endShiftRef.current();
     };
-    window.addEventListener('hustlego:auto-end-shift', onAutoEnd);
+    window.addEventListener('delivroom:auto-end-shift', onAutoEnd);
     return () =>
-      window.removeEventListener('hustlego:auto-end-shift', onAutoEnd);
+      window.removeEventListener('delivroom:auto-end-shift', onAutoEnd);
   }, []);
 
   const startedLabel = getStartedLabel(snapshot?.startedAt ?? null);

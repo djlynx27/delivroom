@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const NOTIF_COOLDOWN_MS = 15 * 60_000; // 15 min per notification type
 const NOTIFIED_EVENTS_KEY = 'geohustle_notified_events';
-const PUSH_SUBSCRIPTION_KEY = 'hustlego_push_subscription_registered';
+const PUSH_SUBSCRIPTION_KEY = 'delivroom_push_subscription_registered';
 
 function base64UrlToUint8Array(value: string): Uint8Array {
   const padding = '='.repeat((4 - (value.length % 4)) % 4);

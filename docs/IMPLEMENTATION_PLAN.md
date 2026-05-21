@@ -1,4 +1,4 @@
-# Plan d'Implémentation HustleGo — Écosystèmes Transport à la Demande
+# Plan d'Implémentation Delivroom — Écosystèmes Transport à la Demande
 
 Source: Analyse Avancée des Écosystèmes de Transport à la Demande (rapport Deep Research)
 Date: 2026-03-20 | Stack: React + Vite + TypeScript + Tailwind + Supabase + pgvector

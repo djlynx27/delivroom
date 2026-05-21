@@ -10,16 +10,16 @@
  * - Auto-SUGGEST : immobilisation > 15 min pendant un shift → toast "Terminer ?"
  *
  * Événements DOM émis (communique avec ShiftTracker) :
- * - `hustlego:shift-changed`   → ShiftTracker doit recharger son état LS
- * - `hustlego:auto-end-shift`  → ShiftTracker doit terminer le shift
+ * - `delivroom:shift-changed`   → ShiftTracker doit recharger son état LS
+ * - `delivroom:auto-end-shift`  → ShiftTracker doit terminer le shift
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { useActivityDetection } from './useActivityDetection';
 
-const ACTIVE_SHIFT_KEY = 'hustlego_active_shift';
-const AUTO_SHIFT_ENABLED_KEY = 'hustlego_auto_shift_enabled';
+const ACTIVE_SHIFT_KEY = 'delivroom_active_shift';
+const AUTO_SHIFT_ENABLED_KEY = 'delivroom_auto_shift_enabled';
 
 // Durée en véhicule avant démarrage auto (ms)
 const VEHICLE_START_DELAY_MS = 30_000;
@@ -122,7 +122,7 @@ export function useAutoShift(): UseAutoShiftResult {
       ) {
         vehicleStartAtRef.current = null; // reset pour pas re-déclencher
         startShiftInStorage();
-        window.dispatchEvent(new CustomEvent('hustlego:shift-changed'));
+        window.dispatchEvent(new CustomEvent('delivroom:shift-changed'));
         toast.success('Shift démarré automatiquement', {
           description: 'Mouvement véhicule détecté — bon shift !',
           duration: 5_000,
@@ -146,7 +146,7 @@ export function useAutoShift(): UseAutoShiftResult {
           action: {
             label: 'Terminer le shift',
             onClick: () => {
-              window.dispatchEvent(new CustomEvent('hustlego:auto-end-shift'));
+              window.dispatchEvent(new CustomEvent('delivroom:auto-end-shift'));
             },
           },
         });

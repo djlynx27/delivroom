@@ -1,13 +1,13 @@
 ---
 name: supabase-expert
-description: Expert Supabase couvrant Edge Functions, Row Level Security (RLS), schéma de base de données, triggers, politiques, realtime, storage et intégrations. Utilise ce skill dès que l'utilisateur mentionne Supabase, Edge Functions, RLS, politiques PostgreSQL, tables Supabase, auth Supabase, realtime subscriptions, pgvector, ou tout problème lié à un backend Supabase. Essentiel pour les projets React/TypeScript connectés à Supabase comme HustleGo/HustleGo.
+description: Expert Supabase couvrant Edge Functions, Row Level Security (RLS), schéma de base de données, triggers, politiques, realtime, storage et intégrations. Utilise ce skill dès que l'utilisateur mentionne Supabase, Edge Functions, RLS, politiques PostgreSQL, tables Supabase, auth Supabase, realtime subscriptions, pgvector, ou tout problème lié à un backend Supabase. Essentiel pour les projets React/TypeScript connectés à Supabase comme Delivroom/Delivroom.
 ---
 
 # Supabase Expert
 
 Référence complète pour construire, déboguer et optimiser des backends Supabase.
 
-## Architecture de référence (projet HustleGo/HustleGo)
+## Architecture de référence (projet Delivroom/Delivroom)
 
 ```
 Supabase Project
@@ -178,7 +178,7 @@ const channel = supabase
 return () => { supabase.removeChannel(channel) }
 ```
 
-## Schéma type pour HustleGo
+## Schéma type pour Delivroom
 
 ```sql
 -- Zones géographiques

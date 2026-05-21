@@ -1,4 +1,4 @@
-# AGENTS.md — HustleGo
+# AGENTS.md — Delivroom
 
 Ce fichier définit les règles d'autonomie bornée pour tous les agents AI intervenant sur ce dépôt.
 Il est lu automatiquement par Claude Code, GitHub Copilot Agent et tout autre agent configuré.

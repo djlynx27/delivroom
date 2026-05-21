@@ -1,6 +1,6 @@
 // supabase/functions/score-calculator/index.ts
 // ──────────────────────────────────────────────────────────────────────────────
-// Edge Function: AI-enhanced zone demand scoring for HustleGo.
+// Edge Function: AI-enhanced zone demand scoring for Delivroom.
 //
 // Triggered by:
 //   - GitHub Actions on deploy (supabase functions deploy score-calculator)

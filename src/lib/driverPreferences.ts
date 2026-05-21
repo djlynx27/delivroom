@@ -1,6 +1,6 @@
 export const DRIVER_MODE_KEY = 'geohustle_driver_mode';
-export const CONSERVATIVE_PRESENCE_KEY = 'hustlego_conservative_presence';
-export const DRIVER_FINGERPRINT_KEY = 'hustlego_driver_fingerprint';
+export const CONSERVATIVE_PRESENCE_KEY = 'delivroom_conservative_presence';
+export const DRIVER_FINGERPRINT_KEY = 'delivroom_driver_fingerprint';
 
 function safeGetItem(key: string) {
   try {
@@ -54,7 +54,7 @@ export function getDriverFingerprint() {
 
 // ── Family schedule constraints ───────────────────────────────────────────────
 
-export const HOME_CONSTRAINTS_KEY = 'hustlego_home_constraints';
+export const HOME_CONSTRAINTS_KEY = 'delivroom_home_constraints';
 
 export interface HomeConstraintsSettings {
   enabled: boolean;

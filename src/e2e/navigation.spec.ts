@@ -1,5 +1,5 @@
 /**
- * navigation.spec.ts — HustleGo E2E
+ * navigation.spec.ts — Delivroom E2E
  *
  * Teste la navigation entre tous les écrans via le BottomNav.
  * Vérifie qu'aucun écran ne déclenche l'ErrorBoundary.

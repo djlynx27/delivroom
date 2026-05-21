@@ -1,5 +1,5 @@
 /**
- * SurgeIndicator — HustleGo
+ * SurgeIndicator — Delivroom
  *
  * Affiche une pastille / badge de surge coloré avec animation pulse.
  * Utilisé dans les cartes zone (TodayScreen, mode libre, AdminScreen).

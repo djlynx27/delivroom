@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 /**
- * surge-detector — Edge Function HustleGo
+ * surge-detector — Edge Function Delivroom
  *
  * Batch surge detection exécuté toutes les 5 min via pg_cron.
  * Pour chaque zone active :

@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
 /**
- * weight-calibrator — Edge Function HustleGo
+ * weight-calibrator — Edge Function Delivroom
  *
  * Analyse les `trip_predictions` récentes pour dériver des poids de scoring
  * optimisés via gradient descent simplifié sur l'erreur MAE.

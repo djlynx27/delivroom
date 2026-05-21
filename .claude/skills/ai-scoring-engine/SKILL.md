@@ -1,6 +1,6 @@
 ---
 name: ai-scoring-engine
-description: Conception et implémentation de moteurs de scoring IA via Edge Functions Supabase appelant Gemini ou d'autres LLMs. Utilise ce skill dès que l'utilisateur veut faire scorer des données par un LLM, construire un pipeline IA de scoring, intégrer Gemini 2.5 Flash dans une Edge Function, ou automatiser le recalcul de scores basé sur l'IA. Directement applicable à HustleGo/HustleGo.
+description: Conception et implémentation de moteurs de scoring IA via Edge Functions Supabase appelant Gemini ou d'autres LLMs. Utilise ce skill dès que l'utilisateur veut faire scorer des données par un LLM, construire un pipeline IA de scoring, intégrer Gemini 2.5 Flash dans une Edge Function, ou automatiser le recalcul de scores basé sur l'IA. Directement applicable à Delivroom/Delivroom.
 ---
 
 # AI Scoring Engine

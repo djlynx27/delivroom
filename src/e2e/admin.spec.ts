@@ -1,5 +1,5 @@
 /**
- * admin.spec.ts — HustleGo E2E
+ * admin.spec.ts — Delivroom E2E
  *
  * Teste le hub admin et les sous-pages spécialisées.
  */

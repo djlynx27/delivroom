@@ -1,4 +1,4 @@
-package com.hustlego.app;
+package com.delivroom.app;
 
 import com.getcapacitor.BridgeActivity;
 

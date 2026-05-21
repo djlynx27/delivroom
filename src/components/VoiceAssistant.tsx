@@ -263,7 +263,7 @@ function executeVoiceAction({
 // ── Composant ─────────────────────────────────────────────────────────────────
 
 /**
- * Assistant vocal mains-libres pour HustleGo.
+ * Assistant vocal mains-libres pour Delivroom.
  *
  * Commandes supportées :
  * "Où aller"          → annonce la zone la mieux scorée

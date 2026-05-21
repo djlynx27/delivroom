@@ -176,8 +176,8 @@ export default defineConfig(({ mode }) => {
         },
         includeAssets: ['favicon.ico', 'pwa-icon-192.png', 'pwa-icon-512.png'],
         manifest: {
-          name: 'HustleGo',
-          short_name: 'HustleGo',
+          name: 'Delivroom',
+          short_name: 'Delivroom',
           description: 'Optimise tes trajets, booste tes revenus.',
           theme_color: '#0a0a1a',
           background_color: '#0a0a1a',

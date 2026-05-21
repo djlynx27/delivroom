@@ -20,7 +20,7 @@ export function openWazeNav(_name: string, lat: number, lng: number): void {
 export function launchGoogleMapsNavigation(name: string, lat: number, lng: number): void {
   openGoogleMapsNav(name, lat, lng);
 }
-// Hotspots stratégiques optimisés pour HustleGo (2026)
+// Hotspots stratégiques optimisés pour Delivroom (2026)
 // Généré à partir de l'analyse stratégique et logistique
 
 export interface Hotspot {

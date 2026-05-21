@@ -1,11 +1,11 @@
 ---
 name: map-visualizer
-description: Cartes interactives avec Mapbox, Leaflet ou deck.gl pour heatmaps, zones colorees, marqueurs dynamiques, polygones. Utilise ce skill des que l'utilisateur veut afficher des donnees geographiques, creer une carte de chaleur, visualiser des zones de demande, ou integrer une carte dans son app React. Directement applicable pour HustleGo/ZonePilote.
+description: Cartes interactives avec Mapbox, Leaflet ou deck.gl pour heatmaps, zones colorees, marqueurs dynamiques, polygones. Utilise ce skill des que l'utilisateur veut afficher des donnees geographiques, creer une carte de chaleur, visualiser des zones de demande, ou integrer une carte dans son app React. Directement applicable pour Delivroom/ZonePilote.
 ---
 
 # Map Visualizer
 
-Cartes interactives avec donnees geospatiales pour HustleGo.
+Cartes interactives avec donnees geospatiales pour Delivroom.
 
 ## Stack recommandee
 

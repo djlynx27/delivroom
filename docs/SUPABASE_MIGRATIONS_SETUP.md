@@ -13,7 +13,7 @@ Pour que le workflow auto-applique les migrations à chaque push sur `main`, tu 
 
 ### 2. Ajouter les secrets GitHub
 
-1. Va sur GitHub → Ton repo HustleGo → **Settings** → **Secrets and variables** → **Actions**
+1. Va sur GitHub → Ton repo Delivroom → **Settings** → **Secrets and variables** → **Actions**
 2. Clique **New repository secret** et ajoute:
 
 | Secret Name             | Valeur                                                                                                                                                   |

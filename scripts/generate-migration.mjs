@@ -26,7 +26,7 @@ function parseCSV(text) {
 
 const mileageRows = parseCSV(
   readFileSync(
-    'D:/Documents/Base de données pour mon appli HustleGo/QuickBooks_Mileage.csv',
+    'D:/Documents/Base de données pour mon appli Delivroom/QuickBooks_Mileage.csv',
     'utf-8'
   )
 )
@@ -49,7 +49,7 @@ const KMH_AVG = 25;
 const lines = [];
 
 lines.push(`-- ============================================================`);
-lines.push(`-- Migration: Données réelles HustleGo (générée automatiquement)`);
+lines.push(`-- Migration: Données réelles Delivroom (générée automatiquement)`);
 lines.push(`-- Source: zones bubble.csv + QuickBooks_Mileage.csv`);
 lines.push(`-- ============================================================`);
 lines.push(``);
@@ -209,7 +209,7 @@ lines.push(``);
 lines.push(`-- ── Fin de migration ─────────────────────────────────────────`);
 
 const sql = lines.join('\n');
-writeFileSync('D:/Documents/HustleGo/supabase-seed.sql', sql, 'utf-8');
+writeFileSync('D:/Documents/Delivroom/supabase-seed.sql', sql, 'utf-8');
 console.log('✓ Migration SQL générée: supabase-seed.sql');
 console.log('  Villes:', 3);
 console.log('  Zones:', zones.length);

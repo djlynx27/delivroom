@@ -3,7 +3,7 @@
     "relation": ["delegate_permission/common.handle_all_urls"],
     "target": {
       "namespace": "android_app",
-      "package_name": "app.hustlego.driver",
+      "package_name": "app.delivroom.driver",
       "sha256_cert_fingerprints": ["REMPLACER_PAR_SHA256_DU_KEYSTORE"]
     }
   }

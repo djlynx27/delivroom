@@ -1,6 +1,6 @@
 ---
 name: react-native-pwa
-description: Création et configuration de Progressive Web Apps (PWA) installables avec React + Vite + TypeScript. Utilise ce skill dès que l'utilisateur mentionne PWA, service workers, manifest, offline-first, installation sur mobile, ou veut rendre son app React installable comme une app native. Applicable directement pour HustleGo/HustleGo sur HustleGo.lovable.app.
+description: Création et configuration de Progressive Web Apps (PWA) installables avec React + Vite + TypeScript. Utilise ce skill dès que l'utilisateur mentionne PWA, service workers, manifest, offline-first, installation sur mobile, ou veut rendre son app React installable comme une app native. Applicable directement pour Delivroom/Delivroom sur Delivroom.lovable.app.
 ---
 
 # React PWA — Progressive Web App
@@ -38,7 +38,7 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'robots.txt', 'icons/*.png'],
       manifest: {
-        name: 'HustleGo',
+        name: 'Delivroom',
         short_name: 'GeoHustle',
         description: 'Optimisation positionnement chauffeur Montréal',
         theme_color: '#1a1a2e',

@@ -25,18 +25,18 @@ self.addEventListener('push', (event) => {
       };
     } catch {
       return {
-        title: 'HustleGo',
+        title: 'Delivroom',
         body: event.data?.text() ?? 'Nouvelle alerte',
       };
     }
   })();
 
   event.waitUntil(
-    self.registration.showNotification(payload.title ?? 'HustleGo', {
+    self.registration.showNotification(payload.title ?? 'Delivroom', {
       body: payload.body ?? 'Nouvelle alerte',
       icon: '/pwa-icon-192.png',
       badge: '/pwa-icon-192.png',
-      tag: payload.tag ?? 'hustlego-push',
+      tag: payload.tag ?? 'delivroom-push',
       data: { url: payload.url ?? '/' },
     })
   );
@@ -53,7 +53,7 @@ self.addEventListener('notificationclick', (event) => {
         const existingClient = clients.find((client) => 'focus' in client);
         if (existingClient) {
           existingClient.postMessage({
-            type: 'hustlego:navigate',
+            type: 'delivroom:navigate',
             url: targetUrl,
           });
           return existingClient.focus();

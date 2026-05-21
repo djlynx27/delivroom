@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">HustleGo</string>
-    <string name="title_activity_main">HustleGo</string>
-    <string name="package_name">com.hustlego.app</string>
-    <string name="custom_url_scheme">com.hustlego.app</string>
+    <string name="app_name">Delivroom</string>
+    <string name="title_activity_main">Delivroom</string>
+    <string name="package_name">com.delivroom.app</string>
+    <string name="custom_url_scheme">com.delivroom.app</string>
 </resources>

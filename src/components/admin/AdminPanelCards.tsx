@@ -66,7 +66,7 @@ interface AIAnalysisResponse {
   recommendations?: AIRecommendation[];
 }
 
-const LAST_AI_ANALYSIS_STORAGE_KEY = 'hustlego_last_ai_analysis';
+const LAST_AI_ANALYSIS_STORAGE_KEY = 'delivroom_last_ai_analysis';
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;

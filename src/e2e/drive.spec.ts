@@ -1,5 +1,5 @@
 /**
- * drive.spec.ts — HustleGo E2E
+ * drive.spec.ts — Delivroom E2E
  *
  * Teste DriveScreen :
  *   - Hero zone (meilleure zone de conduite)

@@ -163,7 +163,7 @@ function createEmptySyncCounts(): LearningSyncResult['syncedCounts'] {
   };
 }
 
-const USER_PING_CACHE_KEY = 'hustlego_user_ping_cache';
+const USER_PING_CACHE_KEY = 'delivroom_user_ping_cache';
 const USER_PING_COOLDOWN_MS = 15 * 60 * 1000;
 
 export function buildUserPingCacheKey(
