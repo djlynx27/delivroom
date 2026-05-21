@@ -41,7 +41,7 @@ Lyft, Hypra (Taxi Express Plan F), Imoove
 **Payments :** stripe_events
 **Content :** content_pipeline
 
-### Edge Functions (10 déployées)
+### Edge Functions (9 déployées — toutes alignées avec le repo local)
 
 | Function | Rôle |
 |---|---|
@@ -54,7 +54,6 @@ Lyft, Hypra (Taxi Express Plan F), Imoove
 | platform-signal-collector | Collecte signaux Lyft/Hypra |
 | weight-calibrator | Calibration poids facteurs scoring |
 | push-notifier | Web Push VAPID |
-| lyft-zone-scanner | Scanner zones Lyft (⚠️ déployée mais absente du repo local — à investiguer) |
 
 ### Migrations
 
