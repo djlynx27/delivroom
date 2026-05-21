@@ -53,7 +53,7 @@ class AppErrorBoundary extends Component<
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4">
+        <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4 pt-[env(safe-area-inset-top)]">
           <div className="max-w-sm text-center space-y-3">
             <h1 className="text-xl font-display font-bold">
               Un problème est survenu
@@ -86,10 +86,10 @@ function AppContent() {
     !location.pathname.startsWith('/admin');
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]">
       <Suspense
         fallback={
-          <div className="min-h-screen bg-background text-foreground" />
+          <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]" />
         }
       >
         <Routes>
