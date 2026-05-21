@@ -49,6 +49,14 @@ jobs:
         with:
           node-version: '20'
 
+      # Android SDK — l'image ubuntu-latest en a un mais bubblewrap rejette
+      # son layout. setup-android installe un SDK propre avec les composants
+      # requis (platform-tools, build-tools, platforms;android-34, etc.)
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-34 build-tools;34.0.0'
+
       - name: Install Bubblewrap CLI
         run: npm install -g @bubblewrap/cli
 
@@ -60,11 +68,13 @@ jobs:
           cat > ~/.bubblewrap/config.json <<EOF
           {
             "jdkPath": "${JAVA_HOME}",
-            "androidSdkPath": "${ANDROID_HOME:-${ANDROID_SDK_ROOT}}"
+            "androidSdkPath": "${ANDROID_HOME}"
           }
           EOF
           echo "Bubblewrap config:"
           cat ~/.bubblewrap/config.json
+          echo "ANDROID_HOME contents:"
+          ls -la "${ANDROID_HOME}" || true
 
       # Restaurer le keystore depuis le secret base64
       - name: Restore keystore
