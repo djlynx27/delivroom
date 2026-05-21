@@ -4,7 +4,7 @@
     "target": {
       "namespace": "android_app",
       "package_name": "app.delivroom.driver",
-      "sha256_cert_fingerprints": ["REMPLACER_PAR_SHA256_DU_KEYSTORE"]
+      "sha256_cert_fingerprints": ["11:3A:BA:D8:F1:EF:BE:87:2C:CF:30:E0:1D:F5:DE:D5:C4:E0:4A:17:7B:E6:AD:1D:9D:44:FA:4C:DE:7E:97:DA"]
     }
   }
 ]
