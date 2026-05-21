@@ -91,9 +91,10 @@ jobs:
           echo "${{ secrets['ANDROID_KEYSTORE_BASE64'] }}" | base64 -d > android.keystore
           echo "Keystore restored ($(wc -c < android.keystore) bytes)"
 
-      # Optionnel : patcher la version dans twa-manifest.json
-      - name: Patch version
-        if: github.event.inputs.version != ''
+      # Patcher version + propager aux fichiers gradle générés via bubblewrap
+      # update. Sans ce step, bubblewrap build voit le manifest divergent du
+      # projet et prompt interactivement, ce qui fait échouer le CI (exit 130).
+      - name: Patch version + sync project
         run: |
           VERSION="${{ github.event.inputs.version }}"
           VERSION_CODE="${{ github.event.inputs.version_code }}"
@@ -103,14 +104,11 @@ jobs:
             VERSION="${VERSION#v}"  # strip leading 'v'
             VERSION_CODE=$(git rev-list --count HEAD)
           fi
-          node -e "
-            const fs = require('fs');
-            const m = JSON.parse(fs.readFileSync('twa-manifest.json','utf8'));
-            m.appVersion = '$VERSION';
-            m.appVersionCode = parseInt('$VERSION_CODE');
-            fs.writeFileSync('twa-manifest.json', JSON.stringify(m, null, 2));
-            console.log('patched version', m.appVersion, 'code', m.appVersionCode);
-          "
+          # Defaults if neither input nor tag provided
+          VERSION="${VERSION:-1.0.0}"
+          VERSION_CODE="${VERSION_CODE:-1}"
+          echo "Patching to version $VERSION (code $VERSION_CODE)"
+          bubblewrap update --appVersionName "$VERSION" --appVersionCode "$VERSION_CODE"
 
       # Build l'APK et l'AAB (bundle Play Store).
       # Bubblewrap lit les passwords via env vars BUBBLEWRAP_KEYSTORE_PASSWORD
