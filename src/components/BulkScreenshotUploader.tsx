@@ -12,17 +12,28 @@ import { supabase } from '@/integrations/supabase/client';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
+import {
+  ensureReadPermission,
+  getStoredHandle,
+  isFolderApiSupported,
+  pickFolder,
+  scanFolder,
+  clearStoredHandle,
+} from '@/lib/maxymoScanner';
 import { drainSharedFiles } from '@/lib/shareInbox';
 import {
   AlertCircle,
   CheckCircle2,
   Copy,
   Folder,
+  FolderSearch,
   FolderUp,
   Loader2,
   RefreshCw,
   Share2,
+  Trash2,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -113,8 +124,75 @@ export function BulkScreenshotUploader() {
     matched: number;
   } | null>(null);
   const [fromShare, setFromShare] = useState(false);
+  const [autoScanConfigured, setAutoScanConfigured] = useState(false);
+  const [autoScanning, setAutoScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Check on mount whether a persisted folder handle exists from a previous
+  // session. If yes AND the browser still grants us read permission silently,
+  // run an auto-scan. If permission is in 'prompt' state we wait for a user
+  // gesture (the "Rescanner" button) — browsers refuse to prompt without one.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const handle = await getStoredHandle();
+      if (cancelled || !handle) return;
+      setAutoScanConfigured(true);
+      const ok = await ensureReadPermission(handle, false);
+      if (ok && !cancelled) {
+        await runAutoScan(handle, { silent: true });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function configureAutoScan() {
+    const handle = await pickFolder();
+    if (!handle) return;
+    setAutoScanConfigured(true);
+    toast.success('Dossier configuré pour l\'auto-scan');
+    await runAutoScan(handle, { silent: false });
+  }
+
+  async function rescan() {
+    const handle = await getStoredHandle();
+    if (!handle) return;
+    const ok = await ensureReadPermission(handle, true);
+    if (!ok) {
+      toast.error('Permission de lecture refusée');
+      return;
+    }
+    await runAutoScan(handle, { silent: false });
+  }
+
+  async function disableAutoScan() {
+    await clearStoredHandle();
+    setAutoScanConfigured(false);
+    toast.info('Auto-scan désactivé');
+  }
+
+  async function runAutoScan(
+    handle: FileSystemDirectoryHandle,
+    opts: { silent: boolean },
+  ): Promise<void> {
+    setAutoScanning(true);
+    try {
+      const files = await scanFolder(handle, nameFilter || '');
+      if (!files.length) {
+        if (!opts.silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
+        return;
+      }
+      ingest(files, { fromFolder: true });
+      if (!opts.silent) toast.success(`Scan terminé — ${files.length} fichier(s) candidat(s)`);
+    } catch (err) {
+      console.error('[autoScan] failed:', err);
+      toast.error('Échec du scan automatique');
+    } finally {
+      setAutoScanning(false);
+    }
+  }
 
   // When the page loads via the Web Share Target redirect (?from=share),
   // pull every batch the Service Worker stashed into IDB and pre-fill the
@@ -185,11 +263,11 @@ export function BulkScreenshotUploader() {
     setItems(newItems);
   }
 
-  function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFilesInput(e: React.ChangeEvent<HTMLInputElement>) {
     ingest(Array.from(e.target.files ?? []), { fromFolder: false });
   }
 
-  function pickFolder(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFolderInput(e: React.ChangeEvent<HTMLInputElement>) {
     ingest(Array.from(e.target.files ?? []), { fromFolder: true });
   }
 
@@ -338,7 +416,7 @@ export function BulkScreenshotUploader() {
               accept="image/*"
               multiple
               className="hidden"
-              onChange={pickFiles}
+              onChange={handleFilesInput}
               disabled={running}
             />
           </label>
@@ -356,7 +434,7 @@ export function BulkScreenshotUploader() {
               webkitdirectory=""
               directory=""
               className="hidden"
-              onChange={pickFolder}
+              onChange={handleFolderInput}
               disabled={running}
             />
           </label>
@@ -367,6 +445,65 @@ export function BulkScreenshotUploader() {
             Dossier scanné : <span className="font-medium text-foreground">{folderStats.totalInFolder}</span> fichier(s) →
             <span className="font-medium text-foreground"> {folderStats.matched}</span> match{folderStats.matched > 1 ? 'ent' : 'e'} le filtre{nameFilter ? ` "${nameFilter}"` : ''}
           </p>
+        )}
+
+        {/* Auto-scan — persistent folder handle (FS Access API). After the
+            initial pick, every app load rescans automatically and pre-loads
+            the candidate list. */}
+        {isFolderApiSupported() && (
+          <div className="space-y-1.5 pt-2 border-t border-border">
+            <label className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+              <Zap className="w-3 h-3" /> Auto-scan du dossier Maxymo
+            </label>
+            {autoScanConfigured ? (
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-xs h-8 flex-1"
+                  onClick={rescan}
+                  disabled={running || autoScanning}
+                >
+                  {autoScanning
+                    ? <Loader2 className="w-3 h-3 animate-spin" />
+                    : <FolderSearch className="w-3 h-3" />}
+                  Rescanner maintenant
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-xs h-8"
+                  onClick={configureAutoScan}
+                  disabled={running || autoScanning}
+                >
+                  Changer
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1 text-xs h-8"
+                  onClick={disableAutoScan}
+                  disabled={running || autoScanning}
+                >
+                  <Trash2 className="w-3 h-3" />
+                </Button>
+              </div>
+            ) : (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1 text-xs h-8 w-full border-primary/30 text-primary hover:bg-primary/10"
+                onClick={configureAutoScan}
+                disabled={running || autoScanning}
+              >
+                <Zap className="w-3 h-3" /> Configurer l'auto-scan du dossier
+              </Button>
+            )}
+            <p className="text-[10px] text-muted-foreground">
+              Une fois configuré, l'app scanne automatiquement ton dossier Maxymo à chaque ouverture
+              et te propose les nouveaux fichiers à importer.
+            </p>
+          </div>
         )}
 
         {items.length > 0 && (
