@@ -1,8 +1,9 @@
+import { BulkScreenshotUploader } from '@/components/BulkScreenshotUploader';
 import { CsvImporter } from '@/components/CsvImporter';
 import { ScreenshotAnalyzer } from '@/components/ScreenshotAnalyzer';
 import { AdminPageShell } from '@/components/admin/AdminPageShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { FileSpreadsheet, Camera, Brain } from 'lucide-react';
+import { Brain, Camera, FileSpreadsheet, FolderUp } from 'lucide-react';
 
 export default function AdminImportsScreen() {
   return (
@@ -34,18 +35,29 @@ export default function AdminImportsScreen() {
         </CardContent>
       </Card>
 
-      {/* Section 1 — Screenshots Imoove/Hypra/Lyft */}
+      {/* Section 1 — Import bulk Maxymo (plusieurs screenshots d'un coup) */}
+      <div>
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <FolderUp className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-bold uppercase tracking-wide text-muted-foreground">
+            Import bulk Maxymo
+          </h2>
+        </div>
+        <BulkScreenshotUploader />
+      </div>
+
+      {/* Section 2 — Screenshot unique (Imoove/Hypra/Lyft direct) */}
       <div>
         <div className="flex items-center gap-2 mb-2 px-1">
           <Camera className="w-4 h-4 text-primary" />
           <h2 className="text-sm font-display font-bold uppercase tracking-wide text-muted-foreground">
-            Screenshot (Imoove · Hypra · Lyft)
+            Screenshot unique (Imoove · Hypra · Lyft)
           </h2>
         </div>
         <ScreenshotAnalyzer />
       </div>
 
-      {/* Section 2 — CSV Lyft */}
+      {/* Section 3 — CSV Lyft */}
       <div>
         <div className="flex items-center gap-2 mb-2 px-1">
           <FileSpreadsheet className="w-4 h-4 text-primary" />

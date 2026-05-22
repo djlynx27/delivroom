@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
+import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, Upload } from 'lucide-react';
 import { useState } from 'react';
@@ -165,6 +166,21 @@ export function ScreenshotAnalyzer() {
     setStoredPath(null);
     let uploaded: UploadedScreenshot | null = null;
     try {
+      // Dedup: skip the upload + Gemini call if this exact file was already
+      // processed for this user. Cached analysis is replayed straight back.
+      const contentHash = await hashFile(file);
+      const existing = await findExistingUpload(contentHash);
+      if (existing) {
+        setStoredPath(existing.file_path);
+        if (existing.analysis_result) {
+          setResult(existing.analysis_result as AnalysisResult);
+          toast.info('Ce screenshot a déjà été analysé — résultat en cache');
+        } else {
+          toast.info('Ce screenshot a déjà été uploadé');
+        }
+        return;
+      }
+
       uploaded = await uploadScreenshot(file);
       setStoredPath(uploaded.objectPath);
       toast.success('Screenshot sauvegardé dans ton compte');
@@ -183,6 +199,17 @@ export function ScreenshotAnalyzer() {
       } else {
         toast.success('Analyse terminée');
       }
+
+      // Persist dedup record so a future re-upload of the same file is skipped
+      await recordUpload({
+        contentHash,
+        filePath: uploaded.objectPath,
+        fileName: file.name,
+        fileSizeBytes: file.size,
+        mimeType: file.type,
+        source: 'manual',
+        analysisResult: analysis,
+      });
     } catch (err) {
       const msg = getErrorMessage(err, "Erreur lors de l'analyse");
       toast.error(uploaded ? `Stocké, mais ${msg.toLowerCase()}` : msg);
