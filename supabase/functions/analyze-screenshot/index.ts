@@ -404,14 +404,16 @@ function fuzzyMatchAddress(address: string, zones: ZoneRow[]): ZoneRow | null {
   const candidates = cityId ? zones.filter((z) => z.city_id === cityId) : zones;
   if (!candidates.length) return null;
 
-  const lower = address.toLowerCase();
+  // Strip the trailing city tag so "Boulevard X, Laval" doesn't make every Laval
+  // zone match on the word "laval"
+  const street = stripCityTag(address).toLowerCase();
 
   // Score each candidate zone by how many of its name tokens appear in the address.
   // Longer matched tokens score higher.
   let best: ZoneRow | null = null;
   let bestScore = 0;
   for (const zone of candidates) {
-    const score = scoreZoneAgainstAddress(zone.name, lower);
+    const score = scoreZoneAgainstAddress(zone.name, street);
     if (score > bestScore) {
       best = zone;
       bestScore = score;
@@ -419,6 +421,12 @@ function fuzzyMatchAddress(address: string, zones: ZoneRow[]): ZoneRow | null {
   }
   // Require a meaningful match (at least one ≥4-char token hit) to avoid false positives
   return bestScore >= 4 ? best : null;
+}
+
+const CITY_TAG_RE = /,\s*(?:laval|longueuil|montréal|montreal|mtl|terrebonne|blainville|boisbriand|rosemère|rosemere|bois-des-filion|sainte-thérèse|ste-thérèse|ste thérèse|qc|québec|quebec|canada)[\s,]*$/iu;
+
+function stripCityTag(address: string): string {
+  return address.replace(CITY_TAG_RE, '').trim();
 }
 
 function scoreZoneAgainstAddress(zoneName: string, lowerAddress: string): number {
