@@ -176,6 +176,15 @@ export default defineConfig(({ mode }) => {
         authToken: env.SENTRY_AUTH_TOKEN,
         disable: !env.SENTRY_AUTH_TOKEN,
         telemetry: false,
+        release: {
+          // Defaults to the git commit SHA — explicit here so the inject
+          // step below has a stable, known value to substitute in the bundle.
+          // Plugin also auto-creates + finalizes the release in Sentry on
+          // every production build.
+          create: true,
+          finalize: true,
+          inject: true,
+        },
       }),
       VitePWA({
         strategies: 'injectManifest',
