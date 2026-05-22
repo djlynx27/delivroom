@@ -12,6 +12,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
+import { drainSharedFiles } from '@/lib/shareInbox';
 import {
   AlertCircle,
   CheckCircle2,
@@ -20,9 +21,11 @@ import {
   FolderUp,
   Loader2,
   RefreshCw,
+  Share2,
   XCircle,
 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file, same as single uploader
@@ -101,6 +104,7 @@ async function analyzeOne(signedUrl: string): Promise<AnalysisResultMinimal | nu
 
 export function BulkScreenshotUploader() {
   const qc = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [items, setItems] = useState<FileItem[]>([]);
   const [running, setRunning] = useState(false);
   const [nameFilter, setNameFilter] = useState(DEFAULT_FILTER);
@@ -108,8 +112,31 @@ export function BulkScreenshotUploader() {
     totalInFolder: number;
     matched: number;
   } | null>(null);
+  const [fromShare, setFromShare] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // When the page loads via the Web Share Target redirect (?from=share),
+  // pull every batch the Service Worker stashed into IDB and pre-fill the
+  // uploader with those files. The query param is then stripped so a refresh
+  // doesn't re-trigger the drain.
+  useEffect(() => {
+    if (searchParams.get('from') !== 'share') return;
+    let cancelled = false;
+    void (async () => {
+      const sharedFiles = await drainSharedFiles();
+      if (cancelled) return;
+      if (sharedFiles.length) {
+        setFromShare(true);
+        ingest(sharedFiles, { fromFolder: false });
+        toast.success(`${sharedFiles.length} screenshot(s) reçu(s) depuis la galerie`);
+      }
+      searchParams.delete('from');
+      setSearchParams(searchParams, { replace: true });
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function reset() {
     setItems([]);
@@ -270,6 +297,18 @@ export function BulkScreenshotUploader() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {fromShare && (
+          <div className="flex items-start gap-2 bg-primary/5 border border-primary/30 rounded-md p-2">
+            <Share2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />
+            <div className="text-xs">
+              <p className="text-primary font-medium">Reçu depuis la galerie</p>
+              <p className="text-muted-foreground text-[10px]">
+                Fichiers partagés via le share sheet Android. Tu peux lancer le batch directement.
+              </p>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-1.5">
           <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
             Filtre nom de fichier (mode dossier)

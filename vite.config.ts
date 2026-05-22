@@ -204,6 +204,23 @@ export default defineConfig(({ mode }) => {
           display: 'standalone',
           orientation: 'portrait',
           start_url: '/',
+          // Web Share Target — receive image shares from the Android share
+          // sheet, e.g. multi-selecting Maxymo screenshots in the gallery.
+          // The Service Worker intercepts the POST and routes to the bulk
+          // uploader.
+          share_target: {
+            action: '/share-import',
+            method: 'POST',
+            enctype: 'multipart/form-data',
+            params: {
+              files: [
+                {
+                  name: 'files',
+                  accept: ['image/jpeg', 'image/png', 'image/webp', 'image/*'],
+                },
+              ],
+            },
+          },
           icons: [
             {
               src: '/pwa-icon-192.png',
