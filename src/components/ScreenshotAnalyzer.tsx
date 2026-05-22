@@ -17,7 +17,7 @@ import {
 import { useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { Camera, CheckCircle2, Flame, Loader2, MapPin, Save, Upload } from 'lucide-react';
+import { AlertTriangle, Camera, CheckCircle2, Flame, Loader2, MapPin, Save, ShieldCheck, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -46,6 +46,9 @@ interface AnalysisResult {
   recommended_target?: string;
   extracted_data?: ExtractedData;
   matched_zone_id?: string;
+  matched_zone_name?: string;
+  is_fallback?: boolean;
+  fallback_reason?: string;
 }
 
 interface AnalyzeScreenshotResponse {
@@ -71,7 +74,12 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-async function uploadScreenshot(file: File): Promise<string> {
+interface UploadedScreenshot {
+  signedUrl: string;
+  objectPath: string;
+}
+
+async function uploadScreenshot(file: File): Promise<UploadedScreenshot> {
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData.user) {
     throw new Error('Authentification requise pour uploader un screenshot');
@@ -90,15 +98,14 @@ async function uploadScreenshot(file: File): Promise<string> {
   if (signError || !signed?.signedUrl) {
     throw signError ?? new Error('Impossible de générer une URL signée');
   }
-  return signed.signedUrl;
+  return { signedUrl: signed.signedUrl, objectPath };
 }
 
 async function analyzeScreenshot(
-  file: File,
+  signedUrl: string,
   zoneId: string | null,
   zoneName: string | null
 ): Promise<AnalysisResult | null> {
-  const signedUrl = await uploadScreenshot(file);
   const { data, error } = await supabase.functions.invoke('analyze-screenshot', {
     body: {
       image_url: signedUrl,
@@ -129,6 +136,7 @@ export function ScreenshotAnalyzer() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [storedPath, setStoredPath] = useState<string | null>(null);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -137,6 +145,7 @@ export function ScreenshotAnalyzer() {
     setFile(f);
     setResult(null);
     setSaved(false);
+    setStoredPath(null);
     const reader = new FileReader();
     reader.onload = () => setPreview(reader.result as string);
     reader.readAsDataURL(f);
@@ -147,19 +156,30 @@ export function ScreenshotAnalyzer() {
     setLoading(true);
     setResult(null);
     setSaved(false);
+    setStoredPath(null);
+    let uploaded: UploadedScreenshot | null = null;
     try {
+      uploaded = await uploadScreenshot(file);
+      setStoredPath(uploaded.objectPath);
+      toast.success('Screenshot sauvegardé dans ton compte');
+
       const selectedZone = zoneId ? allZones.find(z => z.id === zoneId) : null;
       const analysis = await analyzeScreenshot(
-        file,
+        uploaded.signedUrl,
         zoneId || null,
         selectedZone?.name ?? null,
       );
       // Use matched zone if AI found one (user didn't pick + AI inferred)
       if (!zoneId && analysis?.matched_zone_id) setZoneId(analysis.matched_zone_id);
       setResult(analysis);
-      toast.success('Analyse terminée');
+      if (analysis?.is_fallback) {
+        toast.warning('Screenshot stocké, mais analyse IA indisponible');
+      } else {
+        toast.success('Analyse terminée');
+      }
     } catch (err) {
-      toast.error(getErrorMessage(err, "Erreur lors de l'analyse"));
+      const msg = getErrorMessage(err, "Erreur lors de l'analyse");
+      toast.error(uploaded ? `Stocké, mais ${msg.toLowerCase()}` : msg);
     } finally {
       setLoading(false);
     }
@@ -259,15 +279,54 @@ export function ScreenshotAnalyzer() {
           {loading ? 'Analyse en cours…' : "Analyser avec l'IA"}
         </Button>
 
-        {/* Results */}
-        {result && (
+        {/* Storage confirmation — independent from analysis success */}
+        {storedPath && (
+          <div className="flex items-start gap-2 text-xs bg-green-500/5 border border-green-500/20 rounded-md p-2">
+            <ShieldCheck className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" />
+            <div className="space-y-0.5 min-w-0">
+              <p className="text-green-400 font-medium">Screenshot stocké en sécurité</p>
+              <p className="text-muted-foreground break-all font-mono text-[10px]">
+                driver-screenshots/{storedPath}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Fallback state — Gemini failed but file is saved */}
+        {result?.is_fallback && (
+          <div className="space-y-2 pt-2 border-t border-border">
+            <div className="flex items-start gap-2 bg-amber-500/5 border border-amber-500/30 rounded-md p-3">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1 min-w-0">
+                <p className="text-sm font-medium text-amber-400">Analyse IA indisponible</p>
+                <p className="text-xs text-muted-foreground">{result.notes}</p>
+                {result.fallback_reason && (
+                  <p className="text-[10px] text-muted-foreground font-mono">
+                    code: {result.fallback_reason}
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground pt-1">
+                  Le fichier est conservé. Réessaie plus tard ou contacte le support si ça persiste.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Real analysis result */}
+        {result && !result.is_fallback && (
           <div className="space-y-2 pt-2 border-t border-border">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-medium text-foreground">Résultat</span>
+              <span className="text-xs font-medium text-foreground">Résultat IA</span>
               <Badge variant={getDemandBadgeVariant(result.overall_demand)} className="text-xs">
                 <Flame className="w-3 h-3 mr-1" />{result.overall_demand}
               </Badge>
             </div>
+            {result.matched_zone_name && !zoneId && (
+              <p className="text-xs text-muted-foreground">
+                Zone détectée par l'IA : <span className="text-foreground font-medium">{result.matched_zone_name}</span>
+              </p>
+            )}
 
             {/* Extracted trip data */}
             {result.extracted_data && (

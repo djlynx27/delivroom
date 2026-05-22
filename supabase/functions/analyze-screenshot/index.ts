@@ -38,6 +38,8 @@ interface AnalysisResult {
   extracted_data?: ExtractedData;
   matched_zone_id?: string;
   matched_zone_name?: string;
+  is_fallback?: boolean;
+  fallback_reason?: 'missing_image_url' | 'missing_api_key' | 'image_fetch_failed' | 'gemini_call_failed' | 'gemini_invalid_json';
 }
 
 interface RequestBody {
@@ -109,8 +111,12 @@ async function handleRequest(req: Request): Promise<Response> {
     const analysis = analyzeFileContent(body.file_content, body.file_name);
     return jsonResponse({ analysis });
   }
-  if (!body.image_url || !env.geminiKey) {
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name) });
+  if (!body.image_url) {
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'missing_image_url') });
+  }
+  if (!env.geminiKey) {
+    console.error('analyze-screenshot: GEMINI_API_KEY not set in Edge Function secrets');
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'missing_api_key') });
   }
 
   const client = getServiceClient(env);
@@ -118,16 +124,17 @@ async function handleRequest(req: Request): Promise<Response> {
 
   const fetched = await fetchImage(body.image_url);
   if (!fetched) {
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name) });
+    console.error('analyze-screenshot: failed to fetch image from', body.image_url);
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'image_fetch_failed') });
   }
 
-  const analysis = await runGemini(env.geminiKey, fetched, body.zone_name, zones);
-  if (!analysis) {
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name) });
+  const geminiResult = await runGemini(env.geminiKey, fetched, body.zone_name, zones);
+  if (!geminiResult.analysis) {
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, geminiResult.reason) });
   }
 
-  await resolveZoneIfNeeded(analysis, body, client, zones);
-  return jsonResponse({ analysis });
+  await resolveZoneIfNeeded(geminiResult.analysis, body, client, zones);
+  return jsonResponse({ analysis: geminiResult.analysis });
 }
 
 interface FetchedImage { bytes: Uint8Array; mimeType: string; }
@@ -152,15 +159,20 @@ function toBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+interface GeminiResult {
+  analysis: AnalysisResult | null;
+  reason: 'gemini_call_failed' | 'gemini_invalid_json';
+}
+
 async function runGemini(
   apiKey: string,
   image: FetchedImage,
   zoneName: string | undefined,
   zones: ZoneRow[],
-): Promise<AnalysisResult | null> {
+): Promise<GeminiResult> {
   const prompt = buildPrompt(zoneName, zones);
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -180,15 +192,17 @@ async function runGemini(
     },
   );
   if (!res.ok) {
-    console.error('Gemini Vision error:', await res.text());
-    return null;
+    const errBody = await res.text();
+    console.error(`Gemini Vision error (status ${res.status}):`, errBody);
+    return { analysis: null, reason: 'gemini_call_failed' };
   }
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
   try {
-    return JSON.parse(raw) as AnalysisResult;
-  } catch {
-    return null;
+    return { analysis: JSON.parse(raw) as AnalysisResult, reason: 'gemini_call_failed' };
+  } catch (err) {
+    console.error('Gemini returned invalid JSON:', raw, err);
+    return { analysis: null, reason: 'gemini_invalid_json' };
   }
 }
 
@@ -351,15 +365,24 @@ function analyzeFileContent(content: string, fileName?: string): AnalysisResult 
   };
 }
 
-function fallbackAnalysis(zoneName?: string): AnalysisResult {
+const FALLBACK_NOTES: Record<NonNullable<AnalysisResult['fallback_reason']>, string> = {
+  missing_image_url: 'Aucune image reçue par le serveur.',
+  missing_api_key: 'Clé API Gemini manquante côté serveur — contacte le support.',
+  image_fetch_failed: 'Le serveur n\'a pas pu télécharger le screenshot (URL expirée).',
+  gemini_call_failed: 'L\'API Gemini a refusé la requête (clé invalide, quota, ou modèle indisponible).',
+  gemini_invalid_json: 'Gemini a répondu mais dans un format inattendu.',
+};
+
+function fallbackAnalysis(
+  zoneName: string | undefined,
+  reason: NonNullable<AnalysisResult['fallback_reason']>,
+): AnalysisResult {
   return {
     zones_detected: [],
-    overall_demand: 'medium',
+    overall_demand: 'low',
     time_context: null,
-    notes: zoneName
-      ? `Analyse non disponible — zone ${zoneName} sélectionnée`
-      : 'Analyse non disponible — sélectionnez une zone',
-    recommended_target: 'demand',
+    notes: FALLBACK_NOTES[reason],
+    recommended_target: 'unknown',
     extracted_data: {
       earnings: null,
       tips: null,
@@ -368,6 +391,8 @@ function fallbackAnalysis(zoneName?: string): AnalysisResult {
       trips_count: null,
       date: null,
     },
+    is_fallback: true,
+    fallback_reason: reason,
   };
 }
 
