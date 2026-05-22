@@ -11,10 +11,12 @@ import { Progress } from '@/components/ui/progress';
 import { supabase } from '@/integrations/supabase/client';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
+import { Input } from '@/components/ui/input';
 import {
   AlertCircle,
   CheckCircle2,
   Copy,
+  Folder,
   FolderUp,
   Loader2,
   RefreshCw,
@@ -25,6 +27,18 @@ import { toast } from 'sonner';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file, same as single uploader
 const MAX_BATCH_SIZE = 100;             // safety cap so the UI stays responsive
+const DEFAULT_FILTER = 'Maxymo';        // pre-fill the filter for Maxymo's default filename prefix
+
+// Extend HTMLInputElement to declare the non-standard webkitdirectory attribute
+// React's typings don't include it, but Chromium-based browsers + recent Android
+// expose it for folder selection.
+declare module 'react' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface InputHTMLAttributes<T> {
+    webkitdirectory?: string;
+    directory?: string;
+  }
+}
 
 type FileStatus =
   | 'pending'
@@ -89,21 +103,50 @@ export function BulkScreenshotUploader() {
   const qc = useQueryClient();
   const [items, setItems] = useState<FileItem[]>([]);
   const [running, setRunning] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [nameFilter, setNameFilter] = useState(DEFAULT_FILTER);
+  const [folderStats, setFolderStats] = useState<{
+    totalInFolder: number;
+    matched: number;
+  } | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   function reset() {
     setItems([]);
-    if (inputRef.current) inputRef.current.value = '';
+    setFolderStats(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    if (folderInputRef.current) folderInputRef.current.value = '';
   }
 
-  function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
-    const picked = Array.from(e.target.files ?? []);
-    if (!picked.length) return;
-    if (picked.length > MAX_BATCH_SIZE) {
-      toast.error(`Max ${MAX_BATCH_SIZE} fichiers à la fois`);
+  function ingest(rawFiles: File[], opts: { fromFolder: boolean }) {
+    if (!rawFiles.length) return;
+    let filtered = rawFiles;
+    // Keep only image files (a folder dump will also include other things)
+    filtered = filtered.filter((f) => f.type.startsWith('image/'));
+    if (opts.fromFolder && nameFilter.trim()) {
+      const needle = nameFilter.trim().toLowerCase();
+      filtered = filtered.filter((f) => f.name.toLowerCase().includes(needle));
+    }
+    if (opts.fromFolder) {
+      setFolderStats({ totalInFolder: rawFiles.length, matched: filtered.length });
+    } else {
+      setFolderStats(null);
+    }
+    if (!filtered.length) {
+      if (opts.fromFolder) {
+        toast.warning(`Aucun fichier ne matche "${nameFilter}" dans ce dossier`);
+      } else {
+        toast.error('Aucune image dans la sélection');
+      }
       return;
     }
-    const newItems: FileItem[] = picked.map((file, i) => {
+    if (filtered.length > MAX_BATCH_SIZE) {
+      toast.warning(
+        `${filtered.length} fichiers trouvés — limité à ${MAX_BATCH_SIZE} pour cette session`,
+      );
+      filtered = filtered.slice(0, MAX_BATCH_SIZE);
+    }
+    const newItems: FileItem[] = filtered.map((file, i) => {
       const oversize = file.size > MAX_FILE_SIZE;
       return {
         id: `${Date.now()}-${i}-${sanitizeFilename(file.name)}`,
@@ -113,6 +156,14 @@ export function BulkScreenshotUploader() {
       };
     });
     setItems(newItems);
+  }
+
+  function pickFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    ingest(Array.from(e.target.files ?? []), { fromFolder: false });
+  }
+
+  function pickFolder(e: React.ChangeEvent<HTMLInputElement>) {
+    ingest(Array.from(e.target.files ?? []), { fromFolder: true });
   }
 
   function updateItem(id: string, patch: Partial<FileItem>) {
@@ -219,23 +270,65 @@ export function BulkScreenshotUploader() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
-          <div className="flex flex-col items-center gap-1 text-muted-foreground">
-            <FolderUp className="w-5 h-5" />
-            <span className="text-xs">
-              {items.length ? `${items.length} fichier(s) sélectionné(s)` : 'Sélectionner des screenshots'}
-            </span>
-          </div>
-          <input
-            ref={inputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={pickFiles}
+        <div className="space-y-1.5">
+          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Filtre nom de fichier (mode dossier)
+          </label>
+          <Input
+            value={nameFilter}
+            onChange={(e) => setNameFilter(e.target.value)}
+            placeholder="Maxymo, Lyft, Screenshot…"
             disabled={running}
+            className="h-8 text-xs"
           />
-        </label>
+          <p className="text-[10px] text-muted-foreground">
+            Quand tu choisis un dossier entier, seuls les fichiers dont le nom contient ce texte
+            sont importés. Vide = tout prendre.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
+            <div className="flex flex-col items-center gap-1 text-muted-foreground">
+              <FolderUp className="w-5 h-5" />
+              <span className="text-[10px]">Fichiers</span>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={pickFiles}
+              disabled={running}
+            />
+          </label>
+
+          <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/60 transition-colors">
+            <div className="flex flex-col items-center gap-1 text-primary/80">
+              <Folder className="w-5 h-5" />
+              <span className="text-[10px]">Dossier entier</span>
+            </div>
+            <input
+              ref={folderInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              webkitdirectory=""
+              directory=""
+              className="hidden"
+              onChange={pickFolder}
+              disabled={running}
+            />
+          </label>
+        </div>
+
+        {folderStats && (
+          <p className="text-[10px] text-muted-foreground bg-background border border-border rounded-md p-2">
+            Dossier scanné : <span className="font-medium text-foreground">{folderStats.totalInFolder}</span> fichier(s) →
+            <span className="font-medium text-foreground"> {folderStats.matched}</span> match{folderStats.matched > 1 ? 'ent' : 'e'} le filtre{nameFilter ? ` "${nameFilter}"` : ''}
+          </p>
+        )}
 
         {items.length > 0 && (
           <>
