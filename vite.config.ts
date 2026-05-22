@@ -171,7 +171,7 @@ export default defineConfig(({ mode }) => {
       // (set in Vercel for production builds, absent locally so dev stays
       // fast and Sentry's CLI doesn't fail on every `vite build`).
       sentryVitePlugin({
-        org: env.SENTRY_ORG || 'oualid',
+        org: env.SENTRY_ORG || 'hustle-go-media',
         project: env.SENTRY_PROJECT || 'delivroom',
         authToken: env.SENTRY_AUTH_TOKEN,
         disable: !env.SENTRY_AUTH_TOKEN,
