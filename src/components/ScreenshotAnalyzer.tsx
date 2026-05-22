@@ -17,7 +17,7 @@ import {
 import { useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Camera, CheckCircle2, Flame, Loader2, MapPin, Save, ShieldCheck, Upload } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, Upload } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 
@@ -31,6 +31,12 @@ interface ExtractedData {
   hours_worked?: number | null;
   trips_count?: number | null;
   date?: string | null;
+  pickup_address?: string | null;
+  dropoff_address?: string | null;
+  pickup_zone_id?: string | null;
+  pickup_zone_name?: string | null;
+  dropoff_zone_id?: string | null;
+  dropoff_zone_name?: string | null;
 }
 
 interface AnalysisResult {
@@ -326,6 +332,41 @@ export function ScreenshotAnalyzer() {
               <p className="text-xs text-muted-foreground">
                 Zone détectée par l'IA : <span className="text-foreground font-medium">{result.matched_zone_name}</span>
               </p>
+            )}
+
+            {/* Trajet pickup → dropoff */}
+            {result.extracted_data && (result.extracted_data.pickup_address || result.extracted_data.dropoff_address) && (
+              <div className="bg-background rounded-lg border border-border p-3 space-y-2">
+                {result.extracted_data.pickup_address && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <Navigation className="w-3.5 h-3.5 text-green-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Départ</p>
+                      <p className="font-medium break-words">{result.extracted_data.pickup_address}</p>
+                      {result.extracted_data.pickup_zone_name && (
+                        <p className="text-muted-foreground text-[10px]">Zone : {result.extracted_data.pickup_zone_name}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {result.extracted_data.pickup_address && result.extracted_data.dropoff_address && (
+                  <div className="flex justify-center">
+                    <ArrowRight className="w-3 h-3 text-muted-foreground" />
+                  </div>
+                )}
+                {result.extracted_data.dropoff_address && (
+                  <div className="flex items-start gap-2 text-xs">
+                    <MapPin className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-muted-foreground text-[10px] uppercase tracking-wide">Destination</p>
+                      <p className="font-medium break-words">{result.extracted_data.dropoff_address}</p>
+                      {result.extracted_data.dropoff_zone_name && (
+                        <p className="text-muted-foreground text-[10px]">Zone : {result.extracted_data.dropoff_zone_name}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
 
             {/* Extracted trip data */}

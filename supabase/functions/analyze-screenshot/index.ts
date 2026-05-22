@@ -21,6 +21,12 @@ interface ExtractedData {
   hours_worked?: number | null;
   trips_count?: number | null;
   date?: string | null;
+  pickup_address?: string | null;
+  dropoff_address?: string | null;
+  pickup_zone_id?: string | null;
+  pickup_zone_name?: string | null;
+  dropoff_zone_id?: string | null;
+  dropoff_zone_name?: string | null;
 }
 
 interface AnalysisResult {
@@ -255,6 +261,10 @@ async function resolveZoneIfNeeded(
   zones: ZoneRow[],
 ): Promise<void> {
   if (!body.auto_zone) return;
+
+  // Validate pickup/dropoff zone ids returned by Gemini against the catalog
+  resolvePickupDropoffZones(analysis, zones);
+
   // 1. Si Gemini a déjà retourné un matched_zone_id valide, on le vérifie
   if (analysis.matched_zone_id) {
     const known = zones.find((z) => z.id === analysis.matched_zone_id);
@@ -281,6 +291,28 @@ async function resolveZoneIfNeeded(
   }
 }
 
+function resolvePickupDropoffZones(analysis: AnalysisResult, zones: ZoneRow[]): void {
+  const data = analysis.extracted_data;
+  if (!data) return;
+  if (data.pickup_zone_id) {
+    const known = zones.find((z) => z.id === data.pickup_zone_id);
+    if (known) {
+      data.pickup_zone_name = known.name;
+    } else {
+      // Drop invented id
+      data.pickup_zone_id = null;
+    }
+  }
+  if (data.dropoff_zone_id) {
+    const known = zones.find((z) => z.id === data.dropoff_zone_id);
+    if (known) {
+      data.dropoff_zone_name = known.name;
+    } else {
+      data.dropoff_zone_id = null;
+    }
+  }
+}
+
 function buildZonesCatalog(zones: ZoneRow[]): string {
   if (!zones.length) return '';
   const lines = zones.map(
@@ -294,9 +326,11 @@ function buildPrompt(zoneName: string | undefined, zones: ZoneRow[]): string {
     ? `The driver is currently positioned near "${zoneName}" in Montreal/Laval/Longueuil (Quebec).`
     : 'The driver did NOT pre-select a zone — infer it from the image if possible.';
   const catalog = buildZonesCatalog(zones);
+  const today = new Date().toISOString().slice(0, 10);
   return `You are analyzing a rideshare/delivery driver screenshot taken in Quebec, Canada (Greater Montreal area: Montréal island, Laval, Longueuil / Rive-Sud).
 ${zoneCtx}
 ${catalog}
+Today's date is ${today}. If the image does not display a specific date, use today.
 Extract all useful information from this image and return ONLY a raw JSON object (no markdown fences) matching:
 {
   "zones_detected": [{ "area": string, "demand": "low"|"medium"|"high"|"surge", "surge_multiplier": number|null, "color_intensity": "light"|"medium"|"dark" }],
@@ -310,16 +344,23 @@ Extract all useful information from this image and return ONLY a raw JSON object
     "distance_km": number|null,
     "hours_worked": number|null,
     "trips_count": number|null,
-    "date": "YYYY-MM-DD"|null
+    "date": "YYYY-MM-DD"|null,
+    "pickup_address": string|null,
+    "dropoff_address": string|null,
+    "pickup_zone_id": string|null,
+    "dropoff_zone_id": string|null
   },
   "matched_zone_id": string|null
 }
 
 Rules:
 - matched_zone_id: read any text/labels visible on the image (street names, borough names, neighbourhoods, landmarks, transit stations, bridges). If you can locate the screenshot inside one of the catalog entries above, return its EXACT id from the catalog. If unsure, return null — DO NOT invent ids.
+- pickup_address / dropoff_address: copy the addresses verbatim from the image if present (Lyft/Uber/DoorDash trip cards usually show origin near the green/pickup pin and destination near the red/drop pin). Otherwise null.
+- pickup_zone_id / dropoff_zone_id: match each address to the closest entry in the catalog above. Return its EXACT id. If you cannot confidently match, return null — DO NOT invent ids.
 - zones_detected: list visible demand zones/areas in the image (empty array if none)
 - recommended_target: "demand" for heatmaps/zone screenshots, "shift" for earnings/trip summaries, "mileage" for distance/mileage reports, "daily" for daily summaries, "profit" for profit/loss screens
 - extracted_data: populate only fields visually present in the image; null otherwise
+- date: NEVER use a year prior to 2025 unless the image explicitly shows an older year. If only a month/day is visible without year, use ${today.slice(0, 4)}.
 - All monetary values in CAD
 - distance_km: convert miles to km if needed (1 mi = 1.609 km)
 - Return ONLY the JSON, no other text`;
