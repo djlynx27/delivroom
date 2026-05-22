@@ -10,6 +10,7 @@ import {
   Flag,
   FlaskConical,
   LineChart,
+  MapPin,
   ShieldAlert,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -53,6 +54,13 @@ export default function AdminScreen() {
         'Villes, simulation et connecteurs externes. À réserver aux tests, pas à l’analyse métier finale.',
       to: '/admin/tools',
       icon: FlaskConical,
+    },
+    {
+      title: 'Zones découvertes',
+      description:
+        'Adresses pickup/dropoff vues dans tes screenshots qui ne sont pas dans le catalog. Promouvoir en zone pour enrichir le scoring.',
+      to: '/admin/discoveries',
+      icon: MapPin,
     },
   ] as const;
 

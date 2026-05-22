@@ -31,6 +31,9 @@ const AdminReportsScreen = lazy(() => import('@/pages/AdminReportsScreen'));
 const AdminLearningScreen = lazy(() => import('@/pages/AdminLearningScreen'));
 const AdminImportsScreen = lazy(() => import('@/pages/AdminImportsScreen'));
 const AdminToolsScreen = lazy(() => import('@/pages/AdminToolsScreen'));
+const AdminZoneDiscoveriesScreen = lazy(
+  () => import('@/pages/AdminZoneDiscoveriesScreen')
+);
 const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
 const queryClient = new QueryClient();
@@ -138,6 +141,7 @@ function AppContent() {
           <Route path="/admin/learning" element={<AdminLearningScreen />} />
           <Route path="/admin/imports" element={<AdminImportsScreen />} />
           <Route path="/admin/tools" element={<AdminToolsScreen />} />
+          <Route path="/admin/discoveries" element={<AdminZoneDiscoveriesScreen />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </Suspense>
