@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   Flag,
   FlaskConical,
+  HeartPulse,
   LineChart,
   MapPin,
   ShieldAlert,
@@ -61,6 +62,13 @@ export default function AdminScreen() {
         'Adresses pickup/dropoff vues dans tes screenshots qui ne sont pas dans le catalog. Promouvoir en zone pour enrichir le scoring.',
       to: '/admin/discoveries',
       icon: MapPin,
+    },
+    {
+      title: 'Driver Ops — bonus + santé',
+      description:
+        'Suivre tes bonus quests actifs (Lyft Weekly, Uber Quest) et garder un œil sur acceptance / cancellation / rating pour rester prioritaire dans le matching.',
+      to: '/admin/driver-ops',
+      icon: HeartPulse,
     },
   ] as const;
 
