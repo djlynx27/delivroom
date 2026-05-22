@@ -186,7 +186,7 @@ async function runGemini(
         generationConfig: {
           responseMimeType: 'application/json',
           temperature: 0.2,
-          maxOutputTokens: 1024,
+          maxOutputTokens: 2048,
         },
       }),
     },
@@ -198,12 +198,54 @@ async function runGemini(
   }
   const data = await res.json();
   const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
-  try {
-    return { analysis: JSON.parse(raw) as AnalysisResult, reason: 'gemini_call_failed' };
-  } catch (err) {
-    console.error('Gemini returned invalid JSON:', raw, err);
+  const parsed = lenientJsonParse(raw);
+  if (parsed === null) {
+    console.error('Gemini returned unparseable response. Raw text:\n', raw);
     return { analysis: null, reason: 'gemini_invalid_json' };
   }
+  return { analysis: parsed as AnalysisResult, reason: 'gemini_call_failed' };
+}
+
+function lenientJsonParse(raw: string): unknown {
+  // 1. Strict JSON first
+  try {
+    return JSON.parse(raw);
+  } catch { /* fall through */ }
+
+  // 2. Strip markdown fences (```json ... ``` or ``` ... ```)
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced?.[1]) {
+    try {
+      return JSON.parse(fenced[1].trim());
+    } catch { /* fall through */ }
+  }
+
+  // 3. Find first balanced { ... } block via brace counting
+  const start = raw.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < raw.length; i++) {
+    const ch = raw[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === '\\') { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        const candidate = raw.slice(start, i + 1);
+        try {
+          return JSON.parse(candidate);
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 async function resolveZoneIfNeeded(
