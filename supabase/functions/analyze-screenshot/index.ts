@@ -262,8 +262,8 @@ async function resolveZoneIfNeeded(
 ): Promise<void> {
   if (!body.auto_zone) return;
 
-  // Validate pickup/dropoff zone ids returned by Gemini against the catalog
-  resolvePickupDropoffZones(analysis, zones);
+  // Validate + fuzzy-match pickup/dropoff zone ids against the catalog
+  await resolvePickupDropoffZones(analysis, client, zones);
 
   // 1. Si Gemini a déjà retourné un matched_zone_id valide, on le vérifie
   if (analysis.matched_zone_id) {
@@ -291,25 +291,208 @@ async function resolveZoneIfNeeded(
   }
 }
 
-function resolvePickupDropoffZones(analysis: AnalysisResult, zones: ZoneRow[]): void {
+async function resolvePickupDropoffZones(
+  analysis: AnalysisResult,
+  client: SupabaseClient | null,
+  zones: ZoneRow[],
+): Promise<void> {
   const data = analysis.extracted_data;
   if (!data) return;
-  if (data.pickup_zone_id) {
-    const known = zones.find((z) => z.id === data.pickup_zone_id);
-    if (known) {
-      data.pickup_zone_name = known.name;
-    } else {
-      // Drop invented id
-      data.pickup_zone_id = null;
+
+  // Pickup
+  const pickup = await resolveOneAddress(
+    data.pickup_zone_id ?? null,
+    data.pickup_address ?? null,
+    'pickup',
+    client,
+    zones,
+  );
+  if (pickup) {
+    data.pickup_zone_id = pickup.id;
+    data.pickup_zone_name = pickup.name;
+  } else {
+    data.pickup_zone_id = null;
+  }
+
+  // Dropoff
+  const dropoff = await resolveOneAddress(
+    data.dropoff_zone_id ?? null,
+    data.dropoff_address ?? null,
+    'dropoff',
+    client,
+    zones,
+  );
+  if (dropoff) {
+    data.dropoff_zone_id = dropoff.id;
+    data.dropoff_zone_name = dropoff.name;
+  } else {
+    data.dropoff_zone_id = null;
+  }
+}
+
+async function resolveOneAddress(
+  geminiZoneId: string | null,
+  address: string | null,
+  context: 'pickup' | 'dropoff',
+  client: SupabaseClient | null,
+  zones: ZoneRow[],
+): Promise<ZoneRow | null> {
+  // 1. Trust Gemini if id is in the catalog
+  if (geminiZoneId) {
+    const known = zones.find((z) => z.id === geminiZoneId);
+    if (known) return known;
+  }
+  // 2. Fuzzy match server-side
+  if (!address) return null;
+  const matched = fuzzyMatchAddress(address, zones);
+  if (matched) return matched;
+  // 3. No match anywhere — log to zone_discoveries for future promotion
+  if (client) {
+    await logDiscovery(client, address, context, guessCityId(address));
+  }
+  return null;
+}
+
+const CITY_KEYWORDS: Record<string, string[]> = {
+  mtl: [
+    'montreal', 'montréal', 'mtl',
+    'saint-laurent', 'st-laurent', 'st laurent', 'saint laurent',
+    'saint-léonard', 'st-léonard', 'saint leonard', 'st leonard',
+    'verdun', 'outremont', 'westmount', 'lasalle', 'anjou',
+    'rivière-des-prairies', 'riviere-des-prairies', 'rdp',
+    'pointe-aux-trembles', 'pat',
+    'plateau', 'rosemont', 'villeray', 'parc-extension', 'parc ex',
+    'mile end', 'mile-end', 'côte-des-neiges', 'cote-des-neiges', 'cdn',
+    'notre-dame-de-grâce', 'ndg',
+    'hochelaga', 'maisonneuve', 'mercier', 'ahuntsic', 'cartierville',
+    'lachine', 'dorval', 'pierrefonds', 'roxboro', 'kirkland',
+    'pointe-claire', 'baie-d\'urfé', 'beaconsfield', 'sainte-anne-de-bellevue',
+    'griffintown', 'sud-ouest', 'sud ouest',
+  ],
+  lvl: ['laval', 'chomedey', 'sainte-rose', 'ste-rose', 'sainte-dorothée',
+    'duvernay', 'fabreville', 'auteuil', 'pont-viau', 'vimont', 'laval-ouest',
+    'laval-des-rapides', 'saint-vincent-de-paul', 'saint-françois'],
+  lng: ['longueuil', 'brossard', 'saint-hubert', 'st-hubert', 'saint-lambert',
+    'st-lambert', 'greenfield park', 'lemoyne', 'boucherville',
+    'saint-bruno', 'st-bruno', 'rive-sud', 'rive sud', 'south shore'],
+  trb: ['terrebonne', 'lachenaie', 'mascouche', 'la plaine'],
+  sth: ['sainte-thérèse', 'ste-thérèse', 'ste therese'],
+  blv: ['blainville'],
+  bsb: ['boisbriand'],
+  rsm: ['rosemère', 'rosemere'],
+  bdf: ['bois-des-filion', 'bois des filion'],
+};
+
+function guessCityId(address: string): string | null {
+  const lower = address.toLowerCase();
+  // Score each city by counting keyword hits; pick the highest
+  let bestCity: string | null = null;
+  let bestScore = 0;
+  for (const [cityId, keywords] of Object.entries(CITY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (lower.includes(kw) && kw.length > bestScore) {
+        bestCity = cityId;
+        bestScore = kw.length;
+      }
     }
   }
-  if (data.dropoff_zone_id) {
-    const known = zones.find((z) => z.id === data.dropoff_zone_id);
-    if (known) {
-      data.dropoff_zone_name = known.name;
-    } else {
-      data.dropoff_zone_id = null;
+  return bestCity;
+}
+
+function fuzzyMatchAddress(address: string, zones: ZoneRow[]): ZoneRow | null {
+  const cityId = guessCityId(address);
+  const candidates = cityId ? zones.filter((z) => z.city_id === cityId) : zones;
+  if (!candidates.length) return null;
+
+  const lower = address.toLowerCase();
+
+  // Score each candidate zone by how many of its name tokens appear in the address.
+  // Longer matched tokens score higher.
+  let best: ZoneRow | null = null;
+  let bestScore = 0;
+  for (const zone of candidates) {
+    const score = scoreZoneAgainstAddress(zone.name, lower);
+    if (score > bestScore) {
+      best = zone;
+      bestScore = score;
     }
+  }
+  // Require a meaningful match (at least one ≥4-char token hit) to avoid false positives
+  return bestScore >= 4 ? best : null;
+}
+
+function scoreZoneAgainstAddress(zoneName: string, lowerAddress: string): number {
+  const tokens = zoneName
+    .toLowerCase()
+    .split(/[\s\-']+/)
+    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
+  let score = 0;
+  for (const token of tokens) {
+    if (lowerAddress.includes(token)) {
+      score += token.length;
+    }
+  }
+  return score;
+}
+
+const STOPWORDS = new Set([
+  'rue', 'boul', 'boulevard', 'bd', 'avenue', 'av', 'place', 'gare',
+  'station', 'centre', 'ville', 'sainte', 'saint', 'ste', 'st', 'de',
+  'la', 'le', 'les', 'du', 'des', 'cégep', 'cegep', 'parc',
+]);
+
+async function logDiscovery(
+  client: SupabaseClient,
+  address: string,
+  context: 'pickup' | 'dropoff',
+  cityHint: string | null,
+): Promise<void> {
+  try {
+    // Upsert: if (address, context) already exists, increment count + bump last_seen_at.
+    // Otherwise insert a fresh row.
+    const trimmed = address.trim().slice(0, 500);
+    const { error } = await client.rpc('zone_discoveries_upsert', {
+      p_address: trimmed,
+      p_context: context,
+      p_city_hint: cityHint,
+    });
+    // If the RPC doesn't exist yet, fall back to a manual upsert.
+    if (error?.code === 'PGRST202' || error?.message?.includes('not exist')) {
+      await manualDiscoveryUpsert(client, trimmed, context, cityHint);
+    } else if (error) {
+      console.error('zone_discoveries_upsert error:', error);
+    }
+  } catch (err) {
+    console.error('zone_discoveries log failed:', err);
+  }
+}
+
+async function manualDiscoveryUpsert(
+  client: SupabaseClient,
+  address: string,
+  context: 'pickup' | 'dropoff',
+  cityHint: string | null,
+): Promise<void> {
+  const { data: existing } = await client
+    .from('zone_discoveries')
+    .select('id, count')
+    .eq('context', context)
+    .ilike('address', address)
+    .maybeSingle();
+  if (existing) {
+    await client
+      .from('zone_discoveries')
+      .update({
+        count: (existing.count ?? 0) + 1,
+        last_seen_at: new Date().toISOString(),
+      })
+      .eq('id', existing.id);
+  } else {
+    await client.from('zone_discoveries').insert({
+      address,
+      context,
+      city_hint: cityHint,
+    });
   }
 }
 
