@@ -1,3 +1,4 @@
+import { sentryVitePlugin } from '@sentry/vite-plugin';
 import react from '@vitejs/plugin-react';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -166,6 +167,16 @@ export default defineConfig(({ mode }) => {
     plugins: [
       devApiFallbacks,
       react(),
+      // Sentry source maps — only uploaded when the auth token is present
+      // (set in Vercel for production builds, absent locally so dev stays
+      // fast and Sentry's CLI doesn't fail on every `vite build`).
+      sentryVitePlugin({
+        org: env.SENTRY_ORG || 'oualid',
+        project: env.SENTRY_PROJECT || 'delivroom',
+        authToken: env.SENTRY_AUTH_TOKEN,
+        disable: !env.SENTRY_AUTH_TOKEN,
+        telemetry: false,
+      }),
       VitePWA({
         strategies: 'injectManifest',
         srcDir: 'src',
@@ -206,6 +217,9 @@ export default defineConfig(({ mode }) => {
       }),
     ],
     build: {
+      // Required by @sentry/vite-plugin so it can upload source maps that
+      // Sentry can correlate with minified production stack traces.
+      sourcemap: true,
       rollupOptions: {
         output: {
           manualChunks: {
