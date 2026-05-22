@@ -7,9 +7,31 @@
 // returns false so callers fall back to maxymoScanner.ts.
 
 import { App } from '@capacitor/app';
+import { BackgroundRunner } from '@capacitor/background-runner';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
+
+const RUNNER_LABEL = 'com.delivroom.app.scanner';
+
+/**
+ * Mirror a value into the background runner's KV store so the periodic
+ * runners/maxymo-scan.js can read it. Safe to call when not running on
+ * native — short-circuits silently.
+ */
+async function syncToRunner(key: string, value: string | null): Promise<void> {
+  if (!isNative()) return;
+  try {
+    if (value === null) {
+      // No documented delete; setting to empty string is the workaround
+      await BackgroundRunner.set({ label: RUNNER_LABEL, key, value: '' });
+    } else {
+      await BackgroundRunner.set({ label: RUNNER_LABEL, key, value });
+    }
+  } catch (err) {
+    console.warn('[capacitorScanner] syncToRunner failed', key, err);
+  }
+}
 
 const CONFIG_KEY = 'maxymo-folder-path';
 const SEEN_KEY = 'maxymo-seen-keys';
@@ -32,6 +54,9 @@ export function setConfiguredPath(path: string | null): void {
   } else {
     localStorage.removeItem(CONFIG_KEY);
   }
+  // Also mirror to the background runner's KV so the periodic task can scan
+  // the right folder when fired from a cold start.
+  void syncToRunner('maxymo-folder-path', path);
 }
 
 /**
@@ -167,5 +192,25 @@ export function getSeenKeysNative(): Set<string> {
 
 export function setSeenKeysNative(keys: Set<string>): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(keys)));
+  const serialized = JSON.stringify(Array.from(keys));
+  localStorage.setItem(SEEN_KEY, serialized);
+  // Mirror to the runner KV so the periodic task can dedupe its notifications
+  void syncToRunner('maxymo-seen-keys', serialized);
+}
+
+/**
+ * Kick the runner once after configuration so we don't have to wait the full
+ * 30 min for the first periodic fire. Safe-no-op when not on native.
+ */
+export async function triggerImmediateBackgroundScan(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    await BackgroundRunner.dispatchEvent({
+      label: RUNNER_LABEL,
+      event: 'scheduledScan',
+      details: {},
+    });
+  } catch (err) {
+    console.warn('[capacitorScanner] dispatchEvent failed', err);
+  }
 }

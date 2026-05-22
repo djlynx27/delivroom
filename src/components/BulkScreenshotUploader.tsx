@@ -17,7 +17,7 @@ import {
   registerMaxymoPeriodicSync,
   unregisterMaxymoPeriodicSync,
 } from '@/lib/backgroundSync';
-import { onAppResume } from '@/lib/capacitorScanner';
+import { onAppResume, triggerImmediateBackgroundScan } from '@/lib/capacitorScanner';
 import {
   clearAutoScanConfig,
   configureAutoScan as configureScanner,
@@ -201,6 +201,9 @@ export function BulkScreenshotUploader() {
     const periodicOk = await registerMaxymoPeriodicSync();
     if (kind === 'native') {
       toast.info('Notif natives activées — scan reliable même app fermée');
+      // Kick the background runner once now so we don't wait 30 min for the
+      // first notification cycle.
+      void triggerImmediateBackgroundScan();
     } else if (periodicOk && notifState === 'granted') {
       toast.info('Notif activées — scan opportuniste en background');
     } else if (notifState === 'granted') {
