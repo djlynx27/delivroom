@@ -83,23 +83,47 @@ function getWeatherMeta(code: number): {
   return { icon: '🌥️', description: 'Nuageux', isBadWeather: false };
 }
 
-/** Calculate demand boost points from weather conditions */
-function calcWeatherBoost(precipProb: number, weatherCode: number): number {
+/**
+ * Calculate demand boost points from weather conditions. Mirrors the
+ * Edge-Function-side computeWeatherBoost so the UI badge and the actual
+ * scoring agree. Mr Montreal-calibrated: snow is a 25-30 pt swing, freezing
+ * rain even more, deep cold (-20) is another +15.
+ */
+function calcWeatherBoost(
+  precipProb: number,
+  weatherCode: number,
+  precip: number,
+  temp: number,
+): number {
   let boost = 0;
 
-  // Snow (WMO codes 71-77) → +30
-  if (weatherCode >= 71 && weatherCode <= 77) {
-    return 30;
+  // Severe / dangerous
+  if (weatherCode >= 95) boost += 25;                          // thunderstorm
+  else if (weatherCode >= 85 && weatherCode <= 86) boost += 30; // wet snow showers
+  else if (weatherCode >= 71 && weatherCode <= 77) boost += 25; // snow
+  else if (weatherCode >= 80 && weatherCode <= 82) boost += 15; // rain showers
+  else if (weatherCode >= 61 && weatherCode <= 67) boost += 12; // sustained rain
+  else if (weatherCode >= 51 && weatherCode <= 57) boost += 6;  // drizzle
+  else if (weatherCode >= 45 && weatherCode <= 48) boost += 4;  // fog
+
+  // Precip intensity (current hour)
+  if (precip > 10) boost += 8;
+  else if (precip > 5) boost += 5;
+  else if (precip > 1) boost += 2;
+
+  // Lookahead via probability — if the next hour is very likely wet, pre-boost
+  if (boost === 0) {
+    if (precipProb > 80) boost += 8;
+    else if (precipProb > 60) boost += 4;
   }
 
-  // Precipitation probability based
-  if (precipProb > 80) {
-    boost = 25;
-  } else if (precipProb > 60) {
-    boost = 15;
-  }
+  // Temperature extremes
+  if (temp < -20) boost += 15;
+  else if (temp < -10) boost += 10;
+  else if (temp < 0) boost += 5;
+  else if (temp > 32) boost += 5;
 
-  return boost;
+  return Math.min(boost, 40);
 }
 
 export function useWeather(cityId: string) {
@@ -133,7 +157,12 @@ export function useWeather(cityId: string) {
       }
 
       const meta = getWeatherMeta(currentCode);
-      const demandBoostPoints = calcWeatherBoost(precipProb, currentCode);
+      const demandBoostPoints = calcWeatherBoost(
+        precipProb,
+        currentCode,
+        currentPrecip,
+        currentTemp,
+      );
 
       // Map WMO code to approximate OpenWeatherMap id for backward compat
       let weatherId = 800; // clear

@@ -149,12 +149,35 @@ function computeEventBoost(zone: Zone, activeEvents: Event[]): number {
   return Math.min(boost, 25);
 }
 
+// Aggressive Montreal-tuned weather → demand boost. Calibrated against
+// the qualitative observation that bad weather drives ride volume up
+// sharply (people stop walking + biking + waiting at bus stops).
 function computeWeatherBoost(weather: Weather): number {
-  if (weather.precip > 10) return 10;
-  if (weather.precip > 5) return 8;
-  if (weather.precip > 1) return 4;
-  if (weather.temp < -15) return -3;
-  return 0;
+  let boost = 0;
+  const code = weather.weatherCode;
+
+  // Severe / dangerous — biggest signal
+  if (code >= 95) boost += 25;                  // thunderstorm
+  else if (code >= 85 && code <= 86) boost += 30; // wet snow showers (worst case)
+  else if (code >= 71 && code <= 77) boost += 25; // snow
+  else if (code >= 80 && code <= 82) boost += 15; // rain showers
+  else if (code >= 61 && code <= 67) boost += 12; // sustained rain
+  else if (code >= 51 && code <= 57) boost += 6;  // drizzle
+  else if (code >= 45 && code <= 48) boost += 4;  // fog
+
+  // Stacked precip intensity (orthogonal to the code-based bucket above)
+  if (weather.precip > 10) boost += 8;
+  else if (weather.precip > 5) boost += 5;
+  else if (weather.precip > 1) boost += 2;
+
+  // Temperature extremes — Montreal winters specifically
+  if (weather.temp < -20) boost += 15;
+  else if (weather.temp < -10) boost += 10;
+  else if (weather.temp < 0) boost += 5;
+  else if (weather.temp > 32) boost += 5; // heat humidex
+
+  // Cap total weather contribution
+  return Math.min(boost, 40);
 }
 
 // ── External data fetchers ─────────────────────────────────────────────────────
