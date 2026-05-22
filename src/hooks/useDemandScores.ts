@@ -199,13 +199,17 @@ export function useDemandScores(
   });
   const [now, setNow] = useState(new Date());
 
+  // Tick every 15 s so the "best zone right now" recomputes promptly while
+  // the driver is sitting at a red light. Each tick is dirt cheap — just a
+  // setState that triggers memo recalcs. Battery impact is negligible.
   useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 60_000);
+    const interval = setInterval(() => setNow(new Date()), 15_000);
     return () => clearInterval(interval);
   }, []);
 
-  // Trigger Edge Function when DB scores are absent or older than 35 minutes.
-  // The SQL cron refreshes every 30 min; the Edge Function adds weather + AI.
+  // Trigger Edge Function when DB scores are absent or older than 10 minutes.
+  // The SQL cron refreshes every 10 min; the Edge Function adds weather + AI.
+  // Was 35 min — too stale for a "best zone right now" claim.
   const refreshedRef = useRef<Record<string, string>>({});
   useEffect(() => {
     if (!cityId) return;
@@ -222,7 +226,7 @@ export function useDemandScores(
       dbScores.length === 0 ||
       dbScores.some((s) => {
         const ageMs = now.getTime() - new Date(s.calculated_at).getTime();
-        return ageMs > 35 * 60 * 1000;
+        return ageMs > 10 * 60 * 1000;
       });
 
     if (!scoresAreStale) {

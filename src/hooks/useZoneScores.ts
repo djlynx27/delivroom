@@ -62,7 +62,11 @@ export function useZoneScores(cityId: string) {
       }
       return Array.from(latest.values());
     },
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 30 * 60 * 1000, // poll every 30 min as safety net
+    // 30 s — Realtime usually beats us to the punch, but this catches the
+    // case where the channel temporarily drops (e.g. WebView paused) and
+    // ensures the "best zone right now" never goes stale by more than the
+    // cron cadence (10 min) + this poll.
+    staleTime: 30 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 }

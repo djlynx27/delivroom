@@ -118,9 +118,14 @@ export default function DriveScreen() {
     lng: number;
   } | null>(null);
 
-  // Speed-based activity detection → auto-HUD
+  // Speed-based activity detection → auto-HUD.
+  // hudActive defaults to true so the driver lands directly in driving mode
+  // when the app opens. They can dismiss it if they're sitting at home doing
+  // admin work; the dismissed state is local to this session and not
+  // persisted — every fresh app launch shows the HUD again, which is what
+  // the user asked for.
   const { isInVehicle, speedKmh } = useActivityDetection();
-  const [hudActive, setHudActive] = useState(false);
+  const [hudActive, setHudActive] = useState(true);
   const [hudDismissedManually, setHudDismissedManually] = useState(false);
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const { vibrate } = useHaptics();
