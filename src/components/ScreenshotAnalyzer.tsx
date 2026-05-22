@@ -15,11 +15,13 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useZones } from '@/hooks/useSupabase';
+import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
+import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, Upload } from 'lucide-react';
-import { useState } from 'react';
+import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, ThumbsDown, ThumbsUp, Upload, Zap } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
@@ -38,6 +40,10 @@ interface ExtractedData {
   pickup_zone_name?: string | null;
   dropoff_zone_id?: string | null;
   dropoff_zone_name?: string | null;
+  pickup_time_minutes?: number | null;
+  pickup_distance_km?: number | null;
+  ride_time_minutes?: number | null;
+  ride_distance_km?: number | null;
 }
 
 interface AnalysisResult {
@@ -144,6 +150,38 @@ export function ScreenshotAnalyzer() {
   const [saved, setSaved] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [storedPath, setStoredPath] = useState<string | null>(null);
+
+  // Pull current zone scores so the decision agent can reason about the
+  // strategic value of the dropoff (lands in a hot zone = better ride).
+  // Three city queries because the scanner doesn't know city upfront.
+  const { data: mtlScores = [] } = useZoneScores('mtl');
+  const { data: lvlScores = [] } = useZoneScores('lvl');
+  const { data: lngScores = [] } = useZoneScores('lng');
+  const allScores = useMemo(
+    () => [...mtlScores, ...lvlScores, ...lngScores],
+    [mtlScores, lvlScores, lngScores],
+  );
+
+  const decision: Decision | null = useMemo(() => {
+    if (!result?.extracted_data || result.is_fallback) return null;
+    const d = result.extracted_data;
+    if (!d.earnings || (!d.ride_distance_km && !d.ride_time_minutes)) return null;
+    const dropoffScore = d.dropoff_zone_id
+      ? allScores.find((s) => s.zone_id === d.dropoff_zone_id)?.final_score ?? null
+      : null;
+    const pickupScore = d.pickup_zone_id
+      ? allScores.find((s) => s.zone_id === d.pickup_zone_id)?.final_score ?? null
+      : null;
+    return decideRideOffer({
+      earnings: d.earnings ?? null,
+      pickupTimeMin: d.pickup_time_minutes ?? null,
+      pickupDistKm: d.pickup_distance_km ?? null,
+      rideTimeMin: d.ride_time_minutes ?? null,
+      rideDistKm: d.ride_distance_km ?? null,
+      dropoffZoneScore: dropoffScore,
+      pickupZoneScore: pickupScore,
+    });
+  }, [result, allScores]);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -392,6 +430,68 @@ export function ScreenshotAnalyzer() {
                       )}
                     </div>
                   </div>
+                )}
+              </div>
+            )}
+
+            {/* Decision verdict — TAKE / SKIP / MEH with reasoning */}
+            {decision && (
+              <div
+                className={
+                  decision.verdict === 'take'
+                    ? 'bg-green-500/10 border border-green-500/40 rounded-lg p-3 space-y-2'
+                    : decision.verdict === 'skip'
+                      ? 'bg-red-500/10 border border-red-500/40 rounded-lg p-3 space-y-2'
+                      : 'bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 space-y-2'
+                }
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    {decision.verdict === 'take' && <ThumbsUp className="w-4 h-4 text-green-400" />}
+                    {decision.verdict === 'skip' && <ThumbsDown className="w-4 h-4 text-red-400" />}
+                    {decision.verdict === 'meh' && <Zap className="w-4 h-4 text-amber-400" />}
+                    <span
+                      className={
+                        decision.verdict === 'take'
+                          ? 'text-sm font-bold text-green-400 uppercase'
+                          : decision.verdict === 'skip'
+                            ? 'text-sm font-bold text-red-400 uppercase'
+                            : 'text-sm font-bold text-amber-400 uppercase'
+                      }
+                    >
+                      {decision.verdict === 'take' ? 'Accepte' : decision.verdict === 'skip' ? 'Refuse' : 'Au feeling'}
+                    </span>
+                  </div>
+                  <Badge variant="outline" className="text-[10px]">
+                    confiance {decision.confidence}%
+                  </Badge>
+                </div>
+                <div className="grid grid-cols-3 gap-1 text-[10px]">
+                  {decision.metrics.dollarsPerKm != null && (
+                    <div className="text-center">
+                      <p className="text-muted-foreground">$/km</p>
+                      <p className="font-mono font-medium">${decision.metrics.dollarsPerKm.toFixed(2)}</p>
+                    </div>
+                  )}
+                  {decision.metrics.effectiveHourlyRate != null && (
+                    <div className="text-center">
+                      <p className="text-muted-foreground">$/h eff.</p>
+                      <p className="font-mono font-medium">${decision.metrics.effectiveHourlyRate.toFixed(0)}</p>
+                    </div>
+                  )}
+                  {decision.metrics.paidHourlyRate != null && (
+                    <div className="text-center">
+                      <p className="text-muted-foreground">$/h payé</p>
+                      <p className="font-mono font-medium">${decision.metrics.paidHourlyRate.toFixed(0)}</p>
+                    </div>
+                  )}
+                </div>
+                {decision.reasoning.length > 0 && (
+                  <ul className="text-[10px] text-muted-foreground space-y-0.5 pl-1">
+                    {decision.reasoning.map((r, i) => (
+                      <li key={i}>• {r}</li>
+                    ))}
+                  </ul>
                 )}
               </div>
             )}

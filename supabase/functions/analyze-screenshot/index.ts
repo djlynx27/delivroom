@@ -28,6 +28,14 @@ interface ExtractedData {
   pickup_zone_name?: string | null;
   dropoff_zone_id?: string | null;
   dropoff_zone_name?: string | null;
+  // Ride-offer decomposition for the accept/skip decision agent.
+  // Lyft / Uber driver cards show two separate legs: the deadhead to the
+  // passenger (pickup) and the actual ride. Splitting them out lets us
+  // compute the real $/min instead of averaging dead time + paid time.
+  pickup_time_minutes?: number | null;
+  pickup_distance_km?: number | null;
+  ride_time_minutes?: number | null;
+  ride_distance_km?: number | null;
 }
 
 interface AnalysisResult {
@@ -544,7 +552,11 @@ Extract all useful information from this image and return ONLY a raw JSON object
     "pickup_address": string|null,
     "dropoff_address": string|null,
     "pickup_zone_id": string|null,
-    "dropoff_zone_id": string|null
+    "dropoff_zone_id": string|null,
+    "pickup_time_minutes": number|null,
+    "pickup_distance_km": number|null,
+    "ride_time_minutes": number|null,
+    "ride_distance_km": number|null
   },
   "matched_zone_id": string|null
 }
@@ -552,6 +564,8 @@ Extract all useful information from this image and return ONLY a raw JSON object
 Rules:
 - matched_zone_id: read any text/labels visible on the image (street names, borough names, neighbourhoods, landmarks, transit stations, bridges). If you can locate the screenshot inside one of the catalog entries above, return its EXACT id from the catalog. If unsure, return null — DO NOT invent ids.
 - pickup_address / dropoff_address: copy the addresses verbatim from the image if present (Lyft/Uber/DoorDash trip cards usually show origin near the green/pickup pin and destination near the red/drop pin). Otherwise null.
+- pickup_time_minutes / pickup_distance_km: extract the "X mins · Y km" line associated with the pickup pin (typically the FIRST leg before the dropoff). Lyft Driver shows it as e.g. "2 mins · 0.5 km" right under the pickup address.
+- ride_time_minutes / ride_distance_km: extract the "X mins · Y km" line associated with the dropoff pin (the SECOND leg, the actual paid trip). E.g. "8 mins · 4.2 km" right under the dropoff address.
 - pickup_zone_id / dropoff_zone_id: match each address to the closest entry in the catalog above. Return its EXACT id. If you cannot confidently match, return null — DO NOT invent ids.
 - zones_detected: list visible demand zones/areas in the image (empty array if none)
 - recommended_target: "demand" for heatmaps/zone screenshots, "shift" for earnings/trip summaries, "mileage" for distance/mileage reports, "daily" for daily summaries, "profit" for profit/loss screens
