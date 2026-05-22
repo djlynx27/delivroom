@@ -1,5 +1,6 @@
 import { CitySelect } from '@/components/CitySelect';
 import { DemandBadge } from '@/components/DemandBadge';
+import { HourlyWeatherStrip } from '@/components/HourlyWeatherStrip';
 import { NavigationSheet } from '@/components/NavigationSheet';
 import { ShiftOptimizer } from '@/components/ShiftOptimizer';
 import { Input } from '@/components/ui/input';
@@ -241,6 +242,8 @@ export default function PlanningScreen() {
             className="bg-card border-border font-body text-[14px] h-11"
           />
         </div>
+
+        <HourlyWeatherStrip cityId={cityId} hours={18} />
 
         <div className="grid grid-cols-2 gap-2">
           <Select onValueChange={scrollAndHighlight}>

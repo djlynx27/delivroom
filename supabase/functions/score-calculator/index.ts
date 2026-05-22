@@ -44,6 +44,7 @@ interface Zone {
   longitude: number;
   base_score: number | null;
   current_score: number | null;
+  city_id: string | null;
 }
 
 interface Event {
@@ -62,6 +63,16 @@ interface Weather {
   precip: number;
   weatherCode: number;
   description: string;
+  /** Visibility in metres — low visibility (fog, heavy snow) reduces driving alternatives */
+  visibility: number;
+  /** Snow depth in cm — accumulated snow on the ground */
+  snowDepth: number;
+  /** Gust speed in km/h — extreme winds correlate with storm advisories */
+  windGust: number;
+  /** Apparent / feels-like temperature in °C */
+  feelsLike: number;
+  /** Relative humidity 0-100 — drives the heat humidex perception */
+  humidity: number;
 }
 
 interface ScoreRow {
@@ -170,36 +181,139 @@ function computeWeatherBoost(weather: Weather): number {
   else if (weather.precip > 5) boost += 5;
   else if (weather.precip > 1) boost += 2;
 
-  // Temperature extremes — Montreal winters specifically
-  if (weather.temp < -20) boost += 15;
-  else if (weather.temp < -10) boost += 10;
-  else if (weather.temp < 0) boost += 5;
-  else if (weather.temp > 32) boost += 5; // heat humidex
+  // Snow accumulation on the ground — boosts demand even AFTER it stops
+  // falling because sidewalks stay treacherous. 10cm+ is a storm day.
+  if (weather.snowDepth >= 20) boost += 12;
+  else if (weather.snowDepth >= 10) boost += 8;
+  else if (weather.snowDepth >= 5) boost += 4;
+
+  // Reduced visibility (heavy snow / dense fog) — people stop driving
+  if (weather.visibility < 500) boost += 10;
+  else if (weather.visibility < 2000) boost += 5;
+
+  // Wind gusts >60 km/h indicate severe weather advisories
+  if (weather.windGust > 80) boost += 8;
+  else if (weather.windGust > 60) boost += 4;
+
+  // Temperature extremes — use feels-like for accuracy (wind chill matters)
+  const feels = weather.feelsLike;
+  if (feels < -25) boost += 18;
+  else if (feels < -15) boost += 12;
+  else if (feels < -5) boost += 6;
+  else if (feels > 34) boost += 8;  // dangerous humidex
+  else if (feels > 30) boost += 4;
 
   // Cap total weather contribution
-  return Math.min(boost, 40);
+  return Math.min(boost, 50);
+}
+
+/**
+ * Type-aware multiplier applied AFTER the base weather boost. Captures the
+ * fact that not every zone reacts to weather identically:
+ * - Airports spike when flights are delayed (snow / thunderstorm).
+ * - Transit hubs spike in snow (people abandon biking / scooters for transit
+ *   and then taxi the last mile).
+ * - University zones LOSE traffic in extreme heat (students leave campus).
+ * - Nightlife zones spike in rain (less walking between bars).
+ */
+function computeWeatherZoneMultiplier(weather: Weather, zoneType: string | null): number {
+  if (!zoneType) return 1.0;
+  const code = weather.weatherCode;
+  const isSnow = code >= 71 && code <= 77 || code >= 85 && code <= 86;
+  const isStorm = code >= 95 || weather.windGust > 60;
+  const isRain = code >= 51 && code <= 67 || code >= 80 && code <= 82;
+
+  // Airport: flight delays multiply demand
+  if (zoneType === 'aéroport') {
+    if (isSnow || isStorm) return 1.35;
+    if (isRain) return 1.15;
+  }
+
+  // Transport / métro: snow abandons bikes/scooters → taxi to last mile
+  if (zoneType === 'transport' || zoneType === 'métro') {
+    if (isSnow) return 1.20;
+    if (isRain) return 1.08;
+  }
+
+  // Nightlife: rain = less walking between venues
+  if (zoneType === 'nightlife' && (isRain || isSnow)) return 1.15;
+
+  // University: extreme heat empties campuses
+  if (zoneType === 'université' && weather.feelsLike > 32) return 0.92;
+
+  // Hospital / medical: snow boosts non-emergency rides
+  if (zoneType === 'médical' && isSnow) return 1.10;
+
+  return 1.0;
 }
 
 // ── External data fetchers ─────────────────────────────────────────────────────
 
+function fallbackWeather(): Weather {
+  return {
+    temp: 5, precip: 0, weatherCode: 0, description: 'Inconnu',
+    visibility: 20000, snowDepth: 0, windGust: 0, feelsLike: 5, humidity: 50,
+  };
+}
+
+/**
+ * Lookup of city_id → (lat, lon) used to fetch per-city weather. Coordinates
+ * picked from the geographic centroid of each city so the weather feed
+ * matches the bulk of zones served from that city.
+ */
+const CITY_CENTROIDS: Record<string, { lat: number; lon: number }> = {
+  mtl: { lat: 45.5017, lon: -73.5673 },   // downtown Montréal
+  lvl: { lat: 45.5559, lon: -73.7217 },   // central Laval
+  lng: { lat: 45.5311, lon: -73.5181 },   // central Longueuil
+  trb: { lat: 45.6995, lon: -73.6447 },   // Terrebonne
+  sth: { lat: 45.6398, lon: -73.8499 },   // Sainte-Thérèse
+  blv: { lat: 45.6726, lon: -73.8780 },   // Blainville
+  bsb: { lat: 45.6173, lon: -73.8350 },   // Boisbriand
+  rsm: { lat: 45.6321, lon: -73.7892 },   // Rosemère
+  bdf: { lat: 45.6695, lon: -73.7506 },   // Bois-des-Filion
+};
+
+async function fetchWeatherForCities(zones: Zone[]): Promise<Map<string, Weather>> {
+  const cityIds = new Set<string>();
+  for (const z of zones) {
+    if (z.city_id && CITY_CENTROIDS[z.city_id]) cityIds.add(z.city_id);
+  }
+  const entries = await Promise.all(
+    Array.from(cityIds).map(async (cityId) => {
+      const c = CITY_CENTROIDS[cityId];
+      const w = await fetchWeather(c.lat, c.lon);
+      return [cityId, w] as const;
+    }),
+  );
+  return new Map(entries);
+}
+
 async function fetchWeather(lat: number, lon: number): Promise<Weather> {
+  // Pull a richer signal set than the v1: visibility (fog detection),
+  // snow depth (accumulation matters beyond hourly precip), wind gusts
+  // (storm advisory proxy), apparent_temperature (humidex / wind chill),
+  // and relative humidity (heat discomfort multiplier).
   const url =
     `https://api.open-meteo.com/v1/forecast` +
     `?latitude=${lat}&longitude=${lon}` +
-    `&current=temperature_2m,precipitation,weather_code` +
+    `&current=temperature_2m,apparent_temperature,relative_humidity_2m,` +
+    `precipitation,weather_code,visibility,snow_depth,wind_gusts_10m` +
     `&timezone=America%2FToronto`;
 
   const res = await fetch(url);
-  if (!res.ok) {
-    return { temp: 5, precip: 0, weatherCode: 0, description: 'Inconnu' };
-  }
+  if (!res.ok) return fallbackWeather();
   const data = await res.json();
   const current = data?.current ?? {};
   return {
     temp: current.temperature_2m ?? 5,
+    feelsLike: current.apparent_temperature ?? current.temperature_2m ?? 5,
+    humidity: current.relative_humidity_2m ?? 50,
     precip: current.precipitation ?? 0,
     weatherCode: current.weather_code ?? 0,
     description: weatherCodeToDescription(current.weather_code ?? 0),
+    visibility: current.visibility ?? 20000,
+    snowDepth: (current.snow_depth ?? 0) * 100, // m → cm
+    windGust: current.wind_gusts_10m ?? 0,
   };
 }
 
@@ -318,11 +432,11 @@ serve(async (req) => {
       // No body or invalid JSON — score all zones
     }
 
-    // 1. Fetch zones
+    // 1. Fetch zones (with city_id so we can attach city-specific weather)
     let zonesQuery = supabase
       .from('zones')
       .select(
-        'id, name, type, territory, latitude, longitude, base_score, current_score'
+        'id, name, type, territory, latitude, longitude, base_score, current_score, city_id'
       );
     if (zoneIds) {
       zonesQuery = zonesQuery.in('id', zoneIds);
@@ -337,8 +451,15 @@ serve(async (req) => {
       );
     }
 
-    // 2. Fetch weather for Montreal (centre)
-    const weather = await fetchWeather(45.5017, -73.5673);
+    // 2. Fetch weather PER CITY in parallel. The territory spans Montréal +
+    //    Laval + Rive-Sud + Couronne Nord — close enough that the weather is
+    //    usually correlated, but a Laval snowstorm with clear MTL is a real
+    //    pattern (lake effect / corridor). Per-city fetch costs one extra
+    //    HTTP call each, all under the Open-Meteo free tier.
+    const weatherByCity = await fetchWeatherForCities(zones as Zone[]);
+    // Fallback to MTL centre weather when a zone has no city_id
+    const fallbackCityWeather = weatherByCity.get('mtl')
+      ?? (await fetchWeather(45.5017, -73.5673));
 
     // 3. Fetch active events from DB
     const now = new Date();
@@ -352,14 +473,21 @@ serve(async (req) => {
 
     const events: Event[] = (activeEvents ?? []) as Event[];
 
-    // 4. Compute baseline scores for all zones
+    // 4. Compute baseline scores for all zones. Each zone uses ITS city's
+    //    weather, scaled by a zone-type-aware multiplier (airport spikes
+    //    in storms, university dips in extreme heat, etc.).
     const { timeFactor, dayFactor } = getTimeDayFactors(now);
-    const weatherBoostVal = computeWeatherBoost(weather);
 
     const computedScores = new Map<string, number>();
     const scoreRows: ScoreRow[] = [];
 
     for (const zone of zones as Zone[]) {
+      const zoneWeather =
+        (zone.city_id && weatherByCity.get(zone.city_id)) || fallbackCityWeather;
+      const baseWeatherBoost = computeWeatherBoost(zoneWeather);
+      const typeMultiplier = computeWeatherZoneMultiplier(zoneWeather, zone.type);
+      const weatherBoostVal = Math.round(baseWeatherBoost * typeMultiplier);
+
       const baseScore = zone.base_score ?? 50;
       const rawScore = baseScore * timeFactor * dayFactor;
       const clampedScore = Math.min(
@@ -389,7 +517,7 @@ serve(async (req) => {
 
     const geminiScores = await geminiEnhanceScores(
       zones as Zone[],
-      weather,
+      fallbackCityWeather,
       now,
       computedScores
     );
@@ -489,9 +617,15 @@ serve(async (req) => {
         aiEnhanced: geminiScores !== null,
         firewall: firewallStats,
         weather: {
-          temp: weather.temp,
-          precip: weather.precip,
-          description: weather.description,
+          temp: fallbackCityWeather.temp,
+          precip: fallbackCityWeather.precip,
+          description: fallbackCityWeather.description,
+          perCity: Object.fromEntries(
+            Array.from(weatherByCity.entries()).map(([cityId, w]) => [
+              cityId,
+              { temp: w.temp, code: w.weatherCode, snow: w.snowDepth },
+            ]),
+          ),
         },
         activeEvents: events.length,
       }),

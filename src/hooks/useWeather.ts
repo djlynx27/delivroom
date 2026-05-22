@@ -126,6 +126,75 @@ function calcWeatherBoost(
   return Math.min(boost, 40);
 }
 
+export interface HourlyForecastPoint {
+  /** ISO 8601 local hour, e.g. "2026-05-22T18:00" */
+  time: string;
+  /** Display label "18h" */
+  label: string;
+  temp: number;
+  precipProbability: number;
+  precipitation: number;
+  weatherCode: number;
+  icon: string;
+  /** Computed demand boost for THIS hour (same formula as the current-hour boost) */
+  demandBoostPoints: number;
+}
+
+export function useHourlyForecast(cityId: string, hours = 24) {
+  return useQuery<HourlyForecastPoint[]>({
+    queryKey: ['weather-hourly', cityId, hours],
+    queryFn: async () => {
+      const coords = cityCoords[cityId];
+      if (!coords) throw new Error('Unknown city');
+      const url =
+        `https://api.open-meteo.com/v1/forecast` +
+        `?latitude=${coords.lat}&longitude=${coords.lon}` +
+        `&hourly=temperature_2m,precipitation_probability,precipitation,weather_code` +
+        `&timezone=${WEATHER_TIMEZONE}&forecast_days=2`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Open-Meteo hourly fetch failed');
+      const data = await res.json();
+
+      const times: string[] = data.hourly.time;
+      const temps: number[] = data.hourly.temperature_2m;
+      const probs: number[] = data.hourly.precipitation_probability;
+      const precips: number[] = data.hourly.precipitation;
+      const codes: number[] = data.hourly.weather_code;
+
+      // Start at the current hour and take the next `hours` slots
+      const now = new Date();
+      const currentKey = formatHourlyKey(now, WEATHER_TIMEZONE);
+      let startIndex = times.findIndex((t) => t === currentKey);
+      if (startIndex === -1) startIndex = 0;
+
+      const out: HourlyForecastPoint[] = [];
+      for (let i = startIndex; i < startIndex + hours && i < times.length; i++) {
+        const code = codes[i] ?? 0;
+        const meta = getWeatherMeta(code);
+        const hh = parseInt(times[i].slice(11, 13), 10);
+        out.push({
+          time: times[i],
+          label: `${hh}h`,
+          temp: Math.round(temps[i] ?? 0),
+          precipProbability: probs[i] ?? 0,
+          precipitation: precips[i] ?? 0,
+          weatherCode: code,
+          icon: meta.icon,
+          demandBoostPoints: calcWeatherBoost(
+            probs[i] ?? 0,
+            code,
+            precips[i] ?? 0,
+            temps[i] ?? 0,
+          ),
+        });
+      }
+      return out;
+    },
+    staleTime: 10 * 60 * 1000,
+    refetchInterval: 30 * 60 * 1000,
+  });
+}
+
 export function useWeather(cityId: string) {
   return useQuery<WeatherData>({
     queryKey: ['weather', cityId],
