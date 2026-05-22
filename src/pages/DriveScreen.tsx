@@ -6,6 +6,7 @@ import { DrivingHUD } from '@/components/DrivingHUD';
 import { GoogleMapsIcon, WazeIcon } from '@/components/NavIcons';
 import { NavigationSheet } from '@/components/NavigationSheet';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
+import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
 import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
 import { Button } from '@/components/ui/button';
@@ -331,6 +332,11 @@ export default function DriveScreen() {
       className="flex flex-col h-full pb-36 bg-background text-foreground overflow-y-auto"
       data-mode={driverMode}
     >
+      {/* Multi-platform online tracker + switch suggestions */}
+      <div className="px-4 mt-2">
+        <PlatformSwitchBanner />
+      </div>
+
       {/* Mode filter tabs — colour-coded per compass doc (blue=rideshare, amber=delivery) */}
       <div className="px-4 mt-2">
         <div className="flex rounded-xl border border-border bg-muted/30 p-1 gap-1">

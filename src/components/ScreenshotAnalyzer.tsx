@@ -17,6 +17,7 @@ import {
 import { useZones } from '@/hooks/useSupabase';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
+import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
@@ -278,6 +279,9 @@ export function ScreenshotAnalyzer() {
       });
       if (error) throw error;
       setSaved(true);
+      // Reset the idle clock for this platform so the switch-banner stops
+      // suggesting alternatives until this driver goes quiet again.
+      markRide(platform as IdlePlatform);
       qc.invalidateQueries({ queryKey: ['trips-feed'] });
       qc.invalidateQueries({ queryKey: ['trip-history'] });
       toast.success('Course sauvegardée — le moteur d\'apprentissage va s\'améliorer');
