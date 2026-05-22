@@ -1,0 +1,185 @@
+name: Build Capacitor APK (native)
+
+# Parallel pipeline to build-apk.yml. The TWA build (Bubblewrap) is the
+# Play-Store-friendly distribution; this Capacitor build is the direct-install
+# variant that ships native plugins (Filesystem, LocalNotifications, etc.)
+# for the auto-scan + reliable background workflow.
+#
+# Triggers on tags suffixed with `-cap` (e.g. v1.2.0-cap) so the TWA workflow
+# and this one don't both fire on the same tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version (ex: 1.2.0)'
+        required: false
+        default: '1.2.0'
+      version_code:
+        description: 'Version code entier (ex: 4)'
+        required: false
+        default: '4'
+
+  push:
+    tags:
+      - 'v*-cap'
+
+jobs:
+  build-cap-apk:
+    name: Build & Sign Capacitor APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: Install npm deps
+        run: npm ci --no-audit --no-fund
+
+      # Resolve version / version code (input wins, then tag, then defaults)
+      - name: Resolve version
+        id: ver
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          VERSION_CODE="${{ github.event.inputs.version_code }}"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            VERSION="${{ github.ref_name }}"
+            VERSION="${VERSION#v}"
+            VERSION="${VERSION%-cap}"
+            VERSION_CODE=$(git rev-list --count HEAD)
+          fi
+          VERSION="${VERSION:-1.2.0}"
+          VERSION_CODE="${VERSION_CODE:-1}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          echo "Resolved: $VERSION ($VERSION_CODE)"
+
+      # Patch Android gradle with version + version code. Capacitor's
+      # android/app/build.gradle has versionName + versionCode fields we want
+      # to keep in sync with the release tag.
+      - name: Patch Android version
+        run: |
+          sed -i "s/versionCode .*/versionCode ${{ steps.ver.outputs.version_code }}/" android/app/build.gradle
+          sed -i "s/versionName .*/versionName \"${{ steps.ver.outputs.version }}\"/" android/app/build.gradle
+          grep -E "versionCode|versionName" android/app/build.gradle
+
+      # Vite production build → dist/, then sync into the Android assets
+      - name: Build web bundle
+        env:
+          # Same env vars the Vercel build uses so Sentry source maps and DSN
+          # are baked into the bundle.
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_MAPBOX_TOKEN: ${{ secrets.VITE_MAPBOX_TOKEN }}
+          VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: hustle-go-media
+          SENTRY_PROJECT: delivroom
+        run: |
+          npm run build
+          npx cap sync android
+
+      # Restore signing keystore from base64 secret. Use the same keystore as
+      # the TWA build so the user can sideload over an existing v1.x install
+      # if they ever want to migrate to the same packageId in the future.
+      - name: Restore keystore
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/delivroom.keystore
+          echo "Keystore restored ($(wc -c < android/app/delivroom.keystore) bytes)"
+
+      # Inject signing config into Gradle. The Capacitor android/ project
+      # doesn't ship a signingConfigs block by default — we add it on the fly
+      # so production builds are signed.
+      - name: Configure signing
+        run: |
+          cat >> android/app/build.gradle <<'EOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file('delivroom.keystore')
+                      storePassword System.getenv('KEYSTORE_PASSWORD')
+                      keyAlias 'delivroom'
+                      keyPassword System.getenv('KEY_PASSWORD')
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+
+      - name: Build APK + AAB
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_ALIAS_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease bundleRelease
+          ls -la app/build/outputs/apk/release/ app/build/outputs/bundle/release/
+
+      - name: Copy artifacts to repo root
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk delivroom-capacitor-release.apk
+          cp android/app/build/outputs/bundle/release/app-release.aab delivroom-capacitor-release.aab
+          ls -la delivroom-capacitor-*
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: delivroom-capacitor-apk
+          path: |
+            delivroom-capacitor-release.apk
+            delivroom-capacitor-release.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
+        with:
+          name: 'Delivroom Capacitor ${{ github.ref_name }}'
+          body: |
+            ## Delivroom Capacitor ${{ github.ref_name }}
+
+            Build native (Capacitor) — distinct du TWA Bubblewrap.
+
+            ### Pourquoi cette version
+            - Filesystem natif sans ambient permission decay
+            - Local notifications système (lockscreen, tray)
+            - Foundations pour vrai background scan reliable
+            - PackageId : `com.delivroom.app` (distinct du TWA `app.delivroom.driver`)
+
+            ### Installation
+            1. Télécharger `delivroom-capacitor-release.apk`
+            2. Activer "Sources inconnues" sur Android
+            3. Installer en parallèle du TWA si tu veux comparer
+          files: |
+            delivroom-capacitor-release.apk
+            delivroom-capacitor-release.aab
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
