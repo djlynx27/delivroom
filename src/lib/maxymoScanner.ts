@@ -14,6 +14,19 @@
 const DB_NAME = 'delivroom-folder-handle';
 const STORE = 'handles';
 const HANDLE_KEY = 'maxymo-folder';
+const SEEN_KEY = 'seen-file-keys';
+
+export const MAXYMO_SYNC_TAG = 'maxymo-scan';
+
+/**
+ * Stable identifier for a file, used to diff scan results across runs.
+ * lastModified + size + name is unique enough for the folder-scan use case
+ * (a duplicate would either really BE a duplicate, or two distinct files
+ * with literally identical name + size + timestamp which is implausible).
+ */
+export function fileKey(file: File | { name: string; size: number; lastModified: number }): string {
+  return `${file.name}|${file.size}|${file.lastModified}`;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -112,6 +125,43 @@ export async function ensureReadPermission(
   if (!promptIfNeeded || !h.requestPermission) return false;
   const after = await h.requestPermission({ mode: 'read' });
   return after === 'granted';
+}
+
+/**
+ * Read the set of file keys we've already notified the user about. Used by
+ * the periodicsync handler to avoid re-notifying the same screenshots after
+ * every scan.
+ */
+export async function getSeenKeys(): Promise<Set<string>> {
+  try {
+    const db = await openDb();
+    const keys = await new Promise<string[]>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(SEEN_KEY);
+      req.onsuccess = () => resolve((req.result as string[] | undefined) ?? []);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    return new Set(keys);
+  } catch (err) {
+    console.error('[maxymoScanner] getSeenKeys failed:', err);
+    return new Set();
+  }
+}
+
+export async function setSeenKeys(keys: Set<string>): Promise<void> {
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).put(Array.from(keys), SEEN_KEY);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch (err) {
+    console.error('[maxymoScanner] setSeenKeys failed:', err);
+  }
 }
 
 /**

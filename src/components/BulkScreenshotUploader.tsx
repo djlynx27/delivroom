@@ -13,6 +13,11 @@ import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedu
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import {
+  ensureNotificationPermission,
+  registerMaxymoPeriodicSync,
+  unregisterMaxymoPeriodicSync,
+} from '@/lib/backgroundSync';
+import {
   ensureReadPermission,
   getStoredHandle,
   isFolderApiSupported,
@@ -133,18 +138,34 @@ export function BulkScreenshotUploader() {
   // session. If yes AND the browser still grants us read permission silently,
   // run an auto-scan. If permission is in 'prompt' state we wait for a user
   // gesture (the "Rescanner" button) — browsers refuse to prompt without one.
+  // Also re-scan when the document becomes visible again (user came back from
+  // multitasking) so freshly captured Maxymo screenshots show up immediately.
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+
+    async function attemptScan(silent: boolean) {
       const handle = await getStoredHandle();
       if (cancelled || !handle) return;
       setAutoScanConfigured(true);
       const ok = await ensureReadPermission(handle, false);
       if (ok && !cancelled) {
-        await runAutoScan(handle, { silent: true });
+        await runAutoScan(handle, { silent });
       }
-    })();
-    return () => { cancelled = true; };
+    }
+
+    void attemptScan(true);
+
+    function onVisibility() {
+      if (document.visibilityState === 'visible') {
+        void attemptScan(true);
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -154,6 +175,16 @@ export function BulkScreenshotUploader() {
     setAutoScanConfigured(true);
     toast.success('Dossier configuré pour l\'auto-scan');
     await runAutoScan(handle, { silent: false });
+
+    // Opt in to background scan + notifications. Both calls are no-op safe
+    // on browsers/permissions that don't support them.
+    const notifState = await ensureNotificationPermission();
+    const periodicOk = await registerMaxymoPeriodicSync();
+    if (periodicOk && notifState === 'granted') {
+      toast.info('Tu recevras une notification quand de nouveaux Maxymo seront détectés');
+    } else if (notifState === 'granted') {
+      toast.info('Background sync non supporté — scan opportuniste à chaque retour dans l\'app');
+    }
   }
 
   async function rescan() {
@@ -169,6 +200,7 @@ export function BulkScreenshotUploader() {
 
   async function disableAutoScan() {
     await clearStoredHandle();
+    await unregisterMaxymoPeriodicSync();
     setAutoScanConfigured(false);
     toast.info('Auto-scan désactivé');
   }
@@ -194,20 +226,25 @@ export function BulkScreenshotUploader() {
     }
   }
 
-  // When the page loads via the Web Share Target redirect (?from=share),
-  // pull every batch the Service Worker stashed into IDB and pre-fill the
-  // uploader with those files. The query param is then stripped so a refresh
-  // doesn't re-trigger the drain.
+  // Handle the two ?from=… deep-link entry points: ?from=share is the SW
+  // Web Share Target redirect (files in IDB), ?from=auto-scan is the periodic
+  // notification click (auto-scan effect above takes care of the actual scan,
+  // we just toast here to acknowledge the entry).
   useEffect(() => {
-    if (searchParams.get('from') !== 'share') return;
+    const from = searchParams.get('from');
+    if (from !== 'share' && from !== 'auto-scan') return;
     let cancelled = false;
     void (async () => {
-      const sharedFiles = await drainSharedFiles();
-      if (cancelled) return;
-      if (sharedFiles.length) {
-        setFromShare(true);
-        ingest(sharedFiles, { fromFolder: false });
-        toast.success(`${sharedFiles.length} screenshot(s) reçu(s) depuis la galerie`);
+      if (from === 'share') {
+        const sharedFiles = await drainSharedFiles();
+        if (cancelled) return;
+        if (sharedFiles.length) {
+          setFromShare(true);
+          ingest(sharedFiles, { fromFolder: false });
+          toast.success(`${sharedFiles.length} screenshot(s) reçu(s) depuis la galerie`);
+        }
+      } else if (from === 'auto-scan') {
+        toast.info('Nouveau lot Maxymo détecté en arrière-plan');
       }
       searchParams.delete('from');
       setSearchParams(searchParams, { replace: true });
