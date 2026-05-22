@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 /**
  * context-embeddings — Edge Function Delivroom
@@ -229,6 +230,7 @@ serve(async (req: Request) => {
     });
   } catch (err) {
     console.error('context-embeddings error:', err);
+    captureEdgeException(err, 'context-embeddings', { url: req.url, method: req.method });
     return jsonResponse({ error: String(err) }, 500);
   }
 });

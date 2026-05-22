@@ -8,15 +8,6 @@ import App from './App.tsx';
 
 const SENTRY_DSN = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 
-// Diagnostic — visible in browser console so we can confirm the build picked
-// up the env var. Logs the first 30 chars only so the full DSN isn't dumped
-// to the console on every page load.
-if (SENTRY_DSN) {
-  console.info('[Sentry] init with DSN:', SENTRY_DSN.slice(0, 30) + '…');
-} else {
-  console.warn('[Sentry] VITE_SENTRY_DSN missing at build time — error tracking disabled');
-}
-
 if (SENTRY_DSN) {
   Sentry.init({
     dsn: SENTRY_DSN,

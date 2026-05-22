@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 /**
  * surge-detector — Edge Function Delivroom
@@ -276,6 +277,7 @@ serve(async (req: Request) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[surge-detector]', message);
+    captureEdgeException(err, 'surge-detector', { url: req.url, method: req.method });
     return new Response(JSON.stringify({ ok: false, error: message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

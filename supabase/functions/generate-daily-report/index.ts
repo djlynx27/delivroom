@@ -6,6 +6,7 @@ import {
   sumTrackedSessionHours,
   sumTrackedSessionRides,
 } from './reportMetrics.ts';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -200,6 +201,7 @@ Réponds UNIQUEMENT avec la recommandation, pas d'explication.`;
     );
   } catch (err) {
     console.error('generate-daily-report error:', err);
+    captureEdgeException(err, 'generate-daily-report', { url: req.url, method: req.method });
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

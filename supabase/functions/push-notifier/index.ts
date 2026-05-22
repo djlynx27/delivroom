@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.57.4';
 import webpush from 'npm:web-push@3.6.7';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -127,6 +128,7 @@ serve(async (req) => {
     });
   } catch (error) {
     console.error('push-notifier error:', error);
+    captureEdgeException(error, 'push-notifier', { url: req.url, method: req.method });
     const message = error instanceof Error ? error.message : 'Unknown error';
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

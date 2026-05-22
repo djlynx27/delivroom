@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -102,6 +103,10 @@ serve(async (req) => {
     return await handleRequest(req);
   } catch (err) {
     console.error('analyze-screenshot error:', err);
+    captureEdgeException(err, 'analyze-screenshot', {
+      url: req.url,
+      method: req.method,
+    });
     return new Response(JSON.stringify({ error: String(err) }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

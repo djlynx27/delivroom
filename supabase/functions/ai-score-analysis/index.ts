@@ -20,6 +20,7 @@
 
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { captureEdgeException } from '../_shared/sentry.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -293,6 +294,7 @@ Réponds UNIQUEMENT avec un JSON valide sans markdown:
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('ai-score-analysis error:', message);
+    captureEdgeException(err, 'ai-score-analysis', { url: req.url, method: req.method });
     return new Response(JSON.stringify({ error: message }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       status: 500,
