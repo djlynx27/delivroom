@@ -20,6 +20,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
+import { recordRide as shiftRecordRide } from '@/lib/shiftTracker';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, ThumbsDown, ThumbsUp, Upload, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -282,6 +283,17 @@ export function ScreenshotAnalyzer() {
       // Reset the idle clock for this platform so the switch-banner stops
       // suggesting alternatives until this driver goes quiet again.
       markRide(platform as IdlePlatform);
+      // Also tally this ride into the live shift dashboard so the $/h
+      // updates immediately on the DriveScreen.
+      if (earnings) {
+        shiftRecordRide({
+          fare: earnings,
+          rideKm: distance_km ?? null,
+          rideMin: result.extracted_data?.ride_time_minutes ?? null,
+          platform,
+        });
+        window.dispatchEvent(new CustomEvent('delivroom:shift-updated'));
+      }
       qc.invalidateQueries({ queryKey: ['trips-feed'] });
       qc.invalidateQueries({ queryKey: ['trip-history'] });
       toast.success('Course sauvegardée — le moteur d\'apprentissage va s\'améliorer');

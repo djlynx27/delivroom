@@ -7,6 +7,8 @@ import { GoogleMapsIcon, WazeIcon } from '@/components/NavIcons';
 import { NavigationSheet } from '@/components/NavigationSheet';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
 import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
+import { QuickDecideWidget } from '@/components/QuickDecideWidget';
+import { ShiftTally } from '@/components/ShiftTally';
 import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
 import { Button } from '@/components/ui/button';
@@ -332,6 +334,18 @@ export default function DriveScreen() {
       className="flex flex-col h-full pb-36 bg-background text-foreground overflow-y-auto"
       data-mode={driverMode}
     >
+      {/* Shift tally — running $/h based on actual fares logged today */}
+      <div className="px-4 mt-2">
+        <ShiftTally />
+      </div>
+
+      {/* Quick-decide widget — the headline tool for hands-busy drivers.
+          Sits near the top so it's reachable with a thumb without
+          scrolling. */}
+      <div className="px-4 mt-2">
+        <QuickDecideWidget />
+      </div>
+
       {/* Multi-platform online tracker + switch suggestions */}
       <div className="px-4 mt-2">
         <PlatformSwitchBanner />
