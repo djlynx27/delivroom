@@ -17,14 +17,16 @@ import {
   registerMaxymoPeriodicSync,
   unregisterMaxymoPeriodicSync,
 } from '@/lib/backgroundSync';
+import { onAppResume } from '@/lib/capacitorScanner';
 import {
-  ensureReadPermission,
-  getStoredHandle,
-  isFolderApiSupported,
-  pickFolder,
-  scanFolder,
-  clearStoredHandle,
-} from '@/lib/maxymoScanner';
+  clearAutoScanConfig,
+  configureAutoScan as configureScanner,
+  getConfiguredLabel,
+  isAutoScanConfigured,
+  rescanConfigured,
+  scannerKind,
+  silentRescan,
+} from '@/lib/scannerService';
 import { drainSharedFiles } from '@/lib/shareInbox';
 import {
   AlertCircle,
@@ -130,94 +132,104 @@ export function BulkScreenshotUploader() {
   } | null>(null);
   const [fromShare, setFromShare] = useState(false);
   const [autoScanConfigured, setAutoScanConfigured] = useState(false);
+  const [autoScanLabel, setAutoScanLabel] = useState<string | null>(null);
   const [autoScanning, setAutoScanning] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const kind = scannerKind();
 
-  // Check on mount whether a persisted folder handle exists from a previous
-  // session. If yes AND the browser still grants us read permission silently,
-  // run an auto-scan. If permission is in 'prompt' state we wait for a user
-  // gesture (the "Rescanner" button) — browsers refuse to prompt without one.
-  // Also re-scan when the document becomes visible again (user came back from
-  // multitasking) so freshly captured Maxymo screenshots show up immediately.
+  // On mount: refresh the configured-state from the active scanner backend
+  // (FS Access handle in IDB for web, localStorage path for native) and run a
+  // silent scan if anything is configured. Listen to both the DOM
+  // visibilitychange (web) and Capacitor's appStateChange (native APK) so a
+  // freshly captured Maxymo screenshot shows up immediately when the user
+  // returns to the app, regardless of which shell is hosting us.
   useEffect(() => {
     let cancelled = false;
 
-    async function attemptScan(silent: boolean) {
-      const handle = await getStoredHandle();
-      if (cancelled || !handle) return;
+    async function attemptScan() {
+      const configured = await isAutoScanConfigured();
+      if (cancelled || !configured) return;
       setAutoScanConfigured(true);
-      const ok = await ensureReadPermission(handle, false);
-      if (ok && !cancelled) {
-        await runAutoScan(handle, { silent });
-      }
+      const label = await getConfiguredLabel();
+      if (label) setAutoScanLabel(label);
+      const files = await silentRescan(nameFilter || '');
+      if (cancelled || !files.length) return;
+      ingest(files, { fromFolder: true });
     }
 
-    void attemptScan(true);
+    void attemptScan();
 
     function onVisibility() {
-      if (document.visibilityState === 'visible') {
-        void attemptScan(true);
-      }
+      if (document.visibilityState === 'visible') void attemptScan();
     }
     document.addEventListener('visibilitychange', onVisibility);
+    const removeAppListener = onAppResume(() => { void attemptScan(); });
 
     return () => {
       cancelled = true;
       document.removeEventListener('visibilitychange', onVisibility);
+      removeAppListener();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function configureAutoScan() {
-    const handle = await pickFolder();
-    if (!handle) return;
-    setAutoScanConfigured(true);
-    toast.success('Dossier configuré pour l\'auto-scan');
-    await runAutoScan(handle, { silent: false });
+  async function promptNativePath(): Promise<string | null> {
+    const current = autoScanLabel?.replace(/^📁 /, '') ?? 'Pictures/Maxymo';
+    const path = window.prompt(
+      'Chemin du dossier Maxymo (sous External Storage)\nex: Pictures/Maxymo, DCIM/Screenshots',
+      current,
+    );
+    return path?.trim() || null;
+  }
 
-    // Opt in to background scan + notifications. Both calls are no-op safe
-    // on browsers/permissions that don't support them.
+  async function configureAutoScan() {
+    const result = await configureScanner(promptNativePath);
+    if (!result.ok) {
+      if (result.label) toast.error(result.label);
+      return;
+    }
+    setAutoScanConfigured(true);
+    if (result.label) setAutoScanLabel(`📁 ${result.label}`);
+    toast.success('Auto-scan configuré');
+    await runConfiguredScan(false);
+
+    // Best-effort web-side background sync + notification permission. On
+    // native APK the Capacitor side handles its own background; these calls
+    // are still safe (they short-circuit when SW/periodicSync are absent).
     const notifState = await ensureNotificationPermission();
     const periodicOk = await registerMaxymoPeriodicSync();
-    if (periodicOk && notifState === 'granted') {
-      toast.info('Tu recevras une notification quand de nouveaux Maxymo seront détectés');
+    if (kind === 'native') {
+      toast.info('Notif natives activées — scan reliable même app fermée');
+    } else if (periodicOk && notifState === 'granted') {
+      toast.info('Notif activées — scan opportuniste en background');
     } else if (notifState === 'granted') {
-      toast.info('Background sync non supporté — scan opportuniste à chaque retour dans l\'app');
+      toast.info('Notif activées — scan déclenché au retour dans l\'app');
     }
   }
 
   async function rescan() {
-    const handle = await getStoredHandle();
-    if (!handle) return;
-    const ok = await ensureReadPermission(handle, true);
-    if (!ok) {
-      toast.error('Permission de lecture refusée');
-      return;
-    }
-    await runAutoScan(handle, { silent: false });
+    await runConfiguredScan(false);
   }
 
   async function disableAutoScan() {
-    await clearStoredHandle();
+    await clearAutoScanConfig();
     await unregisterMaxymoPeriodicSync();
     setAutoScanConfigured(false);
+    setAutoScanLabel(null);
     toast.info('Auto-scan désactivé');
   }
 
-  async function runAutoScan(
-    handle: FileSystemDirectoryHandle,
-    opts: { silent: boolean },
-  ): Promise<void> {
+  async function runConfiguredScan(silent: boolean): Promise<void> {
     setAutoScanning(true);
     try {
-      const files = await scanFolder(handle, nameFilter || '');
+      const files = await rescanConfigured(nameFilter || '');
       if (!files.length) {
-        if (!opts.silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
+        if (!silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
         return;
       }
       ingest(files, { fromFolder: true });
-      if (!opts.silent) toast.success(`Scan terminé — ${files.length} fichier(s) candidat(s)`);
+      if (!silent) toast.success(`Scan terminé — ${files.length} fichier(s) candidat(s)`);
     } catch (err) {
       console.error('[autoScan] failed:', err);
       toast.error('Échec du scan automatique');
@@ -484,14 +496,24 @@ export function BulkScreenshotUploader() {
           </p>
         )}
 
-        {/* Auto-scan — persistent folder handle (FS Access API). After the
-            initial pick, every app load rescans automatically and pre-loads
-            the candidate list. */}
-        {isFolderApiSupported() && (
+        {/* Auto-scan — works in two modes:
+            - Native (Capacitor APK): persistent path + local notifications +
+              true background tasks (no permission decay).
+            - Web/TWA (FS Access API): persistent FileSystemDirectoryHandle
+              with browser-managed ambient permission. */}
+        {kind !== 'unsupported' && (
           <div className="space-y-1.5 pt-2 border-t border-border">
             <label className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
               <Zap className="w-3 h-3" /> Auto-scan du dossier Maxymo
+              {kind === 'native' && (
+                <span className="text-[9px] bg-primary/15 text-primary border border-primary/30 px-1.5 rounded">
+                  native
+                </span>
+              )}
             </label>
+            {autoScanLabel && (
+              <p className="text-[10px] text-muted-foreground font-mono break-all">{autoScanLabel}</p>
+            )}
             {autoScanConfigured ? (
               <div className="flex items-center gap-2">
                 <Button
