@@ -10,6 +10,7 @@ type Lang = 'en' | 'fr';
 
 const translations: Record<string, Record<Lang, string>> = {
   today: { en: 'Today', fr: 'Auj.' },
+  gas: { en: 'Gas', fr: 'Gaz' },
   planning: { en: 'Planning', fr: 'Planning' },
   zones: { en: 'Zones', fr: 'Zones' },
   admin: { en: 'Admin', fr: 'Admin' },

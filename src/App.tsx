@@ -37,6 +37,7 @@ const AdminZoneDiscoveriesScreen = lazy(
 const AdminDriverOpsScreen = lazy(
   () => import('@/pages/AdminDriverOpsScreen')
 );
+const GasScreen = lazy(() => import('@/pages/GasScreen'));
 const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
 const queryClient = new QueryClient();
@@ -95,6 +96,7 @@ function AppContent() {
     location.pathname !== '/today' &&
     location.pathname !== '/' &&
     location.pathname !== '/events' &&
+    location.pathname !== '/gas' &&
     !location.pathname.startsWith('/admin');
 
   if (authStatus === 'loading') {
@@ -137,6 +139,7 @@ function AppContent() {
           <Route path="/drive" element={<DriveScreen />} />
           <Route path="/planning" element={<PlanningScreen />} />
           <Route path="/zones" element={<ZonesScreen />} />
+          <Route path="/gas" element={<GasScreen />} />
           <Route path="/events" element={<EventsScreen />} />
           <Route path="/admin" element={<AdminScreen />} />
           <Route path="/admin/operations" element={<AdminOperationsScreen />} />

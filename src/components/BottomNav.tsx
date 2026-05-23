@@ -3,6 +3,7 @@ import { useI18n } from '@/contexts/I18nContext';
 import {
   Calendar,
   Car,
+  Fuel,
   Layers,
   Map,
   PartyPopper,
@@ -16,6 +17,7 @@ const navItems = [
   { path: '/planning', icon: Map, label: 'planning' },
   { path: '/events', icon: PartyPopper, label: 'events' },
   { path: '/zones', icon: Layers, label: 'zones' },
+  { path: '/gas', icon: Fuel, label: 'gas' },
   { path: '/admin', icon: Settings, label: 'admin' },
 ] as const;
 
