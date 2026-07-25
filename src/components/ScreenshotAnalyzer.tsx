@@ -14,7 +14,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useZones } from '@/hooks/useSupabase';
+import { useZones, type Zone } from '@/hooks/useSupabase';
+import { haversineKm, requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
@@ -89,6 +90,46 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+const MIN_TRIP_YEAR = 2025;
+const MAX_GPS_ZONE_KM = 25;
+
+/**
+ * Year guard: Gemini occasionally misreads the year on a trip screenshot
+ * (e.g. "2020" seen in prod). If the extracted date is missing, unparseable,
+ * or predates the app, fall back to now so the trip lands on a sane timestamp.
+ */
+export function normalizeStartedAt(
+  dateStr: string | null | undefined,
+  now: Date = new Date(),
+): string {
+  if (dateStr) {
+    const parsed = new Date(dateStr);
+    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= MIN_TRIP_YEAR) {
+      return parsed.toISOString();
+    }
+  }
+  return now.toISOString();
+}
+
+/**
+ * Nearest zone to a GPS fix, within a sane metro radius. Last-resort so a saved
+ * trip always carries a zone_id — a null zone_id silently drops the trip from
+ * the learning loop (buildTripHistory skips zoneless trips).
+ */
+export function nearestZoneId(lat: number, lng: number, zones: Zone[]): string | null {
+  let bestId: string | null = null;
+  let bestKm = Infinity;
+  for (const z of zones) {
+    if (z.latitude == null || z.longitude == null) continue;
+    const km = haversineKm(lat, lng, z.latitude, z.longitude);
+    if (km < bestKm) {
+      bestKm = km;
+      bestId = z.id;
+    }
+  }
+  return bestKm <= MAX_GPS_ZONE_KM ? bestId : null;
+}
+
 interface UploadedScreenshot {
   signedUrl: string;
   objectPath: string;
@@ -141,7 +182,8 @@ export function ScreenshotAnalyzer() {
   const { data: mtlZones = [] } = useZones('mtl');
   const { data: lvlZones = [] } = useZones('lvl');
   const { data: lngZones = [] } = useZones('lng');
-  const allZones: ZoneOption[] = [...mtlZones, ...lvlZones, ...lngZones];
+  const allZonesFull: Zone[] = [...mtlZones, ...lvlZones, ...lngZones];
+  const allZones: ZoneOption[] = allZonesFull;
 
   const [zoneId, setZoneId] = useState('');
   const [platform, setPlatform] = useState<Platform>('lyft');
@@ -260,15 +302,37 @@ export function ScreenshotAnalyzer() {
 
   async function handleSaveTrip() {
     if (!result?.extracted_data) return;
-    const { earnings, tips, distance_km, date } = result.extracted_data;
+    const d = result.extracted_data;
+    const { earnings, tips, distance_km, date } = d;
     if (!earnings && !tips) { toast.error('Aucun revenu détecté dans le screenshot'); return; }
-
-    // Use AI-matched zone if driver didn't manually select one
-    const effectiveZoneId = zoneId || result.matched_zone_id || null;
 
     setSaving(true);
     try {
-      const startedAt = date ? new Date(date).toISOString() : new Date().toISOString();
+      // Zone resolution priority: manual pick → AI zone match → pickup zone →
+      // dropoff zone → GPS-nearest zone. A trip MUST carry a zone_id, otherwise
+      // buildTripHistory drops it and it never improves zone suggestions.
+      let effectiveZoneId =
+        zoneId ||
+        result.matched_zone_id ||
+        d.pickup_zone_id ||
+        d.dropoff_zone_id ||
+        null;
+
+      if (!effectiveZoneId) {
+        try {
+          const loc = await requestCurrentPreciseLocation();
+          effectiveZoneId = nearestZoneId(loc.latitude, loc.longitude, allZonesFull);
+        } catch {
+          // GPS unavailable/denied — caught by the guard below
+        }
+      }
+
+      if (!effectiveZoneId) {
+        toast.error('Zone introuvable — sélectionne une zone de référence avant de sauvegarder');
+        return;
+      }
+
+      const startedAt = normalizeStartedAt(date);
       const { error } = await supabase.from('trips').insert({
         zone_id: effectiveZoneId,
         started_at: startedAt,

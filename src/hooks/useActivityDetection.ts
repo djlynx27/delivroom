@@ -68,11 +68,11 @@ export function useActivityDetection(): ActivityDetectionResult {
         try {
           watchId = await Geolocation.watchPosition(
             { enableHighAccuracy: true },
-            (pos, err) => {
+            (pos) => {
               if (pos) handlePosition(pos);
             }
           );
-        } catch (err) {
+        } catch {
           // Silent fail
         }
       } else if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
