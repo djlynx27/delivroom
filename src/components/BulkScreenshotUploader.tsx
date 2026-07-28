@@ -56,7 +56,10 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file, same as single uploader
-const MAX_BATCH_SIZE = 100;             // safety cap so the UI stays responsive
+// No hard cap on batch size — the driver wants to select every Maxymo/Lyft
+// screenshot at once and let SHA-256 dedup skip the already-processed ones.
+// Above this many files we just show a heads-up (long run), never drop any.
+const LARGE_BATCH_WARN = 300;
 const DEFAULT_FILTER = 'Maxymo';        // pre-fill the filter for Maxymo's default filename prefix
 
 const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
@@ -326,11 +329,10 @@ export function BulkScreenshotUploader() {
       }
       return;
     }
-    if (filtered.length > MAX_BATCH_SIZE) {
-      toast.warning(
-        `${filtered.length} fichiers trouvés — limité à ${MAX_BATCH_SIZE} pour cette session`,
+    if (filtered.length > LARGE_BATCH_WARN) {
+      toast.info(
+        `${filtered.length} fichiers — gros lot, l'analyse peut prendre un moment. Les doublons sont sautés automatiquement, rien n'est jeté.`,
       );
-      filtered = filtered.slice(0, MAX_BATCH_SIZE);
     }
     const newItems: FileItem[] = filtered.map((file, i) => {
       const oversize = file.size > MAX_FILE_SIZE;
@@ -532,7 +534,7 @@ export function BulkScreenshotUploader() {
           <FolderUp className="w-4 h-4 text-primary" /> Import bulk Maxymo
         </CardTitle>
         <CardDescription className="text-xs">
-          Sélectionne plusieurs screenshots d'un coup (jusqu'à {MAX_BATCH_SIZE}). Les doublons sont
+          Sélectionne autant de screenshots que tu veux d'un coup — aucune limite. Les doublons sont
           détectés via hash SHA-256 et ne consomment pas de Gemini.
         </CardDescription>
       </CardHeader>
