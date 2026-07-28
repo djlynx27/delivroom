@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { useZones, type Zone } from '@/hooks/useSupabase';
-import { haversineKm, requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
+import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
+import { nearestZoneId, normalizeStartedAt } from '@/lib/tripSave';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
@@ -88,46 +89,6 @@ function getDemandBadgeVariant(demand: string) {
 
 function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
-const MIN_TRIP_YEAR = 2025;
-const MAX_GPS_ZONE_KM = 25;
-
-/**
- * Year guard: Gemini occasionally misreads the year on a trip screenshot
- * (e.g. "2020" seen in prod). If the extracted date is missing, unparseable,
- * or predates the app, fall back to now so the trip lands on a sane timestamp.
- */
-export function normalizeStartedAt(
-  dateStr: string | null | undefined,
-  now: Date = new Date(),
-): string {
-  if (dateStr) {
-    const parsed = new Date(dateStr);
-    if (!Number.isNaN(parsed.getTime()) && parsed.getFullYear() >= MIN_TRIP_YEAR) {
-      return parsed.toISOString();
-    }
-  }
-  return now.toISOString();
-}
-
-/**
- * Nearest zone to a GPS fix, within a sane metro radius. Last-resort so a saved
- * trip always carries a zone_id — a null zone_id silently drops the trip from
- * the learning loop (buildTripHistory skips zoneless trips).
- */
-export function nearestZoneId(lat: number, lng: number, zones: Zone[]): string | null {
-  let bestId: string | null = null;
-  let bestKm = Infinity;
-  for (const z of zones) {
-    if (z.latitude == null || z.longitude == null) continue;
-    const km = haversineKm(lat, lng, z.latitude, z.longitude);
-    if (km < bestKm) {
-      bestKm = km;
-      bestId = z.id;
-    }
-  }
-  return bestKm <= MAX_GPS_ZONE_KM ? bestId : null;
 }
 
 interface UploadedScreenshot {
