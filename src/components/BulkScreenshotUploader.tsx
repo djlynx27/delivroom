@@ -8,8 +8,16 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
+import { normalizeStartedAt, resolveZoneIdFromAnalysis } from '@/lib/tripSave';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import {
@@ -37,6 +45,7 @@ import {
   FolderUp,
   Loader2,
   RefreshCw,
+  Save,
   Share2,
   Trash2,
   XCircle,
@@ -49,6 +58,9 @@ import { toast } from 'sonner';
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file, same as single uploader
 const MAX_BATCH_SIZE = 100;             // safety cap so the UI stays responsive
 const DEFAULT_FILTER = 'Maxymo';        // pre-fill the filter for Maxymo's default filename prefix
+
+const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
+type Platform = (typeof PLATFORMS)[number];
 
 // Extend HTMLInputElement to declare the non-standard webkitdirectory attribute
 // React's typings don't include it, but Chromium-based browsers + recent Android
@@ -78,6 +90,8 @@ interface FileItem {
   message?: string;
   hash?: string;
   filePath?: string;
+  analysis?: AnalysisResultMinimal | null;
+  tripSaved?: boolean;
 }
 
 function sanitizeFilename(name: string): string {
@@ -86,11 +100,24 @@ function sanitizeFilename(name: string): string {
 
 interface AnalysisResultMinimal {
   is_fallback?: boolean;
+  matched_zone_id?: string | null;
   extracted_data?: {
     earnings?: number | null;
+    tips?: number | null;
+    distance_km?: number | null;
+    date?: string | null;
     pickup_address?: string | null;
     dropoff_address?: string | null;
-  };
+    pickup_zone_id?: string | null;
+    dropoff_zone_id?: string | null;
+  } | null;
+}
+
+// A screenshot is worth saving as a trip only if the AI actually read a fare
+// off it (heatmaps and fallbacks carry no earnings).
+function hasTripEarnings(a: AnalysisResultMinimal | null | undefined): boolean {
+  if (!a || a.is_fallback) return false;
+  return (a.extracted_data?.earnings ?? 0) > 0;
 }
 
 async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: string }> {
@@ -126,6 +153,8 @@ export function BulkScreenshotUploader() {
   const [items, setItems] = useState<FileItem[]>([]);
   const [running, setRunning] = useState(false);
   const [nameFilter, setNameFilter] = useState(DEFAULT_FILTER);
+  const [platform, setPlatform] = useState<Platform>('lyft');
+  const [savingTrips, setSavingTrips] = useState(false);
   const [folderStats, setFolderStats] = useState<{
     totalInFolder: number;
     matched: number;
@@ -367,6 +396,7 @@ export function BulkScreenshotUploader() {
       updateItem(item.id, {
         status: 'done',
         message: summaryBits.length ? summaryBits.join(' · ') : undefined,
+        analysis,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -389,6 +419,86 @@ export function BulkScreenshotUploader() {
       setRunning(false);
     }
   }
+
+  // Persist every analyzed screenshot that carries a fare as a row in `trips`,
+  // so a bulk backlog actually feeds the zone-suggestion learning loop (the
+  // per-screenshot analysis alone only archives). Zone comes from the
+  // screenshot itself (AI-matched → pickup → dropoff); no GPS, since these are
+  // historical. Items with no fare or no resolvable zone are skipped and
+  // reported. tripSaved guards against double-inserting on a repeat click.
+  async function handleSaveAllAsTrips() {
+    const candidates = items.filter(
+      (it) => !it.tripSaved && hasTripEarnings(it.analysis),
+    );
+    if (!candidates.length) {
+      toast.info('Aucune course à sauvegarder (aucun revenu détecté)');
+      return;
+    }
+
+    setSavingTrips(true);
+    try {
+      const rows: { id: string; row: Record<string, unknown> }[] = [];
+      let skippedNoZone = 0;
+      for (const it of candidates) {
+        const a = it.analysis;
+        if (!a) continue;
+        const zoneId = resolveZoneIdFromAnalysis(a);
+        if (!zoneId) {
+          skippedNoZone += 1;
+          continue;
+        }
+        const d = a.extracted_data ?? {};
+        rows.push({
+          id: it.id,
+          row: {
+            zone_id: zoneId,
+            started_at: normalizeStartedAt(d.date),
+            earnings: d.earnings ?? null,
+            tips: d.tips ?? null,
+            distance_km: d.distance_km ?? null,
+            platform,
+            notes: `Import bulk — ${it.file.name}`.slice(0, 500),
+          },
+        });
+      }
+
+      if (!rows.length) {
+        toast.warning(
+          `Aucune zone identifiable sur ${skippedNoZone} course(s) — rien sauvegardé`,
+        );
+        return;
+      }
+
+      const { error } = await supabase
+        .from('trips')
+        .insert(rows.map((r) => r.row));
+      if (error) throw error;
+
+      const savedIds = new Set(rows.map((r) => r.id));
+      setItems((prev) =>
+        prev.map((it) =>
+          savedIds.has(it.id) ? { ...it, tripSaved: true } : it,
+        ),
+      );
+      qc.invalidateQueries({ queryKey: ['trips-feed'] });
+      qc.invalidateQueries({ queryKey: ['trip-history'] });
+
+      const parts = [`${rows.length} course(s) sauvegardée(s)`];
+      if (skippedNoZone) parts.push(`${skippedNoZone} sans zone ignorée(s)`);
+      toast.success(`${parts.join(' · ')} — le moteur va apprendre`);
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Échec de la sauvegarde des courses',
+      );
+    } finally {
+      setSavingTrips(false);
+    }
+  }
+
+  // How many analyzed items are still eligible to be saved as trips.
+  const savableTripCount = items.filter(
+    (it) => !it.tripSaved && hasTripEarnings(it.analysis),
+  ).length;
 
   function copyFailedSummary() {
     const failed = items.filter((i) => i.status === 'failed');
@@ -599,6 +709,43 @@ export function BulkScreenshotUploader() {
                 </Badge>
               )}
             </div>
+
+            {/* Save analyzed screenshots as trips so the batch feeds the
+                learning loop (analysis alone only archives). */}
+            {(savableTripCount > 0 || items.some((it) => it.tripSaved)) && (
+              <div className="space-y-2 pt-2 border-t border-border">
+                <div className="flex items-center gap-2">
+                  <Select value={platform} onValueChange={(v) => setPlatform(v as Platform)}>
+                    <SelectTrigger className="h-9 w-28 bg-background border-border text-xs shrink-0">
+                      <SelectValue placeholder="Plateforme" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border">
+                      {PLATFORMS.map((p) => (
+                        <SelectItem key={p} value={p} className="capitalize">{p}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    onClick={handleSaveAllAsTrips}
+                    variant="outline"
+                    className="flex-1 gap-2 border-green-500/50 text-green-400 hover:bg-green-500/10"
+                    disabled={savingTrips || running || savableTripCount === 0}
+                  >
+                    {savingTrips
+                      ? <Loader2 className="w-4 h-4 animate-spin" />
+                      : <Save className="w-4 h-4" />}
+                    {savingTrips
+                      ? 'Sauvegarde…'
+                      : savableTripCount === 0
+                        ? 'Courses sauvegardées'
+                        : `Tout sauvegarder comme courses (${savableTripCount})`}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Enregistre les courses avec revenus détectés dans ton historique pour améliorer les suggestions de zones. Zone lue depuis le screenshot ; celles sans zone sont ignorées.
+                </p>
+              </div>
+            )}
 
             <ul className="max-h-72 overflow-y-auto space-y-1 text-xs">
               {items.map((it) => (

@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Zone } from '@/hooks/useSupabase';
-import { nearestZoneId, normalizeStartedAt } from '@/components/ScreenshotAnalyzer';
+import {
+  nearestZoneId,
+  normalizeStartedAt,
+  resolveZoneIdFromAnalysis,
+} from '@/lib/tripSave';
 
 function zone(id: string, latitude: number, longitude: number): Zone {
   return { id, latitude, longitude } as unknown as Zone;
@@ -54,5 +58,39 @@ describe('nearestZoneId', () => {
       zone('mtl-downtown', 45.5017, -73.5673),
     ];
     expect(nearestZoneId(45.5019, -73.567, withNull)).toBe('mtl-downtown');
+  });
+});
+
+describe('resolveZoneIdFromAnalysis', () => {
+  it('prefers the AI-matched zone', () => {
+    expect(
+      resolveZoneIdFromAnalysis({
+        matched_zone_id: 'mtl-downtown',
+        extracted_data: { pickup_zone_id: 'lvl-chomedey', dropoff_zone_id: 'lng-brossard' },
+      }),
+    ).toBe('mtl-downtown');
+  });
+
+  it('falls back to pickup, then dropoff', () => {
+    expect(
+      resolveZoneIdFromAnalysis({
+        extracted_data: { pickup_zone_id: 'lvl-chomedey', dropoff_zone_id: 'lng-brossard' },
+      }),
+    ).toBe('lvl-chomedey');
+    expect(
+      resolveZoneIdFromAnalysis({
+        extracted_data: { pickup_zone_id: null, dropoff_zone_id: 'lng-brossard' },
+      }),
+    ).toBe('lng-brossard');
+  });
+
+  it('returns null when no zone is present', () => {
+    expect(resolveZoneIdFromAnalysis({})).toBeNull();
+    expect(
+      resolveZoneIdFromAnalysis({
+        matched_zone_id: null,
+        extracted_data: { pickup_zone_id: null, dropoff_zone_id: null },
+      }),
+    ).toBeNull();
   });
 });
