@@ -8,15 +8,18 @@ import { I18nProvider } from '@/contexts/I18nContext';
 import { useAnonAuth } from '@/hooks/useAnonAuth';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Loader2 } from 'lucide-react';
 import { ThemeProvider } from 'next-themes';
 import {
   Component,
   Suspense,
   lazy,
+  useEffect,
   type ErrorInfo,
   type ReactNode,
 } from 'react';
 import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { toast } from 'sonner';
 
 const DriveScreen = lazy(() => import('@/pages/DriveScreen'));
 const TodayScreen = lazy(() => import('@/pages/TodayScreen'));
@@ -41,6 +44,41 @@ const GasScreen = lazy(() => import('@/pages/GasScreen'));
 const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
 const queryClient = new QueryClient();
+
+// A visible branded loader — used for the auth handshake and lazy-route
+// Suspense. Previously both rendered an empty near-black div, so any slow (or
+// hung) launch was indistinguishable from a crash / black screen.
+function AppLoading({ label = 'Chargement…' }: { label?: string }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background text-foreground pt-[env(safe-area-inset-top)]">
+      <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <p className="text-sm text-muted-foreground">{label}</p>
+    </div>
+  );
+}
+
+// When a new service worker is ready (registerType: 'prompt'), main.tsx fires
+// this event with the updateSW callback instead of silently reloading the page
+// mid-boot — which was flashing/parking a black screen right after a deploy.
+function SwUpdatePrompt() {
+  useEffect(() => {
+    function onNeedRefresh(e: Event) {
+      const detail = (e as CustomEvent<{ update: () => void }>).detail;
+      toast('Nouvelle version disponible', {
+        description: 'Recharge pour mettre à jour Delivroom.',
+        duration: Infinity,
+        action: {
+          label: 'Recharger',
+          onClick: () => detail?.update?.(),
+        },
+      });
+    }
+    window.addEventListener('delivroom:sw-need-refresh', onNeedRefresh);
+    return () =>
+      window.removeEventListener('delivroom:sw-need-refresh', onNeedRefresh);
+  }, []);
+  return null;
+}
 
 type ErrorBoundaryProps = { children: ReactNode };
 type ErrorBoundaryState = { hasError: boolean };
@@ -100,9 +138,7 @@ function AppContent() {
     !location.pathname.startsWith('/admin');
 
   if (authStatus === 'loading') {
-    return (
-      <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]" />
-    );
+    return <AppLoading label="Connexion…" />;
   }
 
   if (authStatus === 'error') {
@@ -128,11 +164,7 @@ function AppContent() {
 
   return (
     <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]">
-      <Suspense
-        fallback={
-          <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]" />
-        }
-      >
+      <Suspense fallback={<AppLoading />}>
         <Routes>
           <Route path="/" element={<DriveScreen />} />
           <Route path="/today" element={<TodayScreen />} />
@@ -160,26 +192,30 @@ function AppContent() {
   );
 }
 
+// ErrorBoundary is the OUTERMOST wrapper so a throw in any provider, a lazy
+// route, or a stale vendor chunk still renders the visible recovery screen
+// instead of a black page. Sonner is mounted high so SwUpdatePrompt can toast.
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <I18nProvider>
-      <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-        <TooltipProvider>
-          <Sonner />
-          <BrowserRouter
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-            <AppErrorBoundary>
+  <AppErrorBoundary>
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <TooltipProvider>
+            <Sonner />
+            <SwUpdatePrompt />
+            <BrowserRouter
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
+            >
               <AppContent />
-            </AppErrorBoundary>
-          </BrowserRouter>
-        </TooltipProvider>
-      </ThemeProvider>
-    </I18nProvider>
-  </QueryClientProvider>
+            </BrowserRouter>
+          </TooltipProvider>
+        </ThemeProvider>
+      </I18nProvider>
+    </QueryClientProvider>
+  </AppErrorBoundary>
 );
 
 export default App;

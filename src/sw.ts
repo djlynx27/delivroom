@@ -10,7 +10,12 @@ import {
 } from '@/lib/maxymoScanner';
 import { pushSharedFiles } from '@/lib/shareInbox';
 import { clientsClaim } from 'workbox-core';
-import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
+import {
+  cleanupOutdatedCaches,
+  createHandlerBoundToURL,
+  precacheAndRoute,
+} from 'workbox-precaching';
+import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 interface PeriodicSyncEvent extends ExtendableEvent {
   tag: string;
@@ -27,6 +32,16 @@ self.skipWaiting();
 clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
+
+// SPA navigation fallback: serve the precached index.html for any navigation
+// (deep links like /today, /admin/...). Without this, injectManifest doesn't
+// add a navigateFallback, so an offline/flaky-network navigation resolves to
+// nothing → black screen. Excludes API-ish and share-target paths.
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('index.html'), {
+    denylist: [/^\/share-import/, /^\/\.well-known\//],
+  })
+);
 
 // Web Share Target — when the user shares images from their gallery to
 // Delivroom, the browser POSTs a multipart form to /share-import. We catch it
