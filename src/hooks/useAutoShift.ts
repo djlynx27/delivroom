@@ -16,10 +16,13 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import {
+  ACTIVE_SHIFT_KEY,
+  isShiftActive,
+  readAutoShiftEnabled,
+  writeAutoShiftEnabled,
+} from '@/lib/activeShift';
 import { useActivityDetection } from './useActivityDetection';
-
-const ACTIVE_SHIFT_KEY = 'delivroom_active_shift';
-const AUTO_SHIFT_ENABLED_KEY = 'delivroom_auto_shift_enabled';
 
 // Durée en véhicule avant démarrage auto (ms)
 const VEHICLE_START_DELAY_MS = 30_000;
@@ -29,31 +32,6 @@ const STATIONARY_SUGGEST_MS = 15 * 60 * 1000;
 const SUGGESTION_COOLDOWN_MS = 30 * 60 * 1000;
 // Fréquence de vérification des timers
 const CHECK_INTERVAL_MS = 10_000;
-
-function readEnabled(): boolean {
-  try {
-    const val = localStorage.getItem(AUTO_SHIFT_ENABLED_KEY);
-    return val !== 'false'; // activé par défaut
-  } catch {
-    return true;
-  }
-}
-
-function writeEnabled(val: boolean) {
-  try {
-    localStorage.setItem(AUTO_SHIFT_ENABLED_KEY, val ? 'true' : 'false');
-  } catch {
-    // ignore storage errors
-  }
-}
-
-function isShiftActive(): boolean {
-  try {
-    return !!localStorage.getItem(ACTIVE_SHIFT_KEY);
-  } catch {
-    return false;
-  }
-}
 
 function startShiftInStorage() {
   try {
@@ -71,8 +49,22 @@ export interface UseAutoShiftResult {
   toggleEnabled: (val: boolean) => void;
 }
 
+/**
+ * Lightweight hook exposing ONLY the enabled toggle — no GPS watch, no interval.
+ * ShiftTracker uses this for its switch so it doesn't spin up a second detection
+ * loop on top of the global AutoShiftMonitor (which runs the full useAutoShift).
+ */
+export function useAutoShiftEnabled(): UseAutoShiftResult {
+  const [enabled, setEnabled] = useState<boolean>(readAutoShiftEnabled);
+  const toggleEnabled = useCallback((val: boolean) => {
+    writeAutoShiftEnabled(val);
+    setEnabled(val);
+  }, []);
+  return { enabled, toggleEnabled };
+}
+
 export function useAutoShift(): UseAutoShiftResult {
-  const [enabled, setEnabled] = useState<boolean>(readEnabled);
+  const { enabled, toggleEnabled } = useAutoShiftEnabled();
   const { activity } = useActivityDetection();
 
   // Timestamps des transitions d'état
@@ -81,11 +73,6 @@ export function useAutoShift(): UseAutoShiftResult {
   const lastSuggestionAtRef = useRef<number | null>(null);
   // Guard : shift auto-démarré dans cette session (évite boucle)
   const autoStartedRef = useRef(false);
-
-  const toggleEnabled = useCallback((val: boolean) => {
-    writeEnabled(val);
-    setEnabled(val);
-  }, []);
 
   // Mise à jour des timestamps selon l'activité GPS
   useEffect(() => {

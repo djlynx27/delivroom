@@ -38,6 +38,7 @@ export default defineConfig({
         'src/lib/screenshotDedup.ts',
         'src/lib/shiftTracker.ts',
         'src/lib/platformIdle.ts',
+        'src/lib/activeShift.ts',
         // FIXME(claude): pure logic but under-tested — backfill tests then re-add
         // to the gate. Excluded for now to unblock the pre-existing coverage break.
         'src/lib/rideDecision.ts',

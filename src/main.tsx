@@ -35,8 +35,37 @@ if (SENTRY_DSN) {
   });
 }
 
-registerSW({
+// Service worker: prompt (not silent auto-reload). When a new SW is ready we
+// dispatch an event so <SwUpdatePrompt> can toast "Recharger" — reloading
+// mid-boot after a deploy was flashing/parking a black screen.
+const updateSW = registerSW({
   immediate: true,
+  onNeedRefresh() {
+    window.dispatchEvent(
+      new CustomEvent('delivroom:sw-need-refresh', {
+        detail: { update: () => void updateSW(true) },
+      })
+    );
+  },
+});
+
+// After a deploy, an old precached index.html can reference lazy chunk hashes
+// that no longer exist → dynamic import rejects → black screen. Reload ONCE
+// (guarded so we never loop) to fetch the fresh shell.
+const CHUNK_RELOAD_FLAG = 'delivroom-chunk-reloaded';
+window.addEventListener('vite:preloadError', (event) => {
+  event.preventDefault();
+  if (sessionStorage.getItem(CHUNK_RELOAD_FLAG)) return;
+  sessionStorage.setItem(CHUNK_RELOAD_FLAG, '1');
+  window.location.reload();
+});
+// Clear the guard once the app has loaded cleanly.
+window.addEventListener('load', () => {
+  try {
+    sessionStorage.removeItem(CHUNK_RELOAD_FLAG);
+  } catch {
+    /* ignore */
+  }
 });
 
 createRoot(document.getElementById('root')!).render(

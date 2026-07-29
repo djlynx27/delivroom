@@ -72,7 +72,16 @@ interface ZoneRow {
   name: string;
   type: string | null;
   city_id: string | null;
+  base_score: number | null;
 }
+
+// Every metro city that has zones in the catalog. Previously only mtl/lvl/lng
+// were loaded, so rides to/from Ste-Thérèse, Terrebonne, Blainville, Boisbriand,
+// Rosemère, Bois-des-Filion (22 real zones) could NEVER match → every such ride
+// landed zoneless. guessCityId already knows all of these.
+const CATALOG_CITY_IDS = [
+  'mtl', 'lvl', 'lng', 'trb', 'sth', 'blv', 'bsb', 'rsm', 'bdf',
+] as const;
 
 interface EnvConfig {
   geminiKey: string | null;
@@ -97,8 +106,8 @@ async function loadZones(client: SupabaseClient | null): Promise<ZoneRow[]> {
   if (!client) return [];
   const { data, error } = await client
     .from('zones')
-    .select('id, name, type, city_id')
-    .in('city_id', ['mtl', 'lvl', 'lng']);
+    .select('id, name, type, city_id, base_score')
+    .in('city_id', CATALOG_CITY_IDS as unknown as string[]);
   if (error || !data) return [];
   return data as ZoneRow[];
 }
@@ -355,13 +364,29 @@ async function resolveOneAddress(
     const known = zones.find((z) => z.id === geminiZoneId);
     if (known) return known;
   }
-  // 2. Fuzzy match server-side
+  // 2. Fuzzy match server-side (precise, street-token match)
   if (!address) return null;
   const matched = fuzzyMatchAddress(address, zones);
   if (matched) return matched;
-  // 3. No match anywhere — log to zone_discoveries for future promotion
+
+  // 3. No precise match. Record the exact address in zone_discoveries so it can
+  // be promoted to a real zone later.
+  const cityId = guessCityId(address);
   if (client) {
-    await logDiscovery(client, address, context, guessCityId(address));
+    await logDiscovery(client, address, context, cityId);
+  }
+
+  // 4. Best-guess placement: rather than drop the ride, place it at the city's
+  // representative (highest-base-score) zone. A city-level approximation still
+  // feeds the learning loop; the exact address is preserved in step 3 for a
+  // precise zone later.
+  if (cityId) {
+    const cityZones = zones.filter((z) => z.city_id === cityId);
+    if (cityZones.length) {
+      return cityZones.reduce((best, z) =>
+        (z.base_score ?? 0) > (best.base_score ?? 0) ? z : best
+      );
+    }
   }
   return null;
 }

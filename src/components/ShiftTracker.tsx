@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
-import { useAutoShift } from '@/hooks/useAutoShift';
+import { useAutoShiftEnabled } from '@/hooks/useAutoShift';
 import { useTrips } from '@/hooks/useTrips';
 import {
   derivePostShiftSummary,
@@ -229,7 +229,7 @@ export function ShiftTracker() {
     useState<PostShiftSummary | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const { enabled: autoShiftEnabled, toggleEnabled: toggleAutoShift } =
-    useAutoShift();
+    useAutoShiftEnabled();
 
   // Ref stable pour les event listeners (évite les captures de closures périmées)
   const endShiftRef = useRef<() => Promise<void>>(async () => {});
