@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Progress } from '@/components/ui/progress';
 import {
   Select,
   SelectContent,
@@ -81,11 +82,87 @@ export default function AdminZoneDiscoveriesScreen() {
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
   const [target, setTarget] = useState<DiscoveryRow | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
 
   const { data: discoveries = [], isLoading } = useQuery({
     queryKey: ['zone-discoveries'],
     queryFn: fetchDiscoveries,
   });
+
+  // Promote every pending discovery at once: geocode each via Mapbox, derive
+  // city + name + a collision-free zone id, and create it through the
+  // service-role Edge Function. Sequential (Mapbox + insert per item) so it
+  // needs the app to stay foreground; unresolvable rows (no geocode / no city)
+  // are skipped and reported. NOTE: this can create a lot of intersection-level
+  // zones — fine if that's what you want, but the city fallback already places
+  // these rides, so promoting only the recurring ones keeps scoring sharper.
+  async function promoteAll() {
+    const pending = discoveries.filter((d) => d.status === 'pending');
+    if (pending.length === 0) return;
+    if (
+      !window.confirm(
+        `Promouvoir les ${pending.length} adresses en zones ? Ça crée ~${pending.length} nouvelles zones (une par intersection).`
+      )
+    ) {
+      return;
+    }
+
+    setBulk({ done: 0, total: pending.length });
+    const usedIds = new Set<string>();
+    let created = 0;
+    let skipped = 0;
+    try {
+      for (const d of pending) {
+        let city = d.city_hint ?? guessCityIdFromText(d.address);
+        const geo = await forwardGeocode(d.address);
+        if (!geo) {
+          skipped += 1;
+          setBulk({ done: created + skipped, total: pending.length });
+          continue;
+        }
+        if (!city) city = guessCityIdFromText(geo.matchedAddress);
+        if (!city) {
+          skipped += 1;
+          setBulk({ done: created + skipped, total: pending.length });
+          continue;
+        }
+        const slug = suggestZoneSlug(d.address);
+        let zoneId = `${city}-${slug}`;
+        let n = 2;
+        while (usedIds.has(zoneId)) zoneId = `${city}-${slug}-${n++}`;
+        usedIds.add(zoneId);
+
+        const { data, error } = await supabase.functions.invoke(
+          'promote-discovery',
+          {
+            body: {
+              action: 'promote',
+              discovery_id: d.id,
+              zone: {
+                id: zoneId,
+                city_id: city,
+                name: suggestZoneName(d.address),
+                type: 'résidentiel',
+                latitude: geo.latitude,
+                longitude: geo.longitude,
+                address: d.address,
+              },
+            },
+          }
+        );
+        if (error || (data as { error?: string })?.error) skipped += 1;
+        else created += 1;
+        setBulk({ done: created + skipped, total: pending.length });
+      }
+      qc.invalidateQueries({ queryKey: ['zone-discoveries'] });
+      qc.invalidateQueries({ queryKey: ['zones'] });
+      toast.success(
+        `${created} zone(s) créée(s)${skipped ? ` · ${skipped} ignorée(s) (adresse non géocodable)` : ''}`
+      );
+    } finally {
+      setBulk(null);
+    }
+  }
 
   async function rejectDiscovery(id: string) {
     setRejectingId(id);
@@ -147,6 +224,39 @@ export default function AdminZoneDiscoveriesScreen() {
           Tout ({discoveries.length})
         </Button>
       </div>
+
+      {(() => {
+        const pendingCount = discoveries.filter(
+          (d) => d.status === 'pending'
+        ).length;
+        if (pendingCount === 0) return null;
+        return (
+          <div className="space-y-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="w-full gap-2"
+              onClick={promoteAll}
+              disabled={!!bulk}
+            >
+              {bulk ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              {bulk
+                ? `Promotion… ${bulk.done}/${bulk.total}`
+                : `Tout promouvoir (${pendingCount})`}
+            </Button>
+            {bulk && (
+              <Progress
+                value={(bulk.done / bulk.total) * 100}
+                className="h-1.5"
+              />
+            )}
+          </div>
+        );
+      })()}
 
       {isLoading && (
         <Card className="bg-card border-border">
