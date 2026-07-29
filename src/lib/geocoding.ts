@@ -58,6 +58,53 @@ export async function forwardGeocode(
   }
 }
 
+// Compact city keyword map (mirrors the edge function's guessCityId) so the
+// promote dialog can auto-fill city_id from the address or Mapbox place_name
+// when the discovery's city_hint is null — one less field the driver must know.
+const CITY_KEYWORDS: Record<string, string[]> = {
+  mtl: [
+    'montreal', 'montréal', 'mtl', 'saint-laurent', 'st-laurent',
+    'saint-léonard', 'st-léonard', 'verdun', 'lasalle', 'lachine', 'anjou',
+    'westmount', 'outremont', 'ndg', 'côte-des-neiges', 'cote-des-neiges',
+    'rivière-des-prairies', 'pointe-aux-trembles', 'hochelaga', 'rosemont',
+    'villeray', 'plateau', 'ahuntsic', 'mercier', 'dorval', 'pierrefonds',
+    'griffintown', 'sud-ouest',
+  ],
+  lvl: [
+    'laval', 'chomedey', 'sainte-rose', 'ste-rose', 'sainte-dorothée',
+    'duvernay', 'fabreville', 'auteuil', 'pont-viau', 'vimont',
+  ],
+  lng: [
+    'longueuil', 'brossard', 'saint-hubert', 'st-hubert', 'saint-lambert',
+    'st-lambert', 'greenfield park', 'boucherville', 'saint-bruno', 'st-bruno',
+  ],
+  trb: ['terrebonne', 'lachenaie', 'mascouche', 'la plaine'],
+  sth: ['sainte-thérèse', 'ste-thérèse', 'ste therese', 'ste-therese'],
+  blv: ['blainville'],
+  bsb: ['boisbriand'],
+  rsm: ['rosemère', 'rosemere'],
+  bdf: ['bois-des-filion', 'bois des filion'],
+};
+
+/**
+ * Best-effort city_id guess from free-form address / place text. Returns the
+ * catalog city id whose longest keyword appears, or null.
+ */
+export function guessCityIdFromText(text: string): string | null {
+  const lower = text.toLowerCase();
+  let bestCity: string | null = null;
+  let bestLen = 0;
+  for (const [cityId, keywords] of Object.entries(CITY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (kw.length > bestLen && lower.includes(kw)) {
+        bestCity = cityId;
+        bestLen = kw.length;
+      }
+    }
+  }
+  return bestCity;
+}
+
 /**
  * Derives a short kebab-case slug suitable for use as the zone ID suffix.
  * "Boulevard Pitfield & Rue Valiquette, St-Laurent" -> "pitfield-valiquette"

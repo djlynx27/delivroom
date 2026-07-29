@@ -110,6 +110,7 @@ jobs:
           supabase functions deploy surge-detector --no-verify-jwt
           supabase functions deploy platform-signal-collector --no-verify-jwt
           supabase functions deploy weight-calibrator --no-verify-jwt
+          supabase functions deploy promote-discovery --no-verify-jwt
 
       - name: Log migration status
         run: echo "✅ Supabase migrations applied successfully"
