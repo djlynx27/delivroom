@@ -22,6 +22,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import {
   forwardGeocode,
+  guessCityIdFromText,
   suggestZoneName,
   suggestZoneSlug,
 } from '@/lib/geocoding';
@@ -79,11 +80,33 @@ export default function AdminZoneDiscoveriesScreen() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
   const [target, setTarget] = useState<DiscoveryRow | null>(null);
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
 
   const { data: discoveries = [], isLoading } = useQuery({
     queryKey: ['zone-discoveries'],
     queryFn: fetchDiscoveries,
   });
+
+  async function rejectDiscovery(id: string) {
+    setRejectingId(id);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        'promote-discovery',
+        { body: { action: 'reject', discovery_id: id } }
+      );
+      if (error) throw error;
+      const payload = (data ?? {}) as { error?: string };
+      if (payload.error) {
+        toast.error(payload.error);
+        return;
+      }
+      qc.invalidateQueries({ queryKey: ['zone-discoveries'] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Échec');
+    } finally {
+      setRejectingId(null);
+    }
+  }
 
   const visible = discoveries.filter((d) => (filter === 'pending' ? d.status === 'pending' : true));
 
@@ -92,6 +115,22 @@ export default function AdminZoneDiscoveriesScreen() {
       title="Zones découvertes"
       description="Adresses que l'IA a vues dans tes screenshots mais qui ne sont pas dans ton catalog. Promouvoir en vraie zone pour enrichir le scoring."
     >
+      <Card className="bg-primary/5 border-primary/20">
+        <CardContent className="p-3 text-xs text-muted-foreground space-y-1">
+          <p>
+            <span className="text-foreground font-medium">Tu n'as pas à toutes les traiter.</span>{' '}
+            Ce sont des intersections isolées ; tes courses y sont déjà placées
+            approximativement (zone représentative de la ville).
+          </p>
+          <p>
+            Promeus seulement les coins <span className="text-foreground font-medium">qui reviennent souvent</span> (vu
+            plusieurs ×, triés en haut). Le GPS et la ville sont remplis
+            automatiquement — tu n'as qu'à cliquer. <span className="text-foreground font-medium">Ignorer</span> vide
+            le reste.
+          </p>
+        </CardContent>
+      </Card>
+
       <div className="flex items-center gap-2">
         <Button
           variant={filter === 'pending' ? 'default' : 'outline'}
@@ -152,14 +191,29 @@ export default function AdminZoneDiscoveriesScreen() {
                   </div>
                 </div>
                 {d.status === 'pending' && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="gap-1 shrink-0"
-                    onClick={() => setTarget(d)}
-                  >
-                    Promouvoir <ArrowRight className="w-3 h-3" />
-                  </Button>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1"
+                      onClick={() => setTarget(d)}
+                    >
+                      Promouvoir <ArrowRight className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-muted-foreground"
+                      onClick={() => rejectDiscovery(d.id)}
+                      disabled={rejectingId === d.id}
+                    >
+                      {rejectingId === d.id ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        'Ignorer'
+                      )}
+                    </Button>
+                  </div>
                 )}
               </div>
             </CardContent>
@@ -196,34 +250,57 @@ function PromoteDialog({ discovery, onClose, onSuccess }: PromoteDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [matchedAddress, setMatchedAddress] = useState<string | null>(null);
 
-  // Pre-fill defaults when a discovery is selected
+  // Pre-fill EVERYTHING when a discovery is selected: name/slug from the
+  // address, city from the hint (or guessed from the text), and GPS auto-fetched
+  // from Mapbox — so promoting is review-and-click, not a form the driver can't
+  // fill.
   useEffect(() => {
     if (!discovery) return;
-    setZoneSlug(suggestZoneSlug(discovery.address));
-    setZoneName(suggestZoneName(discovery.address));
-    setCityId(discovery.city_hint ?? '');
+    const addr = discovery.address;
+    setZoneSlug(suggestZoneSlug(addr));
+    setZoneName(suggestZoneName(addr));
+    setCityId(discovery.city_hint ?? guessCityIdFromText(addr) ?? '');
     setZoneType('résidentiel');
     setLat('');
     setLng('');
     setMatchedAddress(null);
+    void runGeocode(addr, discovery.city_hint);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discovery]);
 
-  async function autoGeocode() {
-    if (!discovery) return;
+  async function runGeocode(
+    address: string,
+    cityHint: string | null,
+    notify = false
+  ) {
     setGeocoding(true);
     try {
-      const result = await forwardGeocode(discovery.address);
+      const result = await forwardGeocode(address);
       if (!result) {
-        toast.error('Mapbox n\'a rien trouvé pour cette adresse');
+        if (notify) toast.error('Mapbox n\'a rien trouvé pour cette adresse');
         return;
       }
       setLat(result.latitude.toFixed(6));
       setLng(result.longitude.toFixed(6));
       setMatchedAddress(result.matchedAddress);
-      toast.success(`Géocodé (confiance ${(result.confidence * 100).toFixed(0)}%)`);
+      // Last-resort city from the Mapbox place_name if the address didn't tell us
+      if (!cityHint && !guessCityIdFromText(address)) {
+        const fromMatch = guessCityIdFromText(result.matchedAddress);
+        if (fromMatch) setCityId(fromMatch);
+      }
+      if (notify) {
+        toast.success(
+          `Géocodé (confiance ${(result.confidence * 100).toFixed(0)}%)`
+        );
+      }
     } finally {
       setGeocoding(false);
     }
+  }
+
+  function autoGeocode() {
+    if (!discovery) return;
+    void runGeocode(discovery.address, discovery.city_hint, true);
   }
 
   async function submit() {
@@ -241,34 +318,41 @@ function PromoteDialog({ discovery, onClose, onSuccess }: PromoteDialogProps) {
     const zoneId = `${cityId}-${zoneSlug}`;
     setSubmitting(true);
     try {
-      // 1. Create the zone
-      const { error: insertErr } = await supabase.from('zones').insert({
-        id: zoneId,
-        city_id: cityId,
-        name: zoneName,
-        type: zoneType,
-        latitude: latNum,
-        longitude: lngNum,
-        address: discovery.address,
-        base_score: 50,
-        current_score: 50,
-      });
-      if (insertErr) {
-        toast.error(`Échec création zone : ${insertErr.message}`);
+      // zones + zone_discoveries are RLS read-only for the client, so the write
+      // goes through the service-role promote-discovery Edge Function.
+      const { data, error } = await supabase.functions.invoke(
+        'promote-discovery',
+        {
+          body: {
+            action: 'promote',
+            discovery_id: discovery.id,
+            zone: {
+              id: zoneId,
+              city_id: cityId,
+              name: zoneName,
+              type: zoneType,
+              latitude: latNum,
+              longitude: lngNum,
+              address: discovery.address,
+            },
+          },
+        }
+      );
+      if (error) throw error;
+      const payload = (data ?? {}) as {
+        error?: string;
+        warning?: string;
+        zone_id?: string;
+      };
+      if (payload.error) {
+        toast.error(payload.error);
         return;
       }
-
-      // 2. Mark discovery as promoted
-      const { error: updErr } = await supabase
-        .from('zone_discoveries')
-        .update({ status: 'promoted', promoted_zone_id: zoneId })
-        .eq('id', discovery.id);
-      if (updErr) {
-        toast.warning(`Zone créée mais échec màj discovery : ${updErr.message}`);
-      }
-
+      if (payload.warning) toast.warning(payload.warning);
       toast.success(`Zone ${zoneId} créée`);
       onSuccess();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Échec de la promotion');
     } finally {
       setSubmitting(false);
     }
