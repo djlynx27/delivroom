@@ -19,6 +19,7 @@ import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
 import { nearestZoneId, normalizeStartedAt } from '@/lib/tripSave';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
+import { ensureShiftStarted } from '@/lib/activeShift';
 import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
@@ -241,6 +242,12 @@ export function ScreenshotAnalyzer() {
         toast.warning('Screenshot stocké, mais analyse IA indisponible');
       } else {
         toast.success('Analyse terminée');
+        // Analyzing a live ride/earnings screenshot is a strong "I'm working
+        // right now" signal — a PWA can't read Lyft's online state, so use this
+        // to auto-start the shift (no-op if one is already running / disabled).
+        if (ensureShiftStarted()) {
+          toast.info('Shift démarré automatiquement');
+        }
       }
 
       // Persist dedup record so a future re-upload of the same file is skipped
