@@ -101,6 +101,40 @@ function buildFallbackRecommendation(
   };
 }
 
+interface GeminiZonesPayload {
+  zones: {
+    zone_id: string;
+    new_score: number;
+    peak_hours: string;
+    best_days: string;
+    trend: 'up' | 'down' | 'stable';
+    tip: string;
+  }[];
+}
+
+// Gemini occasionally wraps its JSON in markdown fences or (when the output is
+// long / thinking eats the token budget) truncates it mid-string. Try the raw
+// text, then a fenced block, then the outermost {...}. Returns null if nothing
+// parses so the caller can fall back to deterministic scoring instead of 500-ing.
+function parseGeminiZones(raw: string): GeminiZonesPayload | null {
+  const attempts: string[] = [raw];
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced?.[1]) attempts.push(fenced[1].trim());
+  const first = raw.indexOf('{');
+  const last = raw.lastIndexOf('}');
+  if (first !== -1 && last > first) attempts.push(raw.slice(first, last + 1));
+
+  for (const candidate of attempts) {
+    try {
+      const parsed = JSON.parse(candidate);
+      if (parsed && Array.isArray(parsed.zones)) return parsed as GeminiZonesPayload;
+    } catch {
+      /* try the next candidate */
+    }
+  }
+  return null;
+}
+
 // eslint-disable-next-line complexity
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -174,17 +208,26 @@ serve(async (req) => {
     const now = new Date();
     const hour = (now.getUTCHours() + 19) % 24; // ~America/Toronto
 
+    // Deterministic scoring from existing score + trip data. Used when Gemini
+    // is unavailable, errors, rate-limits, or returns unparseable/empty JSON —
+    // so this endpoint never 500s on an AI hiccup.
+    const deterministic = (): AIRecommendation[] =>
+      (zones as Zone[]).map((z) =>
+        buildFallbackRecommendation(z, statsMap.get(z.id))
+      );
+
     let recommendations: AIRecommendation[];
 
     if (apiKey) {
-      const zoneList = (zones as Zone[])
-        .map((z) => {
-          const stats = statsMap.get(z.id);
-          return `zone_id=${z.id}, nom="${z.name}", type=${z.type}, territory=${z.territory ?? '?'}, score_actuel=${z.current_score ?? z.base_score ?? 50}, trips_30j=${stats?.count ?? 0}, revenus_30j=${stats?.totalEarnings.toFixed(0) ?? 0}CAD`;
-        })
-        .join('\n');
+      try {
+        const zoneList = (zones as Zone[])
+          .map((z) => {
+            const stats = statsMap.get(z.id);
+            return `zone_id=${z.id}, nom="${z.name}", type=${z.type}, territory=${z.territory ?? '?'}, score_actuel=${z.current_score ?? z.base_score ?? 50}, trips_30j=${stats?.count ?? 0}, revenus_30j=${stats?.totalEarnings.toFixed(0) ?? 0}CAD`;
+          })
+          .join('\n');
 
-      const prompt = `Tu es un expert en optimisation de positionnement pour chauffeurs Lyft/taxi à Montréal. Il est ${hour}h.
+        const prompt = `Tu es un expert en optimisation de positionnement pour chauffeurs Lyft/taxi à Montréal. Il est ${hour}h.
 
 Zones à analyser:
 ${zoneList}
@@ -199,52 +242,55 @@ Pour chaque zone, fournis:
 Réponds UNIQUEMENT avec un JSON valide sans markdown:
 {"zones": [{"zone_id": "...", "new_score": 75, "peak_hours": "17h–20h", "best_days": "Vendredi-Samedi", "trend": "up", "tip": "Conseil court"}]}`;
 
-      const geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.3,
-              maxOutputTokens: 4096,
-              responseMimeType: 'application/json',
-            },
-          }),
-        }
-      );
+        const geminiRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.3,
+                // 61 zones make the JSON long; give it plenty of room and turn
+                // off 2.5-flash "thinking" so tokens go to output, not reasoning
+                // — thinking-eaten budget was truncating the JSON (unterminated
+                // string → JSON.parse crash → 500).
+                maxOutputTokens: 8192,
+                responseMimeType: 'application/json',
+                thinkingConfig: { thinkingBudget: 0 },
+              },
+            }),
+          }
+        );
 
-      if (!geminiRes.ok) throw new Error(`Gemini error: ${geminiRes.status}`);
-      const geminiData = await geminiRes.json();
-      const text =
-        geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
-      const parsed: {
-        zones: {
-          zone_id: string;
-          new_score: number;
-          peak_hours: string;
-          best_days: string;
-          trend: 'up' | 'down' | 'stable';
-          tip: string;
-        }[];
-      } = JSON.parse(text);
+        if (!geminiRes.ok) throw new Error(`Gemini error: ${geminiRes.status}`);
+        const geminiData = await geminiRes.json();
+        const text =
+          geminiData?.candidates?.[0]?.content?.parts?.[0]?.text ?? '{}';
+        const parsed = parseGeminiZones(text);
+        if (!parsed) throw new Error('Gemini returned unparseable JSON');
 
-      const zoneMap = new Map((zones as Zone[]).map((z) => [z.id, z]));
-      recommendations = (parsed.zones ?? []).map((r) => ({
-        zone_id: r.zone_id,
-        zone_name: zoneMap.get(r.zone_id)?.name ?? r.zone_id,
-        new_score: Math.min(100, Math.max(0, r.new_score)),
-        peak_hours: r.peak_hours,
-        best_days: r.best_days,
-        trend: r.trend,
-        tip: r.tip,
-      }));
+        const zoneMap = new Map((zones as Zone[]).map((z) => [z.id, z]));
+        const mapped = (parsed.zones ?? []).map((r) => ({
+          zone_id: r.zone_id,
+          zone_name: zoneMap.get(r.zone_id)?.name ?? r.zone_id,
+          new_score: Math.min(100, Math.max(0, r.new_score)),
+          peak_hours: r.peak_hours,
+          best_days: r.best_days,
+          trend: r.trend,
+          tip: r.tip,
+        }));
+        if (mapped.length === 0) throw new Error('Gemini returned no zones');
+        recommendations = mapped;
+      } catch (aiErr) {
+        console.error(
+          'ai-score-analysis: AI path failed, using deterministic fallback:',
+          aiErr instanceof Error ? aiErr.message : aiErr
+        );
+        recommendations = deterministic();
+      }
     } else {
-      // Deterministic fallback: use existing score + trip data
-      recommendations = (zones as Zone[]).map((z) =>
-        buildFallbackRecommendation(z, statsMap.get(z.id))
-      );
+      recommendations = deterministic();
     }
 
     // 5. Update zone scores in DB (partial or full)
