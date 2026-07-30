@@ -34,8 +34,9 @@ interface ZonePayload {
 }
 
 interface RequestBody {
-  action?: 'promote' | 'reject';
+  action?: 'promote' | 'reject' | 'unpromote';
   discovery_id?: string;
+  zone_id?: string;
   zone?: ZonePayload;
 }
 
@@ -69,6 +70,25 @@ serve(async (req) => {
         .update({ status: 'rejected' })
         .eq('id', body.discovery_id);
       if (error) throw new Error(error.message);
+      return json({ ok: true });
+    }
+
+    if (body.action === 'unpromote') {
+      // Delete the (dud) zone and return the discovery to the pending pool.
+      // FKs: scores/time_slots/platform_signals CASCADE, trips/weight_history
+      // SET NULL — safe. promoted_zone_id also SET NULLs on the delete.
+      if (body.zone_id) {
+        const { error: delErr } = await client
+          .from('zones')
+          .delete()
+          .eq('id', body.zone_id);
+        if (delErr) throw new Error(`Suppression zone: ${delErr.message}`);
+      }
+      const { error: updErr } = await client
+        .from('zone_discoveries')
+        .update({ status: 'pending', promoted_zone_id: null })
+        .eq('id', body.discovery_id);
+      if (updErr) throw new Error(updErr.message);
       return json({ ok: true });
     }
 

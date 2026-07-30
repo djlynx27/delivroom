@@ -35,6 +35,7 @@ import {
   MapPin,
   Navigation,
   Sparkles,
+  Trash2,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -95,15 +96,76 @@ async function functionErrorMessage(error: unknown): Promise<string> {
 
 export default function AdminZoneDiscoveriesScreen() {
   const qc = useQueryClient();
-  const [filter, setFilter] = useState<'pending' | 'all'>('pending');
+  const [filter, setFilter] = useState<'pending' | 'promoted' | 'all'>('pending');
   const [target, setTarget] = useState<DiscoveryRow | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [unpromotingId, setUnpromotingId] = useState<string | null>(null);
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
 
   const { data: discoveries = [], isLoading } = useQuery({
     queryKey: ['zone-discoveries'],
     queryFn: fetchDiscoveries,
   });
+
+  // Validation loop: count how many trips have landed in each promoted zone.
+  // A promoted spot that's genuinely frequented accumulates trips; a dud that
+  // was a coincidence stays at 0 → the driver can delete it.
+  const promotedZoneIds = discoveries
+    .filter((d) => d.status === 'promoted' && d.promoted_zone_id)
+    .map((d) => d.promoted_zone_id as string);
+
+  const { data: tripCounts = {} } = useQuery({
+    queryKey: ['zone-discovery-trip-counts', promotedZoneIds.sort().join(',')],
+    enabled: promotedZoneIds.length > 0,
+    queryFn: async (): Promise<Record<string, number>> => {
+      const { data, error } = await supabase
+        .from('trips')
+        .select('zone_id')
+        .in('zone_id', promotedZoneIds);
+      if (error) throw error;
+      const counts: Record<string, number> = {};
+      for (const row of (data ?? []) as { zone_id: string | null }[]) {
+        if (row.zone_id) counts[row.zone_id] = (counts[row.zone_id] ?? 0) + 1;
+      }
+      return counts;
+    },
+  });
+
+  async function unpromoteDiscovery(d: DiscoveryRow) {
+    if (
+      !window.confirm(
+        `Supprimer la zone ${d.promoted_zone_id} ? L'adresse retournera dans « À traiter ».`
+      )
+    ) {
+      return;
+    }
+    setUnpromotingId(d.id);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        'promote-discovery',
+        {
+          body: {
+            action: 'unpromote',
+            discovery_id: d.id,
+            zone_id: d.promoted_zone_id,
+          },
+        }
+      );
+      if (error) throw error;
+      const payload = (data ?? {}) as { error?: string };
+      if (payload.error) {
+        toast.error(payload.error);
+        return;
+      }
+      toast.success('Zone supprimée');
+      qc.invalidateQueries({ queryKey: ['zone-discoveries'] });
+      qc.invalidateQueries({ queryKey: ['zones'] });
+    } catch (err) {
+      toast.error(await functionErrorMessage(err));
+    } finally {
+      setUnpromotingId(null);
+    }
+  }
 
   // Promote every pending discovery at once: geocode each via Mapbox, derive
   // city + name + a collision-free zone id, and create it through the
@@ -201,7 +263,11 @@ export default function AdminZoneDiscoveriesScreen() {
     }
   }
 
-  const visible = discoveries.filter((d) => (filter === 'pending' ? d.status === 'pending' : true));
+  const visible = discoveries.filter((d) => {
+    if (filter === 'pending') return d.status === 'pending';
+    if (filter === 'promoted') return d.status === 'promoted';
+    return true;
+  });
 
   return (
     <AdminPageShell
@@ -216,10 +282,15 @@ export default function AdminZoneDiscoveriesScreen() {
             approximativement (zone représentative de la ville).
           </p>
           <p>
-            Promeus seulement les coins <span className="text-foreground font-medium">qui reviennent souvent</span> (vu
-            plusieurs ×, triés en haut). Le GPS et la ville sont remplis
-            automatiquement — tu n'as qu'à cliquer. <span className="text-foreground font-medium">Ignorer</span> vide
-            le reste.
+            Promeus les coins <span className="text-foreground font-medium">qui reviennent souvent</span> (vu
+            plusieurs ×, triés en haut). GPS et ville auto — tu n'as qu'à
+            cliquer. <span className="text-foreground font-medium">Ignorer</span> vide le reste.
+          </p>
+          <p>
+            Pas sûr ? Promeus quand même, puis reviens dans l'onglet{' '}
+            <span className="text-foreground font-medium">Promues</span> après quelques
+            shifts : le badge <span className="text-foreground font-medium">« X courses depuis »</span> te
+            dit si le spot est vraiment fréquenté. 0 course = <span className="text-foreground font-medium">Supprimer</span>.
           </p>
         </CardContent>
       </Card>
@@ -231,6 +302,13 @@ export default function AdminZoneDiscoveriesScreen() {
           onClick={() => setFilter('pending')}
         >
           À traiter ({discoveries.filter((d) => d.status === 'pending').length})
+        </Button>
+        <Button
+          variant={filter === 'promoted' ? 'default' : 'outline'}
+          size="sm"
+          onClick={() => setFilter('promoted')}
+        >
+          Promues ({discoveries.filter((d) => d.status === 'promoted').length})
         </Button>
         <Button
           variant={filter === 'all' ? 'default' : 'outline'}
@@ -314,8 +392,42 @@ export default function AdminZoneDiscoveriesScreen() {
                         promu → {d.promoted_zone_id}
                       </Badge>
                     )}
+                    {d.status === 'promoted' &&
+                      (() => {
+                        const trips = d.promoted_zone_id
+                          ? tripCounts[d.promoted_zone_id] ?? 0
+                          : 0;
+                        return (
+                          <Badge
+                            variant="outline"
+                            className={
+                              trips > 0
+                                ? 'text-[10px] text-green-400 border-green-500/30'
+                                : 'text-[10px] text-amber-400 border-amber-500/30'
+                            }
+                          >
+                            {trips} course{trips > 1 ? 's' : ''} depuis
+                          </Badge>
+                        );
+                      })()}
                   </div>
                 </div>
+                {d.status === 'promoted' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 shrink-0 gap-1 text-xs text-muted-foreground hover:text-red-400"
+                    onClick={() => unpromoteDiscovery(d)}
+                    disabled={unpromotingId === d.id}
+                  >
+                    {unpromotingId === d.id ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Trash2 className="w-3 h-3" />
+                    )}
+                    Supprimer
+                  </Button>
+                )}
                 {d.status === 'pending' && (
                   <div className="flex flex-col gap-1 shrink-0">
                     <Button
