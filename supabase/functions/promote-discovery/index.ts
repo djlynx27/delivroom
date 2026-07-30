@@ -81,17 +81,25 @@ serve(async (req) => {
         return json({ error: 'Champs de zone requis (id, city_id, name, lat, lng)' }, 400);
       }
 
-      const { error: zoneErr } = await client.from('zones').insert({
-        id: z.id,
-        city_id: z.city_id,
-        name: z.name,
-        type: z.type || 'résidentiel',
-        latitude: z.latitude,
-        longitude: z.longitude,
-        address: z.address ?? null,
-        base_score: 50,
-        current_score: 50,
-      });
+      // Idempotent: if the zone id already exists (re-promote, or two
+      // intersections sharing a slug), keep the existing zone instead of
+      // erroring on the primary key — then just mark the discovery promoted.
+      const { error: zoneErr } = await client
+        .from('zones')
+        .upsert(
+          {
+            id: z.id,
+            city_id: z.city_id,
+            name: z.name,
+            type: z.type || 'résidentiel',
+            latitude: z.latitude,
+            longitude: z.longitude,
+            address: z.address ?? null,
+            base_score: 50,
+            current_score: 50,
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
+        );
       if (zoneErr) throw new Error(`Création zone: ${zoneErr.message}`);
 
       const { error: discErr } = await client

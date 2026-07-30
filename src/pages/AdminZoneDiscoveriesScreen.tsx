@@ -77,6 +77,22 @@ async function fetchDiscoveries(): Promise<DiscoveryRow[]> {
   return (data ?? []) as DiscoveryRow[];
 }
 
+// supabase.functions.invoke() reports non-2xx as a generic "Edge Function
+// returned a non-2xx status code"; the real reason is in the Response body.
+// Pull it out so the driver sees what actually failed.
+async function functionErrorMessage(error: unknown): Promise<string> {
+  const ctx = (error as { context?: Response })?.context;
+  if (ctx && typeof ctx.json === 'function') {
+    try {
+      const body = (await ctx.json()) as { error?: string };
+      if (typeof body?.error === 'string') return body.error;
+    } catch {
+      /* fall through to the generic message */
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function AdminZoneDiscoveriesScreen() {
   const qc = useQueryClient();
   const [filter, setFilter] = useState<'pending' | 'all'>('pending');
@@ -179,7 +195,7 @@ export default function AdminZoneDiscoveriesScreen() {
       }
       qc.invalidateQueries({ queryKey: ['zone-discoveries'] });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Échec');
+      toast.error(await functionErrorMessage(err));
     } finally {
       setRejectingId(null);
     }
@@ -462,7 +478,7 @@ function PromoteDialog({ discovery, onClose, onSuccess }: PromoteDialogProps) {
       toast.success(`Zone ${zoneId} créée`);
       onSuccess();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Échec de la promotion');
+      toast.error(await functionErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
