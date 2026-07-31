@@ -90,7 +90,6 @@ export function NearestHotspot() {
   const { data: zonesSth = [] } = useZones('sth');
   const { data: zonesBsb = [] } = useZones('bsb');
   const { data: zonesTrb = [] } = useZones('trb');
-  const { data: zonesBdf = [] } = useZones('bdf');
   const { data: weatherMtl } = useWeather('mtl');
 
   const allZones = useMemo(
@@ -103,7 +102,6 @@ export function NearestHotspot() {
       ...zonesSth,
       ...zonesBsb,
       ...zonesTrb,
-      ...zonesBdf,
     ],
     [
       zonesMtl,
@@ -114,7 +112,6 @@ export function NearestHotspot() {
       zonesSth,
       zonesBsb,
       zonesTrb,
-      zonesBdf,
     ]
   );
 

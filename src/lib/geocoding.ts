@@ -82,8 +82,9 @@ const CITY_KEYWORDS: Record<string, string[]> = {
   sth: ['sainte-thérèse', 'ste-thérèse', 'ste therese', 'ste-therese'],
   blv: ['blainville'],
   bsb: ['boisbriand'],
-  rsm: ['rosemère', 'rosemere'],
-  bdf: ['bois-des-filion', 'bois des filion'],
+  // Bois-des-Filion n'a plus de zones (aucun générateur de courses) : on
+  // rattache son texte à Rosemère, la ville catalogue la plus proche.
+  rsm: ['rosemère', 'rosemere', 'bois-des-filion', 'bois des filion'],
 };
 
 /**
