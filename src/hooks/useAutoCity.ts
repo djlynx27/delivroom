@@ -43,7 +43,6 @@ const CITY_REFERENCE_POINTS: {
   { id: 'sth', points: [{ lat: 45.642, lng: -73.829 }] },
   { id: 'blv', points: [{ lat: 45.675, lng: -73.878 }] },
   { id: 'rsm', points: [{ lat: 45.638, lng: -73.799 }] },
-  { id: 'bdf', points: [{ lat: 45.667, lng: -73.76 }] },
   { id: 'trb', points: [{ lat: 45.702, lng: -73.645 }] },
 ];
 
