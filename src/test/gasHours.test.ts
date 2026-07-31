@@ -98,6 +98,19 @@ describe('getOpenStatus', () => {
     expect(getOpenStatus(sundayNight, edt('2026-08-02', '06:00')).state).toBe('closed');
   });
 
+  it('traite une plage sans fermeture comme ouverte 24h, au sein d’un horaire mixte', () => {
+    const mixed: OpenHours = {
+      periods: [
+        // Jeudi (4) : ouvert en continu, aucune heure de fermeture publiée.
+        { open: { day: 4, time: '0000' } },
+        { open: { day: 5, time: '0900' }, close: { day: 5, time: '1700' } },
+      ],
+    };
+    expect(getOpenStatus(mixed, edt('2026-07-30', '23:00')).state).toBe('open');
+    expect(getOpenStatus(mixed, edt('2026-07-30', '23:00')).alwaysOpen).toBe(false);
+    expect(getOpenStatus(mixed, edt('2026-07-31', '20:00')).state).toBe('closed');
+  });
+
   it('ignore les périodes malformées', () => {
     const broken: OpenHours = {
       periods: [
@@ -118,6 +131,18 @@ describe('describeOpenStatus', () => {
   it('affiche l’heure de fermeture quand il reste du temps', () => {
     const status = getOpenStatus(NINE_TO_NINE, edt('2026-07-30', '12:00'));
     expect(describeOpenStatus(status)).toBe('Ouvert · ferme à 21:00');
+  });
+
+  it('se contente de "Ouvert"/"Fermé" sans heure exploitable', () => {
+    const base = {
+      alwaysOpen: false,
+      minutesUntilClose: null,
+      minutesUntilOpen: null,
+      closesAt: null,
+      opensAt: null,
+    };
+    expect(describeOpenStatus({ ...base, state: 'open' })).toBe('Ouvert');
+    expect(describeOpenStatus({ ...base, state: 'closed' })).toBe('Fermé');
   });
 
   it('affiche 24h/24 et horaire inconnu', () => {

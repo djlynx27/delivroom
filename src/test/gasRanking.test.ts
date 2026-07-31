@@ -109,6 +109,19 @@ describe('groupByCity', () => {
     expect(mtl?.city).toBe('Montréal');
   });
 
+  it('remet en casse lisible une ville qu’EQC ne publie qu’en majuscules', () => {
+    const shouty = [
+      station('Esso', 'SAINT-LIN–LAURENTIDES', 45.56, -73.72, 1.6),
+      station('Shell', 'SAINT-LIN–LAURENTIDES', 45.561, -73.721, 1.7),
+    ];
+    const groups = groupByCity(
+      toRankedStations(shouty, LAVAL_USER.lat, LAVAL_USER.lng, 'regular'),
+      LAVAL_USER.lat,
+      LAVAL_USER.lng
+    );
+    expect(groups[0].city).toBe('Saint-Lin–Laurentides');
+  });
+
   it('trie les villes par proximité', () => {
     const groups = groupByCity(rank(), LAVAL_USER.lat, LAVAL_USER.lng);
     expect(groups.map((g) => g.cityKey)[0]).toBe('laval');
@@ -237,6 +250,28 @@ describe('buildGasBoard', () => {
 
     expect(board.slots[0].alsoCheapestInCity).toBe(true);
     expect(board.slots.filter((s) => s.kind === 'city-cheapest')).toHaveLength(0);
+  });
+
+  it('trie le reste de la liste par compromis prix/distance et exclut les fermées', () => {
+    const crowded: GasStation[] = [
+      ...FLEET,
+      station('Sonic', 'Laval', 45.5601, -73.7250, 1.719),
+      station('Harnois', 'Laval', 45.5610, -73.7300, 1.689),
+      station('Crevier', 'Laval', 45.5620, -73.7350, 1.709),
+      station('Ultramar', 'Laval', 45.5630, -73.7400, 1.759),
+    ];
+    const ranked = toRankedStations(crowded, LAVAL_USER.lat, LAVAL_USER.lng, 'regular');
+    const board = buildGasBoard({
+      stations: ranked,
+      userLat: LAVAL_USER.lat,
+      userLng: LAVAL_USER.lng,
+      statusOf: (s) => (s.brand === 'Ultramar' && s.cityKey === 'laval' ? CLOSED : OPEN),
+    });
+
+    expect(board.nearbyRest.length).toBeGreaterThan(1);
+    const scores = board.nearbyRest.map((r) => r.station.cost_score);
+    expect(scores).toEqual([...scores].sort((a, b) => a - b));
+    expect(board.nearbyRest.every((r) => r.status.state !== 'closed')).toBe(true);
   });
 
   it('ne répète jamais la même station dans deux slots', () => {
