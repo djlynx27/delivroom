@@ -52,7 +52,6 @@ const CITY_CENTERS: Record<string, [number, number]> = {
   sth: [45.6422, -73.8295],
   blv: [45.675, -73.8779],
   rsm: [45.6365, -73.7993],
-  bdf: [45.667, -73.7588],
   trb: [45.7017, -73.6449],
 };
 

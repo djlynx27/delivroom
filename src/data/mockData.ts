@@ -8,7 +8,6 @@ export const CITIES: City[] = [
   { id: 'sth', name: 'Sainte-Thérèse' },
   { id: 'blv', name: 'Blainville' },
   { id: 'rsm', name: 'Rosemère' },
-  { id: 'bdf', name: 'Bois-des-Filion' },
   { id: 'trb', name: 'Terrebonne' },
 ];
 
@@ -452,31 +451,6 @@ export const ZONES: Zone[] = [
     type: 'transport',
     latitude: 45.625,
     longitude: -73.7643,
-  },
-  // ── Bois-des-Filion ───────────────────────────────────────────────────────
-  {
-    id: 'bdf-cl',
-    city_id: 'bdf',
-    name: 'Secteur Curé-Labelle',
-    type: 'commercial',
-    latitude: 45.6691,
-    longitude: -73.7563,
-  },
-  {
-    id: 'bdf-ar',
-    city_id: 'bdf',
-    name: 'Aréna Bois-des-Filion',
-    type: 'événements',
-    latitude: 45.6658,
-    longitude: -73.7603,
-  },
-  {
-    id: 'bdf-rp',
-    city_id: 'bdf',
-    name: 'Rue Principale Bois-des-Filion',
-    type: 'résidentiel',
-    latitude: 45.667,
-    longitude: -73.7588,
   },
   // ── Terrebonne ────────────────────────────────────────────────────────────
   {
