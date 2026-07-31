@@ -44,12 +44,27 @@ interface GasStation {
   name: string;
   brand: string;
   address: string;
+  /** municipality parsed from the address — used to group stations per city */
+  city: string;
   lat: number;
   lng: number;
   /** prices in CAD/L (e.g. 1.629), null when not posted */
   regular: number | null;
   super: number | null;
   diesel: number | null;
+}
+
+/**
+ * EQC addresses are consistently "<civic address>, <municipality>", with an
+ * occasional qualifier in parentheses ("Plessisville (ville & paroisse)").
+ * Casing is inconsistent upstream ("Laval" vs "LAVAL") — normalisation to a
+ * display label happens client-side in gasRanking.ts.
+ */
+function cityFromAddress(address: string): string {
+  const tail = address.includes(',')
+    ? address.slice(address.lastIndexOf(',') + 1)
+    : address;
+  return tail.replace(/\s*\(.*?\)\s*/g, '').trim();
 }
 
 interface CacheEntry {
@@ -99,6 +114,7 @@ async function fetchStations(): Promise<GasStation[]> {
       name: r['1'] ?? '',
       brand: (r['2'] ?? '').trim() || 'Inconnu',
       address: r['3'] ?? '',
+      city: cityFromAddress(r['3'] ?? ''),
       lat: r['4'],
       lng: r['5'],
       regular: toDollars(r.regulier),
