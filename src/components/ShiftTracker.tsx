@@ -10,6 +10,10 @@ import { Switch } from '@/components/ui/switch';
 import { useAutoShiftEnabled } from '@/hooks/useAutoShift';
 import { useTrips } from '@/hooks/useTrips';
 import {
+  ACTIVE_SHIFT_KEY,
+  readActiveShift,
+} from '@/lib/activeShift';
+import {
   derivePostShiftSummary,
   type PostShiftSummary,
 } from '@/lib/learningEngine';
@@ -29,20 +33,13 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-const ACTIVE_SHIFT_KEY = 'delivroom_active_shift';
-
 type ActiveShift = {
   startedAt: string;
 };
 
-function loadActiveShift() {
+function loadActiveShift(): ActiveShift | null {
   if (typeof window === 'undefined') return null;
-  try {
-    const raw = window.localStorage.getItem(ACTIVE_SHIFT_KEY);
-    return raw ? (JSON.parse(raw) as ActiveShift) : null;
-  } catch {
-    return null;
-  }
+  return readActiveShift();
 }
 
 function saveActiveShift(shift: ActiveShift | null) {
