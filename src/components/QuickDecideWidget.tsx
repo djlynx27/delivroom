@@ -162,7 +162,6 @@ export function QuickDecideWidget() {
               onChange={(e) => setFare(e.target.value)}
               placeholder="7.00"
               className="h-14 text-2xl font-mono text-center"
-              autoFocus
             />
           </div>
           <div className="space-y-1">
