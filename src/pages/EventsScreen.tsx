@@ -6,10 +6,43 @@ import { useCityId } from '@/hooks/useCityId';
 import { useEvents, type AppEvent } from '@/hooks/useEvents';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
+import {
+  useTicketmasterEvents,
+  type TicketmasterEvent,
+} from '@/hooks/useTicketmaster';
 import { useUserLocation } from '@/hooks/useUserLocation';
 import { openGoogleMapsNav } from '@/lib/hotspots';
 import { Calendar, Clock, Navigation, Star, Users } from 'lucide-react';
 import { useMemo } from 'react';
+
+// The `events` DB table is only ever seeded manually (no ingestion edge
+// function populates it — see supabase advisor audit), so it's sparse
+// outside Montreal. Ticketmaster is already fetched live for the "X
+// événements en cours" banner on TodayScreen — reuse it here so this screen
+// isn't empty just because nobody's kept the DB table current.
+const TM_EVENT_DURATION_MS = 3 * 60 * 60 * 1000; // matches getRelevantTmEvents assumption
+
+function tmEventToAppEvent(ev: TicketmasterEvent, cityId: string): AppEvent {
+  const start = new Date(ev.startDate);
+  const end = new Date(start.getTime() + TM_EVENT_DURATION_MS);
+  return {
+    id: `tm-${ev.id}`,
+    name: ev.name,
+    venue: ev.venueName || 'Lieu inconnu',
+    city_id: cityId,
+    latitude: ev.latitude,
+    longitude: ev.longitude,
+    start_at: start.toISOString(),
+    end_at: end.toISOString(),
+    capacity: ev.capacity,
+    demand_impact: Math.max(1, Math.round(ev.boostPoints / 7)),
+    boost_multiplier: 1 + ev.boostPoints / 50,
+    boost_radius_km: 2,
+    boost_zone_types: [],
+    category: 'event',
+    is_holiday: false,
+  };
+}
 
 function formatDate(dateStr: string, locale: string): string {
   return new Date(dateStr).toLocaleDateString(locale, {
@@ -148,7 +181,17 @@ export default function EventsScreen() {
     userLocation?.longitude
   );
   const { data: cities = [] } = useCities();
-  const { data: events = [] } = useEvents(cityId);
+  const { data: dbEvents = [] } = useEvents(cityId);
+  const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
+
+  const events = useMemo(() => {
+    const dbIds = new Set(dbEvents.map((e) => e.name + e.start_at));
+    const converted = tmEvents
+      .map((e) => tmEventToAppEvent(e, cityId))
+      // Skip a TM event if a DB-seeded one already covers the same name/time
+      .filter((e) => !dbIds.has(e.name + e.start_at));
+    return [...dbEvents, ...converted];
+  }, [dbEvents, tmEvents, cityId]);
 
   // Build stable date boundaries for today (local timezone)
   const now = new Date();

@@ -42,9 +42,18 @@ interface ShiftOptimizerProps {
 }
 
 // ── Score-to-$/h mapping (calibrated Montreal reference) ──────────────────────
-// score 80 → ~$45/h, score 60 → ~$32/h, score 40 → ~$22/h
+// score 80 → ~$45/h, score 60 → ~$32/h, score 40 → ~$22/h.
+// Piecewise-linear through those exact points — the flat `12 + score*0.42`
+// formula this replaced didn't actually hit them (score 60 gave $37/h, not
+// $32/h), which is why a "demande moyenne" shift was projected at ~$38/h
+// instead of the documented ~$32/h. This is still a theoretical curve, not
+// the driver's real $/h — it only applies when there isn't yet enough
+// observed EMA data for that zone/day/slot (see getLearningAdjustedEarningsPerHour).
 function scoreToEarningsPerH(score: number): number {
-  return Math.max(12, 12 + score * 0.42);
+  if (score <= 40) return Math.max(12, (score / 40) * 22);
+  if (score <= 60) return 22 + (score - 40) * 0.5;
+  if (score <= 80) return 32 + (score - 60) * 0.65;
+  return 45 + (score - 80) * 0.65;
 }
 
 // ── High-value time blocks per day-of-week (0=Mon…6=Sun) ─────────────────────
