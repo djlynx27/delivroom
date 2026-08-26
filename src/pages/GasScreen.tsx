@@ -185,7 +185,7 @@ export default function GasScreen() {
             role="tab"
             aria-selected={fuel === f.id}
             onClick={() => setFuel(f.id)}
-            className={`rounded-lg border py-2 text-sm font-medium transition ${
+            className={`rounded-lg border py-3 min-h-11 text-sm font-medium transition ${
               fuel === f.id
                 ? 'border-primary bg-primary text-primary-foreground'
                 : 'border-border bg-card text-muted-foreground hover:text-foreground'

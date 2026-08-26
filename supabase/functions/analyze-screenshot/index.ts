@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { isRateLimited } from '../_shared/rateLimit.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -54,7 +55,7 @@ interface AnalysisResult {
   matched_zone_id?: string;
   matched_zone_name?: string;
   is_fallback?: boolean;
-  fallback_reason?: 'missing_image_url' | 'missing_api_key' | 'image_fetch_failed' | 'gemini_call_failed' | 'gemini_invalid_json';
+  fallback_reason?: 'missing_image_url' | 'invalid_image_url' | 'missing_api_key' | 'image_fetch_failed' | 'gemini_call_failed' | 'gemini_invalid_json' | 'rate_limited';
 }
 
 interface RequestBody {
@@ -142,12 +143,22 @@ async function handleRequest(req: Request): Promise<Response> {
   if (!body.image_url) {
     return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'missing_image_url') });
   }
+  // SSRF guard: only ever fetch from this project's own Storage bucket, not
+  // an arbitrary caller-supplied URL (which could target internal/metadata
+  // endpoints reachable from the edge runtime).
+  if (!env.supabaseUrl || !body.image_url.startsWith(`${env.supabaseUrl}/storage/v1/object/`)) {
+    console.error('analyze-screenshot: rejected image_url outside storage bucket', body.image_url);
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'invalid_image_url') });
+  }
   if (!env.geminiKey) {
     console.error('analyze-screenshot: GEMINI_API_KEY not set in Edge Function secrets');
     return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'missing_api_key') });
   }
 
   const client = getServiceClient(env);
+  if (client && (await isRateLimited(client, 'analyze-screenshot', 20))) {
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'rate_limited') });
+  }
   const zones = await loadZones(client);
 
   const fetched = await fetchImage(body.image_url);
@@ -685,6 +696,8 @@ function analyzeFileContent(content: string, fileName?: string): AnalysisResult 
 
 const FALLBACK_NOTES: Record<NonNullable<AnalysisResult['fallback_reason']>, string> = {
   missing_image_url: 'Aucune image reçue par le serveur.',
+  invalid_image_url: 'URL d\'image refusée (hors du stockage de l\'app).',
+  rate_limited: 'Trop de requêtes — réessaie dans une minute.',
   missing_api_key: 'Clé API Gemini manquante côté serveur — contacte le support.',
   image_fetch_failed: 'Le serveur n\'a pas pu télécharger le screenshot (URL expirée).',
   gemini_call_failed: 'L\'API Gemini a refusé la requête (clé invalide, quota, ou modèle indisponible).',

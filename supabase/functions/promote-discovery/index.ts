@@ -62,6 +62,19 @@ serve(async (req) => {
       return json({ error: 'discovery_id requis' }, 400);
     }
 
+    // Default JWT verification alone isn't enough here: the anon key shipped
+    // in the PWA bundle is itself a valid JWT, so it passes that check. This
+    // function does destructive writes (deletes zones), so require an actual
+    // signed-in user, not just "any request carrying a Supabase key".
+    const authHeader = req.headers.get('Authorization') ?? '';
+    const anonClient = createClient(url, Deno.env.get('SUPABASE_ANON_KEY') ?? serviceKey, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData, error: authError } = await anonClient.auth.getUser();
+    if (authError || !userData?.user) {
+      return json({ error: 'Non authentifié' }, 401);
+    }
+
     const client = createClient(url, serviceKey);
 
     if (body.action === 'reject') {

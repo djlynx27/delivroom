@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Geolocation } from '@capacitor/geolocation';
+import type { Position } from '@capacitor/geolocation';
 import { Capacitor } from '@capacitor/core';
 
 export type ActivityState = 'unknown' | 'stationary' | 'walking' | 'in_vehicle';
@@ -37,7 +38,7 @@ export function useActivityDetection(): ActivityDetectionResult {
   useEffect(() => {
     let watchId: string | number | null = null;
 
-    const handlePosition = (pos: any) => {
+    const handlePosition = (pos: Position | GeolocationPosition) => {
       const rawSpeed = pos.coords.speed; // m/s — null on many browsers
       if (rawSpeed === null || rawSpeed === undefined || rawSpeed < 0) return;
 

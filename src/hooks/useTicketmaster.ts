@@ -80,12 +80,12 @@ export function useTicketmasterEvents(cityId: string) {
 
   return useQuery<TicketmasterEvent[]>({
     queryKey: ['ticketmaster', cityId],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       if (!TM_API_KEY) return [];
 
       const url = `https://app.ticketmaster.com/discovery/v2/events.json?apikey=${TM_API_KEY}&latlong=${latlong}&radius=30&unit=km&size=50&sort=date,asc`;
 
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
       if (!res.ok) {
         console.warn('Ticketmaster fetch failed:', res.status);
         return [];

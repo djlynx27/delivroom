@@ -26,6 +26,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { isRateLimited } from '../_shared/rateLimit.ts';
+import { montrealHour } from '../_shared/time.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -116,9 +118,7 @@ function getTimeDayFactors(now: Date): {
   timeFactor: number;
   dayFactor: number;
 } {
-  // Convert to Montreal local time
-  const montrealOffset = -5; // EST (adjust for DST if needed: -4 in summer)
-  const localHour = (now.getUTCHours() + 24 + montrealOffset) % 24;
+  const localHour = montrealHour(now);
   const localDow = now.getUTCDay(); // close enough for day-of-week
 
   const timeFactor =
@@ -331,7 +331,7 @@ async function geminiEnhanceScores(
   const apiKey = Deno.env.get('GEMINI_API_KEY');
   if (!apiKey) return null;
 
-  const hour = (now.getUTCHours() + 19) % 24; // UTC-5 approx
+  const hour = montrealHour(now);
   const dayNames = [
     'Dimanche',
     'Lundi',
@@ -515,12 +515,18 @@ serve(async (req) => {
     // baseline, preserving the AI's direction while bounding its magnitude.
     const FIREWALL_MAX_DRIFT = 35; // max score units of deviation allowed
 
-    const geminiScores = await geminiEnhanceScores(
-      zones as Zone[],
-      fallbackCityWeather,
-      now,
-      computedScores
-    );
+    // Cap Gemini calls (this can be triggered by anyone with the anon key,
+    // not just the 10-min cron) so a scripted caller can't drive up the
+    // Gemini bill. Falls back to the baseline computed score, same as when
+    // GEMINI_API_KEY is unset.
+    const geminiScores = (await isRateLimited(supabase, 'score-calculator', 20))
+      ? null
+      : await geminiEnhanceScores(
+          zones as Zone[],
+          fallbackCityWeather,
+          now,
+          computedScores
+        );
 
     let firewallAccepted = 0;
     let firewallClamped = 0;
@@ -585,24 +591,34 @@ serve(async (req) => {
       throw new Error(`Score insert failed: ${insertError.message}`);
     }
 
-    // 7. Update zone.current_score for fast reads
-    await Promise.all(
-      scoreRows.map(async ({ zone_id, final_score }) => {
-        const { error: zoneUpdateError } = await supabase
-          .from('zones')
-          .update({
-            current_score: Math.round(final_score),
-            updated_at: now.toISOString(),
-          })
-          .eq('id', zone_id);
-
-        if (zoneUpdateError) {
-          throw new Error(
-            `Zone score update failed for ${zone_id}: ${zoneUpdateError.message}`
-          );
-        }
-      })
+    // 7. Update zone.current_score for fast reads — one bulk upsert instead
+    // of one UPDATE per zone (this runs every 10 min via cron; was 61 round
+    // trips per run). Postgres validates NOT NULL columns on the upsert's
+    // insert path even when it resolves to an update, so every required
+    // column (city_id, name, latitude, longitude) must ride along — reuse
+    // the zone rows already fetched in step 1 rather than a second query.
+    const zoneById = new Map(zones.map((z) => [z.id, z]));
+    const { error: zoneUpdateError } = await supabase.from('zones').upsert(
+      scoreRows.map(({ zone_id, final_score }) => {
+        const z = zoneById.get(zone_id);
+        return {
+          id: zone_id,
+          city_id: z?.city_id,
+          name: z?.name,
+          type: z?.type,
+          territory: z?.territory,
+          latitude: z?.latitude,
+          longitude: z?.longitude,
+          base_score: z?.base_score,
+          current_score: Math.round(final_score),
+          updated_at: now.toISOString(),
+        };
+      }),
+      { onConflict: 'id' }
     );
+    if (zoneUpdateError) {
+      throw new Error(`Zone score update failed: ${zoneUpdateError.message}`);
+    }
 
     // 8. Purge history older than 24h
     await supabase

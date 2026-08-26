@@ -22,9 +22,9 @@ export function useHabsGame(date: string): {
 } {
   return useQuery<HabsGameResult>({
     queryKey: ['habs-game', date],
-    queryFn: async () => {
+    queryFn: async ({ signal }) => {
       try {
-        const res = await fetch(`${HABS_SCHEDULE_URL}?date=${date}`);
+        const res = await fetch(`${HABS_SCHEDULE_URL}?date=${date}`, { signal });
         if (!res.ok)
           return {
             isHomeGame: false,

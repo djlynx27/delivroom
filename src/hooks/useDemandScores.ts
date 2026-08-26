@@ -15,7 +15,7 @@ import {
   getAverageTrafficCongestion,
   useTomTomTraffic,
 } from '@/hooks/useTomTomTraffic';
-import type { TripWithZone } from '@/hooks/useTrips';
+import { useTrips, type TripWithZone } from '@/hooks/useTrips';
 import { haversineKm } from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { useZoneScores } from '@/hooks/useZoneScores';
@@ -174,29 +174,14 @@ export function useDemandScores(
   options: UseDemandScoresOptions = {}
 ) {
   const queryClient = useQueryClient();
-  const { data: zones = [] } = useZones(cityId);
+  const { data: zones = [], isLoading: zonesLoading } = useZones(cityId);
   const { data: weather } = useWeather(cityId);
   const { data: events = [] } = useEvents(cityId);
   const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
-  const { data: dbScores = [] } = useZoneScores(cityId);
+  const { data: dbScores = [], isLoading: scoresLoading } = useZoneScores(cityId);
   const { data: trafficSnapshots = [] } = useTomTomTraffic(cityId, zones);
   const { data: stmStatus } = useStmTransit();
-  const { data: tripLogs = [] } = useQuery({
-    queryKey: ['trip-history', cityId],
-    queryFn: async (): Promise<TripWithZone[]> => {
-      if (!cityId) return [];
-
-      const { data, error } = await supabase
-        .from('trips')
-        .select('*, zones!inner(name, type, current_score, city_id)')
-        .eq('zones.city_id', cityId)
-        .order('started_at', { ascending: false })
-        .limit(200);
-      if (error) throw error;
-      return (data ?? []) as TripWithZone[];
-    },
-    staleTime: 5 * 60 * 1000,
-  });
+  const { data: tripLogs = [] } = useTrips(200, cityId, Boolean(cityId));
   const [now, setNow] = useState(new Date());
 
   // Tick every 15 s so the "best zone right now" recomputes promptly while
@@ -806,6 +791,9 @@ export function useDemandScores(
   return {
     scores,
     factors,
+    // True only on the initial fetch, before any zone/score is known — lets
+    // callers show a skeleton instead of a blank hero card while waiting.
+    isLoading: (zonesLoading || scoresLoading) && zones.length === 0,
     zones,
     weather,
     now,

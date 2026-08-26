@@ -24,6 +24,7 @@ import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
 import { MultiAppStatus } from '@/components/MultiAppStatus';
+import { Skeleton } from '@/components/ui/skeleton';
 
 const CITY_CENTERS: Record<string, [number, number]> = {
   mtl: [45.5017, -73.5673],
@@ -50,7 +51,7 @@ export default function TodayScreen() {
 
   const { start, end } = getCurrentSlotTime(now);
   const { data: cities = [] } = useCities();
-  const { scores, factors, zones, endingSoon, relevantTmEvents } = useDemandScores(cityId);
+  const { scores, factors, zones, isLoading: scoresLoading, endingSoon, relevantTmEvents } = useDemandScores(cityId);
   const { data: holiday } = useHoliday(getCurrentSlotTime(now).date);
   const { data: habsGame } = useHabsGame(getCurrentSlotTime(now).date);
   const timeBoosts = useMemo(() => getActiveTimeBoosts(now), [now]);
@@ -90,7 +91,7 @@ export default function TodayScreen() {
     <div className="flex flex-col h-full pb-36">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 pt-2 pb-1 h-12">
-        <div className="w-[140px] flex-shrink-0">
+        <div className="max-w-[140px] flex-shrink-0">
           <CitySelect cities={cities} value={cityId} onChange={setCityId} />
         </div>
         <div className="flex-1 min-w-0">
@@ -241,9 +242,17 @@ export default function TodayScreen() {
               </div>
               <DemandBadge score={heroZone.score} size="giant" />
             </div>
+          ) : scoresLoading ? (
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex-1 min-w-0 space-y-2">
+                <Skeleton className="h-8 w-40" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+              <Skeleton className="h-16 w-16 rounded-full" />
+            </div>
           ) : (
             <p className="text-[18px] font-body text-muted-foreground">
-              {lang === 'fr' ? 'Chargement des zones...' : 'Loading zones...'}
+              {lang === 'fr' ? 'Aucune zone trouvée.' : 'No zones found.'}
             </p>
           )}
 

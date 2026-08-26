@@ -188,8 +188,8 @@ export default function EventsScreen() {
     <div className="flex flex-col h-full pb-36 overflow-y-auto">
       <div className="px-3 pt-3 pb-2 space-y-2">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-[22px] font-display font-bold">{t('events')}</h1>
-          <div className="w-[150px] flex-shrink-0">
+          <h1 className="text-[22px] font-display font-bold flex-1 min-w-0 truncate">{t('events')}</h1>
+          <div className="max-w-[150px] flex-shrink-0">
             <CitySelect cities={cities} value={cityId} onChange={setCityId} />
           </div>
         </div>

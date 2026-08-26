@@ -802,6 +802,20 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      get_latest_scores: {
+        Args: {
+          p_city_id: string;
+        };
+        Returns: {
+          id: string;
+          zone_id: string;
+          score: number | null;
+          weather_boost: number | null;
+          event_boost: number | null;
+          final_score: number | null;
+          calculated_at: string;
+        }[];
+      };
       match_user_pings: {
         Args: {
           match_count?: number;

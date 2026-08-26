@@ -763,3 +763,46 @@ export function scoreAllZonesWithLearning(
   const adjustedScores = applyLearningAgents(zones, base.scores, history);
   return { scores: adjustedScores, factors: base.factors };
 }
+
+// ── Driver-mode reweighting ──────────────────────────────────────────────────
+// A rideshare passenger and a delivery order favor different zone types
+// (rideshare: airports/transit; delivery: dense residential/commercial), so
+// the same underlying demand score gets reweighted per mode before ranking.
+export type DriverMode = 'all' | 'rideshare' | 'delivery';
+
+const RIDESHARE_BOOST: Record<string, number> = {
+  aéroport: 1.2,
+  université: 1.15,
+  transport: 1.1,
+  commercial: 1.05,
+  médical: 1.05,
+  métro: 1.05,
+  résidentiel: 0.75,
+};
+
+const DELIVERY_BOOST: Record<string, number> = {
+  commercial: 1.3,
+  résidentiel: 1.2,
+  métro: 0.95,
+  transport: 0.85,
+  université: 0.8,
+  médical: 0.75,
+  tourisme: 0.75,
+  nightlife: 0.7,
+  événements: 0.7,
+  aéroport: 0.65,
+};
+
+export function reweightZonesByDriverMode<T extends { type: string; score: number }>(
+  rankedZones: T[],
+  driverMode: DriverMode
+): T[] {
+  if (driverMode === 'all') return rankedZones;
+  const boostMap = driverMode === 'rideshare' ? RIDESHARE_BOOST : DELIVERY_BOOST;
+  return [...rankedZones]
+    .map((z) => ({
+      ...z,
+      score: Math.min(Math.round(z.score * (boostMap[z.type] ?? 1.0)), 100),
+    }))
+    .sort((a, b) => b.score - a.score);
+}

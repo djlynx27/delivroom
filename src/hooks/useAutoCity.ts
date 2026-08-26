@@ -84,7 +84,7 @@ export function useAutoCity(
   setCityId: (id: string) => void,
   userLat: number | null | undefined,
   userLng: number | null | undefined,
-  refreshKey?: any
+  refreshKey?: unknown
 ) {
   const lastAutoCityRef = useRef<string | null>(null);
   const pendingCityRef = useRef<{ id: string; confirmations: number } | null>(
