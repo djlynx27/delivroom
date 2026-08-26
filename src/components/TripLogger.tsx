@@ -16,15 +16,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  type FeedbackContext,
-  usePostTripFeedback,
-} from '@/hooks/usePostTripFeedback';
 import { useZones } from '@/hooks/useSupabase';
-import type { TripWithZone } from '@/hooks/useTrips';
-import { supabase } from '@/integrations/supabase/client';
+import { useAddTrip, useTrips } from '@/hooks/useTrips';
 import { validateTripEntryForm } from '@/lib/tripEntryValidation';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Clock,
   DollarSign,
@@ -40,83 +34,13 @@ function scoreToPredictedEarningsPerHour(score: number): number {
   return Math.max(12, 12 + score * 0.42);
 }
 
-function useRecentTrips() {
-  return useQuery<TripWithZone[]>({
-    queryKey: ['recent-trips'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('trips')
-        .select('*, zones(name)')
-        .order('started_at', { ascending: false })
-        .limit(10);
-      if (error) throw error;
-      return (data ?? []) as TripWithZone[];
-    },
-  });
-}
-
-function useAddTrip() {
-  const qc = useQueryClient();
-  const { submitFeedback } = usePostTripFeedback();
-
-  return useMutation({
-    mutationFn: async ({
-      trip,
-      feedback,
-    }: {
-      trip: {
-        zone_id: string;
-        started_at: string;
-        ended_at: string;
-        earnings: number;
-        tips: number;
-        distance_km: number;
-        notes: string;
-        platform: string | null;
-        experiment?: boolean;
-        zone_score?: number | null;
-      };
-      feedback: FeedbackContext;
-    }) => {
-      const { data, error } = await supabase
-        .from('trips')
-        .insert(trip)
-        .select('*, zones(name, type, current_score)')
-        .single();
-      if (error) throw error;
-
-      const insertedTrip = data as TripWithZone;
-      await submitFeedback(insertedTrip, feedback);
-      return insertedTrip.zone_id;
-    },
-    onSuccess: async (zoneId) => {
-      qc.invalidateQueries({ queryKey: ['recent-trips'] });
-      qc.invalidateQueries({ queryKey: ['trips-feed'] });
-      toast.success('Course enregistrée');
-
-      // Trigger partial AI rescore for this zone only
-      try {
-        const { error } = await supabase.functions.invoke('ai-score-analysis', {
-          body: { zone_id: zoneId },
-        });
-        if (!error) {
-          qc.invalidateQueries({ queryKey: ['zone-scores'] });
-          toast.info('Score de zone mis à jour via IA');
-        }
-      } catch {
-        // Non-blocking: don't fail if AI rescore fails
-      }
-    },
-  });
-}
-
 export function TripLogger() {
   const { data: zones = [] } = useZones('mtl');
   const { data: lavalZones = [] } = useZones('laval');
   const { data: longueuilZones = [] } = useZones('longueuil');
   const allZones = [...zones, ...lavalZones, ...longueuilZones];
 
-  const { data: recentTrips = [] } = useRecentTrips();
+  const { data: recentTrips = [] } = useTrips(10);
   const addTrip = useAddTrip();
 
   const today = new Date().toISOString().split('T')[0];

@@ -46,6 +46,18 @@ serve(async (req) => {
 
     const supabaseUrl = getEnv('SUPABASE_URL');
     const serviceRoleKey = getEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+    // Internal-only: the anon key ships in the PWA bundle and passes default
+    // JWT verification, so it must NOT be enough to trigger a push to every
+    // driver. Only callers presenting the service_role key (other Edge
+    // Functions, e.g. surge-detector) may invoke this.
+    if (req.headers.get('Authorization') !== `Bearer ${serviceRoleKey}`) {
+      return new Response(JSON.stringify({ error: 'Forbidden' }), {
+        status: 403,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const vapidPublicKey = getEnv('VAPID_PUBLIC_KEY');
     const vapidPrivateKey = getEnv('VAPID_PRIVATE_KEY');
     const vapidSubject =

@@ -12,6 +12,7 @@ import { ShiftTally } from '@/components/ShiftTally';
 import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
 import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
 import { useI18n } from '@/contexts/I18nContext';
 import { useActivityDetection } from '@/hooks/useActivityDetection';
@@ -35,6 +36,7 @@ import {
   openWazeNav,
   launchGoogleMapsNavigation,
 } from '@/lib/hotspots';
+import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -46,29 +48,6 @@ interface WakeLockNavigator extends Navigator {
 }
 
 type WakeLockStatus = 'active' | 'inactive' | 'unsupported';
-
-// Mode boost multipliers — module-level constants (no state dependency)
-const RIDESHARE_BOOST: Record<string, number> = {
-  aéroport: 1.2,
-  université: 1.15,
-  transport: 1.1,
-  commercial: 1.05,
-  médical: 1.05,
-  métro: 1.05,
-  résidentiel: 0.75,
-};
-const DELIVERY_BOOST: Record<string, number> = {
-  commercial: 1.3,
-  résidentiel: 1.2,
-  métro: 0.95,
-  transport: 0.85,
-  université: 0.8,
-  médical: 0.75,
-  tourisme: 0.75,
-  nightlife: 0.7,
-  événements: 0.7,
-  aéroport: 0.65,
-};
 
 export default function DriveScreen() {
   usePullToRefresh(() => window.location.reload());
@@ -109,7 +88,7 @@ export default function DriveScreen() {
   const [conservativePresence, setConservativePresence] = useState(() =>
     getConservativePresencePreference()
   );
-  const { scores, factors, zones, surgeMap } = useDemandScores(cityId, {
+  const { scores, factors, zones, isLoading: scoresLoading, surgeMap } = useDemandScores(cityId, {
     currentLat: location?.latitude ?? null,
     currentLng: location?.longitude ?? null,
     conservativePresence,
@@ -221,8 +200,6 @@ export default function DriveScreen() {
             label: t('screenInactive'),
           };
 
-  // Mode filter logic (mirrors TodayScreen) — boost maps defined at module level
-
   // Ranked zones by score descending
   const rankedZones = useMemo(() => {
     return zones
@@ -230,18 +207,12 @@ export default function DriveScreen() {
       .sort((a, b) => b.score - a.score);
   }, [zones, scores]);
 
-  // Reweight scores based on driver objective
-  const modeZones = useMemo(() => {
-    if (driverMode === 'all') return rankedZones;
-    const boostMap =
-      driverMode === 'rideshare' ? RIDESHARE_BOOST : DELIVERY_BOOST;
-    return [...rankedZones]
-      .map((z) => ({
-        ...z,
-        score: Math.min(Math.round(z.score * (boostMap[z.type] ?? 1.0)), 100),
-      }))
-      .sort((a, b) => b.score - a.score);
-  }, [rankedZones, driverMode]);
+  // Reweight scores based on driver objective (rideshare vs delivery favor
+  // different zone types) — see scoringEngine.reweightZonesByDriverMode
+  const modeZones = useMemo(
+    () => reweightZonesByDriverMode(rankedZones, driverMode),
+    [rankedZones, driverMode]
+  );
 
   // Exclude airport from hero zone, but allow in next recommendations
   const heroZone = modeZones.find((z) => z.type !== 'aéroport') ?? null;
@@ -379,7 +350,7 @@ export default function DriveScreen() {
                 setDriverMode(key);
                 vibrate('navigation');
               }}
-              className={`flex-1 text-[13px] font-display font-semibold py-2 rounded-lg transition-colors ${
+              className={`flex-1 text-[13px] font-display font-semibold py-3 min-h-11 rounded-lg transition-colors ${
                 driverMode === key
                   ? `${activeClass} shadow-sm`
                   : 'text-muted-foreground hover:text-foreground'
@@ -505,7 +476,7 @@ export default function DriveScreen() {
               </span>
             </h1>
           </div>
-          <div className="w-[130px] flex-shrink-0">
+          <div className="max-w-[130px] flex-shrink-0">
             <CitySelect cities={cities} value={cityId} onChange={setCityId} />
           </div>
         </div>
@@ -586,6 +557,12 @@ export default function DriveScreen() {
                 />
               </div>
             </>
+          ) : scoresLoading ? (
+            <div className="flex flex-col items-center space-y-3 py-2">
+              <Skeleton className="h-9 w-48" />
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-20 w-20 rounded-full" />
+            </div>
           ) : (
             <p className="text-[16px] text-muted-foreground font-body text-center">
               {t('noZonesAvailable')}

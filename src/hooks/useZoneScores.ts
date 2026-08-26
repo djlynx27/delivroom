@@ -44,23 +44,14 @@ export function useZoneScores(cityId: string) {
   return useQuery<ZoneScore[]>({
     queryKey: ['zone-scores', cityId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('scores')
-        .select('*, zones!inner(city_id)')
-        .eq('zones.city_id', cityId)
-        .order('calculated_at', { ascending: false });
+      // Server-side dedup via get_latest_scores (DISTINCT ON, uses
+      // idx_scores_zone_time) instead of pulling the full history table.
+      const { data, error } = await supabase.rpc('get_latest_scores', {
+        p_city_id: cityId,
+      });
 
       if (error) throw error;
-
-      // Deduplicate after fetching the full city slice; limiting rows here can
-      // hide some zones if a few zones have many recent historical scores.
-      const latest = new Map<string, ZoneScore>();
-      for (const row of data ?? []) {
-        if (!latest.has(row.zone_id)) {
-          latest.set(row.zone_id, row as unknown as ZoneScore);
-        }
-      }
-      return Array.from(latest.values());
+      return (data ?? []) as ZoneScore[];
     },
     // 30 s — Realtime usually beats us to the punch, but this catches the
     // case where the channel temporarily drops (e.g. WebView paused) and

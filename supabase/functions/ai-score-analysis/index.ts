@@ -21,6 +21,8 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { isRateLimited } from '../_shared/rateLimit.ts';
+import { montrealHour } from '../_shared/time.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -204,9 +206,12 @@ serve(async (req) => {
     }
 
     // 4. If Gemini available → batch AI analysis; otherwise deterministic fallback
-    const apiKey = Deno.env.get('GEMINI_API_KEY');
+    const apiKey =
+      (await isRateLimited(supabase, 'ai-score-analysis', 20))
+        ? undefined
+        : Deno.env.get('GEMINI_API_KEY');
     const now = new Date();
-    const hour = (now.getUTCHours() + 19) % 24; // ~America/Toronto
+    const hour = montrealHour(now);
 
     // Deterministic scoring from existing score + trip data. Used when Gemini
     // is unavailable, errors, rate-limits, or returns unparseable/empty JSON —

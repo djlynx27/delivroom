@@ -7,6 +7,7 @@ import {
   sumTrackedSessionRides,
 } from './reportMetrics.ts';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { isRateLimited } from '../_shared/rateLimit.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -112,7 +113,7 @@ serve(async (req) => {
     // ─── AI recommendation (optional, Gemini) ────────────────────────
     let aiRecommendation: string | null = null;
     const geminiKey = Deno.env.get('GEMINI_API_KEY');
-    if (geminiKey && totalTrips > 0) {
+    if (geminiKey && totalTrips > 0 && !(await isRateLimited(supabase, 'generate-daily-report', 10))) {
       try {
         const earningsPerHour =
           reportHoursWorked > 0

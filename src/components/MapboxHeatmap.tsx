@@ -4,6 +4,7 @@ import {
   Component,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -164,8 +165,9 @@ export function MapboxHeatmap({
               }
             }
           );
-        } catch (err: any) {
-          logMapGeolocationIssue('Capacitor location error:', err.message);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          logMapGeolocationIssue('Capacitor location error:', message);
         }
       } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
         navigator.geolocation.getCurrentPosition(
@@ -214,15 +216,20 @@ export function MapboxHeatmap({
     });
   }, [center, zoom]);
 
-  // GeoJSON for heatmap
-  const geojson: GeoJSON.FeatureCollection = {
-    type: 'FeatureCollection',
-    features: markers.map((m) => ({
-      type: 'Feature',
-      properties: { intensity: (m.demandScore ?? 50) / 100 },
-      geometry: { type: 'Point', coordinates: [m.longitude, m.latitude] },
-    })),
-  };
+  // GeoJSON for heatmap — memoized so a GPS tick (driverPos state, updated
+  // every few seconds via watchPosition) doesn't rebuild + re-diff the full
+  // FeatureCollection when `markers` itself hasn't changed.
+  const geojson: GeoJSON.FeatureCollection = useMemo(
+    () => ({
+      type: 'FeatureCollection',
+      features: markers.map((m) => ({
+        type: 'Feature',
+        properties: { intensity: (m.demandScore ?? 50) / 100 },
+        geometry: { type: 'Point', coordinates: [m.longitude, m.latitude] },
+      })),
+    }),
+    [markers]
+  );
 
   if (!MAPBOX_TOKEN) {
     return (

@@ -21,9 +21,9 @@ export interface UserLocationResult {
   refresh: () => Promise<UserLocation | null>;
 }
 
-function getGeolocationErrorMessage(error: any) {
+function getGeolocationErrorMessage(error: unknown) {
   if (typeof error === 'string') return error;
-  if (error.message) return error.message;
+  if (error instanceof Error) return error.message;
   return 'Impossible de récupérer la position actuelle';
 }
 

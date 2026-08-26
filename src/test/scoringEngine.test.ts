@@ -5,6 +5,7 @@ import {
   computeDemandScore,
   DEFAULT_WEIGHTS,
   getWeatherMultiplier,
+  reweightZonesByDriverMode,
   scoreAllZones,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
@@ -1045,5 +1046,48 @@ describe('computeDemandScore — off-peak branches for uncovered zone profiles',
       null
     );
     expect(shift).toBeGreaterThanOrEqual(offPeak);
+  });
+});
+
+describe('reweightZonesByDriverMode', () => {
+  const zones = [
+    { id: 'a', type: 'aéroport', score: 50 },
+    { id: 'r', type: 'résidentiel', score: 50 },
+  ];
+
+  it('returns the input unchanged for mode "all"', () => {
+    expect(reweightZonesByDriverMode(zones, 'all')).toBe(zones);
+  });
+
+  it('boosts airport over residential for rideshare mode', () => {
+    const result = reweightZonesByDriverMode(zones, 'rideshare');
+    const airport = result.find((z) => z.id === 'a')!;
+    const residential = result.find((z) => z.id === 'r')!;
+    expect(airport.score).toBeGreaterThan(residential.score);
+    // sorted descending by the reweighted score
+    expect(result[0].score).toBeGreaterThanOrEqual(result[1].score);
+  });
+
+  it('boosts residential over airport for delivery mode', () => {
+    const result = reweightZonesByDriverMode(zones, 'delivery');
+    const airport = result.find((z) => z.id === 'a')!;
+    const residential = result.find((z) => z.id === 'r')!;
+    expect(residential.score).toBeGreaterThan(airport.score);
+  });
+
+  it('falls back to a neutral 1.0 multiplier for an unmapped zone type', () => {
+    const result = reweightZonesByDriverMode(
+      [{ id: 'x', type: 'unknown-type', score: 42 }],
+      'rideshare'
+    );
+    expect(result[0].score).toBe(42);
+  });
+
+  it('caps the reweighted score at 100', () => {
+    const result = reweightZonesByDriverMode(
+      [{ id: 'a', type: 'aéroport', score: 95 }],
+      'rideshare'
+    );
+    expect(result[0].score).toBeLessThanOrEqual(100);
   });
 });
