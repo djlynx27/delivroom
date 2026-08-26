@@ -80,6 +80,31 @@ function SwUpdatePrompt() {
   return null;
 }
 
+// Scoped fallback for Sentry.ErrorBoundary around individual routes — lets
+// the driver retry just that page (resetError) instead of losing the whole
+// app to AppErrorBoundary's full reload. Reused per-route rather than one
+// component per screen since the recovery UX is identical everywhere.
+function RouteErrorFallback({ resetError }: { resetError: () => void }) {
+  return (
+    <div className="min-h-[60vh] flex items-center justify-center px-4">
+      <div className="max-w-sm text-center space-y-3">
+        <h2 className="text-lg font-display font-bold">
+          Cette page a rencontré un problème
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          Réessaie, ou change d&apos;onglet si ça persiste.
+        </p>
+        <button
+          className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+          onClick={resetError}
+        >
+          Réessayer
+        </button>
+      </div>
+    </div>
+  );
+}
+
 type ErrorBoundaryProps = { children: ReactNode };
 type ErrorBoundaryState = { hasError: boolean };
 
@@ -167,7 +192,19 @@ function AppContent() {
       <Suspense fallback={<AppLoading />}>
         <Routes>
           <Route path="/" element={<DriveScreen />} />
-          <Route path="/today" element={<TodayScreen />} />
+          <Route
+            path="/today"
+            element={
+              <Sentry.ErrorBoundary
+                fallback={({ resetError }) => (
+                  <RouteErrorFallback resetError={resetError} />
+                )}
+                beforeCapture={(scope) => scope.setTag('route', '/today')}
+              >
+                <TodayScreen />
+              </Sentry.ErrorBoundary>
+            }
+          />
           <Route path="/drive" element={<DriveScreen />} />
           <Route path="/planning" element={<PlanningScreen />} />
           <Route path="/zones" element={<ZonesScreen />} />

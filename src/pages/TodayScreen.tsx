@@ -155,7 +155,9 @@ export default function TodayScreen() {
           </div>
         ))}
         {endingSoon.map(ev => {
-          const minsLeft = Math.round((new Date(ev.end_at).getTime() - now.getTime()) / 60_000);
+          const endMs = new Date(ev.end_at).getTime();
+          if (!Number.isFinite(endMs)) return null;
+          const minsLeft = Math.round((endMs - now.getTime()) / 60_000);
           return (
             <div key={ev.id} className="flex items-center gap-2 bg-destructive/20 border border-destructive/40 rounded-lg px-3 py-2">
               <span className="text-[14px] font-body font-bold text-destructive">
