@@ -446,29 +446,33 @@ function CustomNavigationMapInner({
 
   return (
     <div className="fixed inset-0 z-50 bg-background">
-      <Map
-        ref={mapRef}
-        initialViewState={{
-          longitude: origin?.lng ?? destination.longitude,
-          latitude: origin?.lat ?? destination.latitude,
-          zoom: 15,
-          pitch: 45,
-        }}
-        mapboxAccessToken={MAPBOX_TOKEN}
-        mapStyle="mapbox://styles/mapbox/dark-v11"
-        style={{ width: '100%', height: '100%' }}
-        attributionControl={false}
-        reuseMaps
+      <ErrorBoundary
+        fallback={<MapCanvasFallback destination={destination} />}
       >
-        <RouteMapLayers
-          routeGeojson={routeGeojson}
-          mode={mode}
-          location={location}
-          destination={destination}
-          waypointsUsed={activeRoute?.waypointsUsed ?? []}
-          isFallbackLine={showFallbackLine}
-        />
-      </Map>
+        <Map
+          ref={mapRef}
+          initialViewState={{
+            longitude: origin?.lng ?? destination.longitude,
+            latitude: origin?.lat ?? destination.latitude,
+            zoom: 15,
+            pitch: 45,
+          }}
+          mapboxAccessToken={MAPBOX_TOKEN}
+          mapStyle="mapbox://styles/mapbox/dark-v11"
+          style={{ width: '100%', height: '100%' }}
+          attributionControl={false}
+          reuseMaps
+        >
+          <RouteMapLayers
+            routeGeojson={routeGeojson}
+            mode={mode}
+            location={location}
+            destination={destination}
+            waypointsUsed={activeRoute?.waypointsUsed ?? []}
+            isFallbackLine={showFallbackLine}
+          />
+        </Map>
+      </ErrorBoundary>
 
       <NavTopBar mode={mode} onModeChange={setMode} onClose={onClose} />
 
@@ -499,6 +503,55 @@ export function CustomNavigationMap(props: CustomNavigationMapProps) {
     >
       <CustomNavigationMapInner {...props} />
     </ErrorBoundary>
+  );
+}
+
+/**
+ * Shown when the Mapbox WebGL canvas itself throws (GPU context loss on some
+ * Android devices, driver crash, etc.) — scoped tightly around <Map> so the
+ * rest of the nav chrome (top bar, close button) stays mounted and the
+ * driver still has Google Maps/Waze one tap away instead of a dead screen.
+ */
+function MapCanvasFallback({ destination }: { destination: RouteCandidateZone }) {
+  return (
+    <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-6 text-center bg-background">
+      <div>
+        <h2 className="text-base font-display font-bold text-foreground">
+          Carte indisponible
+        </h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          L'affichage de la carte a rencontré un problème sur cet appareil.
+        </p>
+      </div>
+      {hasFiniteCoordinates(destination) && (
+        <div className="flex flex-col gap-2 w-full max-w-xs">
+          <button
+            onClick={() =>
+              openGoogleMapsNav(
+                destination.name,
+                destination.latitude,
+                destination.longitude
+              )
+            }
+            className="w-full gap-2.5 flex items-center justify-center text-[15px] font-display font-bold h-12 rounded-xl bg-primary text-primary-foreground"
+          >
+            <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" /> Google Maps
+          </button>
+          <button
+            onClick={() =>
+              openWazeNav(
+                destination.name,
+                destination.latitude,
+                destination.longitude
+              )
+            }
+            className="w-full gap-2.5 flex items-center justify-center text-[15px] font-display font-bold h-12 rounded-xl bg-secondary text-secondary-foreground"
+          >
+            <WazeIcon className="w-5 h-5 flex-shrink-0" /> Waze
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

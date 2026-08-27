@@ -168,10 +168,10 @@ function EventCard({
       {!event.is_holiday && (
         <Button
           onClick={() => onNavigate(event)}
-          className="w-full h-14 px-4 py-3 text-[16px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 min-w-0"
+          className="w-full h-auto min-h-[48px] px-4 py-2 whitespace-normal text-xs sm:text-sm font-display font-semibold leading-tight gap-2 bg-primary text-primary-foreground hover:bg-primary/90 min-w-0"
         >
           <Navigation className="w-4 h-4 flex-shrink-0" />
-          <span className="truncate min-w-0">
+          <span className="line-clamp-2 min-w-0">
             {t('navigateTo')} {event.venue}
           </span>
         </Button>

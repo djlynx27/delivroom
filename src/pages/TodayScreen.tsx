@@ -1,369 +1,161 @@
-import { useState, useEffect, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useI18n } from '@/contexts/I18nContext';
-import { CitySelect } from '@/components/CitySelect';
-import { DemandBadge } from '@/components/DemandBadge';
-import { useCities } from '@/hooks/useSupabase';
-import { useDemandScores } from '@/hooks/useDemandScores';
-import { formatTime24h, getCurrentSlotTime, getDemandClass, hasFiniteCoordinates } from '@/lib/demandUtils';
-import { getActiveTimeBoosts } from '@/lib/timeBoosts';
-import { Clock, PartyPopper, Download, WifiOff, Navigation, Bell, Ticket, Upload, Brain } from 'lucide-react';
-import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
-import { WeatherWidget } from '@/components/WeatherWidget';
-import { MapboxHeatmap } from '@/components/MapboxHeatmap';
-import { useHoliday } from '@/hooks/useHoliday';
-import { useHabsGame } from '@/hooks/useHabsGame';
-import { usePwaInstall } from '@/hooks/usePwaInstall';
-import { useOnlineStatus } from '@/hooks/useOnlineStatus';
-import { useNotifications } from '@/hooks/useNotifications';
-import { Button } from '@/components/ui/button';
-import { useUserLocation, haversineKm } from '@/hooks/useUserLocation';
-import { CustomNavigationMap } from '@/components/CustomNavigationMap';
-import { useCityId } from '@/hooks/useCityId';
-import { openWazeNav } from '@/lib/hotspots';
-import { DeadTimeTimer } from '@/components/DeadTimeTimer';
-import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
-import { MultiAppStatus } from '@/components/MultiAppStatus';
-import { Skeleton } from '@/components/ui/skeleton';
-import type { RouteCandidateZone } from '@/services/routing';
+import { useTrips, type TripWithZone } from '@/hooks/useTrips';
+import { getTripRevenue, summarizeTrips } from '@/lib/tripAnalytics';
+import { RefreshCw } from 'lucide-react';
+import { useMemo } from 'react';
 
-const CITY_CENTERS: Record<string, [number, number]> = {
-  mtl: [45.5017, -73.5673],
-  qc: [46.8139, -71.2080],
-  ott: [45.4215, -75.6972],
-};
+function getTodayStart(): Date {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start;
+}
 
+export function formatMoney(amount: number): string {
+  return `${Math.round(amount ?? 0)} $`;
+}
+
+export function formatHoursMinutes(hours: number): string {
+  const totalMinutes = Math.max(0, Math.round((hours ?? 0) * 60));
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  return `${h}h${String(m).padStart(2, '0')}`;
+}
+
+export function toValidDate(value: string | null | undefined): Date | null {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function KpiTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex-1 bg-card rounded-xl border border-border px-3 py-4 text-center min-w-0">
+      <p className="text-[22px] font-display font-bold text-foreground truncate">{value}</p>
+      <p className="text-[11px] text-muted-foreground font-body uppercase tracking-wide mt-1">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function TripRow({ trip }: { trip: TripWithZone }) {
+  const zoneName = trip.zones?.name ?? 'Zone inconnue';
+  const startedAt = toValidDate(trip.started_at);
+  const time = startedAt
+    ? startedAt.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' })
+    : '--:--';
+
+  return (
+    <div className="flex items-center justify-between bg-card rounded-lg border border-border px-3 py-2.5 gap-3">
+      <div className="min-w-0 flex-1">
+        <p className="text-[14px] font-display font-semibold truncate">{zoneName}</p>
+        <p className="text-[12px] text-muted-foreground font-body">{time}</p>
+      </div>
+      <p className="text-[14px] font-display font-bold text-green-400 flex-shrink-0">
+        {formatMoney(getTripRevenue(trip))}
+      </p>
+    </div>
+  );
+}
+
+function EmptyState() {
+  return (
+    <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+      <p className="text-[16px] font-display font-semibold text-muted-foreground">
+        Aucune course aujourd'hui
+      </p>
+      <p className="text-[13px] text-muted-foreground font-body mt-1">
+        Tes courses enregistrées apparaîtront ici.
+      </p>
+    </div>
+  );
+}
+
+function TripsSection({
+  isLoading,
+  isError,
+  trips,
+}: {
+  isLoading: boolean;
+  isError: boolean;
+  trips: TripWithZone[];
+}) {
+  if (isLoading) {
+    return (
+      <p className="text-center text-muted-foreground text-[13px] py-8">Chargement…</p>
+    );
+  }
+  if (isError) {
+    return (
+      <p className="text-center text-muted-foreground text-[13px] py-8 px-4">
+        Connexion indisponible — synchronise pour réessayer.
+      </p>
+    );
+  }
+  if (trips.length === 0) {
+    return <EmptyState />;
+  }
+  return (
+    <>
+      {trips.map((trip) => (
+        <TripRow key={trip.id} trip={trip} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * Aujourd'hui — minimal, single-source-of-truth day view. Reads only
+ * useTrips(); every metric goes through `?? 0`/`toValidDate` guards so bad
+ * or missing data renders "0"/"--:--" instead of crashing the tab.
+ */
 export default function TodayScreen() {
-  const navigate = useNavigate();
-  const { t, lang } = useI18n();
-  const [showImportHint, setShowImportHint] = useState(false);
-  const [cityId, setCityId] = useCityId();
-  const [now, setNow] = useState(new Date());
-  const { canInstall, install } = usePwaInstall();
-  const isOnline = useOnlineStatus();
-  const { enabled: notifEnabled, requestPermission } = useNotifications(cityId);
-  const { location: userLocation } = useUserLocation();
-  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
+  const { data: trips, isLoading, isError, refetch, isRefetching } = useTrips(200);
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 15000);
-    return () => clearInterval(timer);
-  }, []);
+  const todayTrips = useMemo(() => {
+    const todayStart = getTodayStart();
+    return (trips ?? [])
+      .filter((trip) => {
+        const startedAt = toValidDate(trip.started_at);
+        return !!startedAt && startedAt >= todayStart;
+      })
+      .sort((a, b) => {
+        const aTime = toValidDate(a.started_at)?.getTime() ?? 0;
+        const bTime = toValidDate(b.started_at)?.getTime() ?? 0;
+        return bTime - aTime;
+      });
+  }, [trips]);
 
-  const { start, end } = getCurrentSlotTime(now);
-  const { data: cities = [] } = useCities();
-  const { scores, factors, zones, isLoading: scoresLoading, endingSoon, relevantTmEvents } = useDemandScores(cityId);
-  const { data: holiday } = useHoliday(getCurrentSlotTime(now).date);
-  const { data: habsGame } = useHabsGame(getCurrentSlotTime(now).date);
-  const timeBoosts = useMemo(() => getActiveTimeBoosts(now), [now]);
-
-  const rankedZones = useMemo(() => {
-    return zones
-      .filter(hasFiniteCoordinates)
-      .map(z => ({ ...z, score: scores.get(z.id) ?? 0 }))
-      .sort((a, b) => b.score - a.score);
-  }, [zones, scores]);
-
-  const heroZone = rankedZones[0] ?? null;
-  const nextZones = rankedZones.slice(1, 4);
-
-  const getDistance = (zone: { latitude: number; longitude: number } | null) => {
-    if (!userLocation || !zone) return null;
-    return haversineKm(userLocation.latitude, userLocation.longitude, zone.latitude, zone.longitude);
-  };
-
-  const heroDistance = getDistance(heroZone);
-
-  const mapCenter = heroZone
-    ? [heroZone.latitude, heroZone.longitude] as [number, number]
-    : CITY_CENTERS[cityId] ?? CITY_CENTERS.mtl;
-
-  const mapMarkers = useMemo(() => {
-    return rankedZones.map(z => ({
-      id: z.id,
-      name: z.name,
-      type: z.type,
-      latitude: z.latitude,
-      longitude: z.longitude,
-      demandScore: z.score,
-    }));
-  }, [rankedZones]);
+  const summary = useMemo(
+    () => summarizeTrips(todayTrips, getTodayStart()),
+    [todayTrips]
+  );
 
   return (
     <div className="flex flex-col h-full pb-36">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 pt-2 pb-1 h-12">
-        <div className="max-w-[140px] flex-shrink-0">
-          <CitySelect cities={cities} value={cityId} onChange={setCityId} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <WeatherWidget cityId={cityId} />
-        </div>
-        <span className="text-[14px] text-muted-foreground font-body flex-shrink-0">
-          {formatTime24h(now)}
-        </span>
+      <div className="px-4 pt-4 pb-2">
+        <h1 className="text-[20px] font-display font-bold">Aujourd'hui</h1>
       </div>
 
-      {/* Dead Time Timer + Weekly Goal */}
-      <div className="px-3 mt-2 space-y-2">
-        <DeadTimeTimer nearestZoneName={heroZone?.name} />
-        <WeeklyGoalDisplay />
+      <div className="px-4 flex gap-2">
+        <KpiTile label="Gains" value={formatMoney(summary.revenue ?? 0)} />
+        <KpiTile label="Courses" value={String(summary.rides ?? 0)} />
+        <KpiTile label="Temps en route" value={formatHoursMinutes(summary.hours ?? 0)} />
       </div>
 
-      {/* Alerts */}
-      <div className="px-3 space-y-1.5 mt-2">
-        {!isOnline && (
-          <div className="flex items-center gap-2 bg-destructive/20 border border-destructive/40 rounded-lg px-3 py-2">
-            <WifiOff className="w-5 h-5 text-destructive flex-shrink-0" />
-            <span className="text-[14px] font-body font-medium text-destructive">Hors ligne</span>
-          </div>
-        )}
-        {canInstall && (
-          <Button onClick={install} variant="outline" className="w-full gap-2 border-primary/40 text-primary hover:bg-primary/10 h-12">
-            <Download className="w-5 h-5" /> Installer Delivroom
-          </Button>
-        )}
-        {!notifEnabled && (
-          <Button onClick={requestPermission} variant="outline" className="w-full gap-2 border-accent/40 text-accent-foreground hover:bg-accent/10 h-12">
-            <Bell className="w-5 h-5" /> {lang === 'fr' ? 'Activer les notifications' : 'Enable notifications'}
-          </Button>
-        )}
-        {notifEnabled && (
-          <div className="flex items-center gap-2 bg-primary/10 border border-primary/30 rounded-lg px-3 py-2">
-            <Bell className="w-4 h-4 text-primary flex-shrink-0" />
-            <span className="text-[13px] font-body text-primary">
-              {lang === 'fr' ? 'Notifications activées' : 'Notifications enabled'}
-            </span>
-          </div>
-        )}
-        {holiday?.isHoliday && holiday.name && (
-          <div className="flex items-center gap-2 bg-primary/10 border border-primary/30 rounded-lg px-3 py-2">
-            <PartyPopper className="w-5 h-5 text-primary flex-shrink-0" />
-            <span className="text-[14px] font-body font-medium text-primary">{holiday.name}</span>
-          </div>
-        )}
-        {cityId === 'mtl' && habsGame?.isHomeGame && (
-          <div className="flex items-center gap-2 bg-accent/30 border border-accent rounded-lg px-3 py-2">
-            <span className="text-lg flex-shrink-0">🏒</span>
-            <span className="text-[14px] font-body font-medium">Canadiens — Centre Bell</span>
-          </div>
-        )}
-        {timeBoosts.map((boost, index) => (
-          <div key={index} className="flex items-center gap-2 bg-secondary border border-border rounded-lg px-3 py-2">
-            <span className="text-lg flex-shrink-0">{boost.icon}</span>
-            <span className="text-[14px] font-body font-medium">
-              {lang === 'fr' ? boost.bannerFr : boost.bannerEn}
-            </span>
-          </div>
-        ))}
-        {endingSoon.map(ev => {
-          const endMs = new Date(ev.end_at).getTime();
-          if (!Number.isFinite(endMs)) return null;
-          const minsLeft = Math.round((endMs - now.getTime()) / 60_000);
-          return (
-            <div key={ev.id} className="flex items-center gap-2 bg-destructive/20 border border-destructive/40 rounded-lg px-3 py-2">
-              <span className="text-[14px] font-body font-bold text-destructive">
-                🔴 {ev.name} se termine dans {minsLeft}min — Demande maximale prévue!
-              </span>
-            </div>
-          );
-        })}
-        {relevantTmEvents.length > 0 && (
-          <div
-            onClick={() => navigate('/events')}
-            className="flex items-center gap-2 bg-accent/20 border border-accent/40 rounded-lg px-3 py-2 cursor-pointer active:scale-[0.98] transition-transform"
-          >
-            <Ticket className="w-5 h-5 text-accent-foreground flex-shrink-0" />
-            <span className="text-[14px] font-body font-medium text-accent-foreground">
-              🎫 {relevantTmEvents.length} événement{relevantTmEvents.length > 1 ? 's' : ''} en cours/à venir —{' '}
-              {relevantTmEvents.map(e => e.venueName).filter((v, i, a) => a.indexOf(v) === i).join(', ')}
-            </span>
-          </div>
-        )}
+      <div className="px-4 mt-4 flex-1 space-y-2 overflow-y-auto">
+        <TripsSection isLoading={isLoading} isError={isError} trips={todayTrips} />
       </div>
 
-      {/* Meilleure zone */}
-      <div className="px-3 mt-2">
-        <div className="bg-card rounded-xl border border-border p-4">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-muted-foreground" />
-              <span className="text-[14px] text-muted-foreground font-body uppercase tracking-wide">
-                {lang === 'fr' ? 'Meilleure zone maintenant' : 'Best zone now'} · {start}–{end}
-              </span>
-            </div>
-            {/* Confidence badge */}
-            {heroZone && (() => {
-              const f = factors.get(heroZone.id);
-              const hasPersonalData = (f?.learningBoostPoints ?? 0) > 0 || (f?.habitBoostPercent ?? 0) > 0;
-              return hasPersonalData ? (
-                <span className="flex items-center gap-1 text-[11px] text-green-400 font-medium">
-                  <Brain className="w-3 h-3" /> Données perso
-                </span>
-              ) : (
-                <button
-                  onClick={() => setShowImportHint(h => !h)}
-                  className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  🔮 Théorique
-                </button>
-              );
-            })()}
-          </div>
-
-          {/* Import hint */}
-          {showImportHint && (
-            <div className="mb-3 bg-primary/10 border border-primary/20 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
-              <span className="text-xs text-primary">
-                Importe tes screenshots Imoove/Hypra pour des suggestions basées sur tes vraies données
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 px-2 text-xs text-primary shrink-0"
-                onClick={() => navigate('/admin/imports')}
-              >
-                <Upload className="w-3 h-3 mr-1" /> Importer
-              </Button>
-            </div>
-          )}
-
-          {heroZone ? (
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0">
-                <h2 className="text-[28px] font-display font-bold leading-tight break-words">
-                  {heroZone.name}
-                </h2>
-                <span className="text-[16px] text-muted-foreground capitalize block mt-0.5">
-                  {heroZone.type}
-                  <ScoreFactorIcons factors={factors.get(heroZone.id)} />
-                </span>
-                {heroDistance !== null && (
-                  <span className="text-[20px] font-display font-semibold text-muted-foreground mt-1 block">
-                    📍 {heroDistance.toFixed(1)} km
-                  </span>
-                )}
-              </div>
-              <DemandBadge score={heroZone.score} size="giant" />
-            </div>
-          ) : scoresLoading ? (
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex-1 min-w-0 space-y-2">
-                <Skeleton className="h-8 w-40" />
-                <Skeleton className="h-4 w-24" />
-              </div>
-              <Skeleton className="h-16 w-16 rounded-full" />
-            </div>
-          ) : (
-            <p className="text-[18px] font-body text-muted-foreground">
-              {lang === 'fr' ? 'Aucune zone trouvée.' : 'No zones found.'}
-            </p>
-          )}
-
-          {heroZone && (
-            <div className="mt-4 space-y-2">
-              <Button
-                onClick={() =>
-                  setNavZone({
-                    id: heroZone.id,
-                    name: heroZone.name,
-                    latitude: heroZone.latitude,
-                    longitude: heroZone.longitude,
-                    score: heroZone.score,
-                  })
-                }
-                className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Navigation className="w-5 h-5" />
-                🗺️ GO — Naviguer
-              </Button>
-              <Button
-                onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
-                variant="secondary"
-                className="w-full h-16 text-[18px] font-display font-bold gap-2"
-              >
-                🧭 Waze
-              </Button>
-            </div>
-          )}
-        </div>
+      <div className="px-4 pb-4 pt-2">
+        <button
+          onClick={() => void refetch()}
+          disabled={isRefetching}
+          className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-60"
+        >
+          <RefreshCw className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`} />
+          {isRefetching ? 'Synchronisation…' : 'Synchroniser'}
+        </button>
       </div>
-
-      {/* Heatmap */}
-      <div className="flex-shrink-0 h-[260px] max-h-[260px] overflow-hidden mx-3 mt-3 rounded-xl border border-border">
-        <MapboxHeatmap
-          center={mapCenter}
-          zoom={13}
-          markers={mapMarkers}
-          onZoneClick={(z) =>
-            setNavZone({
-              id: z.id,
-              name: z.name,
-              latitude: z.latitude,
-              longitude: z.longitude,
-              score: z.demandScore ?? 0,
-            })
-          }
-        />
-      </div>
-
-      {/* Multi-App Status */}
-      <div className="px-3 mt-3">
-        <MultiAppStatus cityId={cityId} />
-      </div>
-
-      {/* Prochains créneaux */}
-      <div className="px-3 mt-3 pb-4 space-y-2">
-        <h3 className="text-[16px] font-display font-bold text-muted-foreground uppercase tracking-wide">
-          {t('nextSlots')}
-        </h3>
-        {nextZones.map((zone) => {
-          const dc = getDemandClass(zone.score);
-          const dist = getDistance(zone);
-          return (
-            <div
-              key={zone.id}
-              onClick={() =>
-                setNavZone({
-                  id: zone.id,
-                  name: zone.name,
-                  latitude: zone.latitude,
-                  longitude: zone.longitude,
-                  score: zone.score,
-                })
-              }
-              className={`flex items-center justify-between bg-card rounded-xl border-l-4 ${dc.border} border border-border p-4 gap-3 cursor-pointer active:scale-[0.98] transition-transform`}
-            >
-              <div className="flex-1 min-w-0">
-                <span className="text-[18px] font-display font-semibold block leading-tight break-words">
-                  {zone.name}
-                  {dist !== null && (
-                    <span className="text-muted-foreground text-[14px] font-body ml-2">
-                      · {dist.toFixed(1)} km
-                    </span>
-                  )}
-                </span>
-                <span className="text-[14px] text-muted-foreground font-body capitalize">
-                  {zone.type}
-                  <ScoreFactorIcons factors={factors.get(zone.id)} />
-                </span>
-                <span className="text-[12px] text-muted-foreground font-body">{start}–{end}</span>
-              </div>
-              <div className="flex-shrink-0">
-                <DemandBadge score={zone.score} size="lg" />
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {navZone && (
-        <CustomNavigationMap
-          destination={navZone}
-          candidateZones={rankedZones}
-          onClose={() => setNavZone(null)}
-        />
-      )}
     </div>
   );
 }
