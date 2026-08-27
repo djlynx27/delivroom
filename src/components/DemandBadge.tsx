@@ -17,7 +17,14 @@ export function DemandBadge({ score, size = 'sm' }: DemandBadgeProps) {
   if (size === 'giant') {
     return (
       <div className="flex flex-col items-center gap-0.5">
-        <span className={`${textClass} text-[64px] font-display font-extrabold leading-none`}>{score}</span>
+        {/* key={score} remounts the node so the pop animation replays when
+            the score value changes, not on every unrelated re-render. */}
+        <span
+          key={score}
+          className={`${textClass} text-[64px] font-display font-extrabold leading-none animate-spring-pop`}
+        >
+          {score}
+        </span>
         <span className={`${bgClass} inline-flex items-center rounded-full px-3 py-1 text-[14px] font-display font-semibold text-background`}>
           {label}
         </span>

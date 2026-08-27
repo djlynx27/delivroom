@@ -6,11 +6,30 @@
  * - Stamps ISO-8601 timestamps
  * - Attaches structured context objects (JSON-serialisable)
  * - Suppresses debug output in production
- * - Can be upgraded to a remote sink (Sentry, Datadog, etc.) without
- *   changing call sites — just swap the transport in `emit()`.
+ * - Forwards warn/error to Sentry so they show up in the same place as
+ *   render-crash reports, instead of only ever reaching the console.
  */
 
+import * as Sentry from '@sentry/react';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+// Context keys that could carry PII (GPS coords, auth tokens, emails) never
+// leave the device — main.tsx already sets sendDefaultPii: false for Sentry
+// events, this is the same rule applied to our own structured context.
+const SENSITIVE_KEY_PATTERN =
+  /token|password|secret|email|latitude|longitude|lat$|lng$|coords?/i;
+
+export function sanitizeContext(
+  context?: Record<string, unknown>
+): Record<string, unknown> | undefined {
+  if (!context) return undefined;
+  const clean: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(context)) {
+    clean[key] = SENSITIVE_KEY_PATTERN.test(key) ? '[redacted]' : value;
+  }
+  return clean;
+}
 
 interface LogEntry {
   level: LogLevel;
@@ -41,10 +60,13 @@ const consoleTransport: Transport = (entry) => {
   }
 };
 
-/** Remote transport placeholder — swap with Sentry/Datadog SDK when ready */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const remoteTransport: Transport = (_entry: LogEntry) => {
-  // TODO: send to remote observability platform (Sentry, Datadog, etc.)
+/** Remote transport — forwards warn/error to Sentry (no-op if Sentry.init was never called, e.g. dev without a DSN) */
+export const remoteTransport: Transport = (entry) => {
+  if (entry.level !== 'warn' && entry.level !== 'error') return;
+  Sentry.captureMessage(entry.message, {
+    level: entry.level === 'error' ? 'error' : 'warning',
+    extra: sanitizeContext(entry.context),
+  });
 };
 
 const transports: Transport[] = IS_PROD

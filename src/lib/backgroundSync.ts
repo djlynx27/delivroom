@@ -36,8 +36,9 @@ export async function registerMaxymoPeriodicSync(): Promise<boolean> {
   // ('periodic-background-sync'). Skip silently if denied.
   try {
     const permission = await navigator.permissions.query({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      name: 'periodic-background-sync' as any,
+      // 'periodic-background-sync' isn't in the standard PermissionName union
+      // yet (Chromium-only API) — go through unknown rather than `any`.
+      name: 'periodic-background-sync' as unknown as PermissionName,
     });
     if (permission.state === 'denied') return false;
   } catch {

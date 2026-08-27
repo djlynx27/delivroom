@@ -3,8 +3,9 @@ import { CitySelect } from '@/components/CitySelect';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
-import { GoogleMapsIcon, WazeIcon } from '@/components/NavIcons';
-import { NavigationSheet } from '@/components/NavigationSheet';
+import { WazeIcon } from '@/components/NavIcons';
+import { CustomNavigationMap } from '@/components/CustomNavigationMap';
+import type { RouteCandidateZone } from '@/services/routing';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
 import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
 import { QuickDecideWidget } from '@/components/QuickDecideWidget';
@@ -32,11 +33,11 @@ import {
   setStoredDriverMode,
 } from '@/lib/driverPreferences';
 import {
-  openGoogleMapsNav,
   openWazeNav,
   launchGoogleMapsNavigation,
 } from '@/lib/hotspots';
 import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
+import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -48,6 +49,17 @@ interface WakeLockNavigator extends Navigator {
 }
 
 type WakeLockStatus = 'active' | 'inactive' | 'unsupported';
+
+function hasActiveSurge(surge: SurgeResult | null | undefined): surge is SurgeResult {
+  return !!surge && surge.surgeClass !== 'normal';
+}
+
+function getHeroCardGlowClass(surge: SurgeResult | null | undefined): string {
+  if (!hasActiveSurge(surge)) return '';
+  return surge.surgeClass === 'high' || surge.surgeClass === 'peak'
+    ? 'animate-pulse-glow'
+    : '';
+}
 
 export default function DriveScreen() {
   usePullToRefresh(() => window.location.reload());
@@ -94,11 +106,7 @@ export default function DriveScreen() {
     conservativePresence,
   });
   const [fullScreen, setFullScreen] = useState(false);
-  const [navZone, setNavZone] = useState<{
-    name: string;
-    lat: number;
-    lng: number;
-  } | null>(null);
+  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
 
   // Speed-based activity detection → auto-HUD.
   // hudActive defaults to true so the driver lands directly in driving mode
@@ -249,6 +257,7 @@ export default function DriveScreen() {
   };
 
   const heroDistance = getDistance(heroZone);
+  const heroSurge = heroZone ? surgeMap?.get(heroZone.id) : null;
 
   const gpsLabel =
     status === 'loading'
@@ -456,7 +465,17 @@ export default function DriveScreen() {
                 }
               : null
           }
+          heroSurge={heroSurge}
           speedKmh={speedKmh}
+          onNavigate={(zone) =>
+            setNavZone({
+              id: zone.id,
+              name: zone.name,
+              latitude: zone.latitude,
+              longitude: zone.longitude,
+              score: zone.score,
+            })
+          }
           onExit={() => {
             setHudDismissedManually(true);
             setHudActive(false);
@@ -495,7 +514,7 @@ export default function DriveScreen() {
         className={`px-4 ${fullScreen ? 'flex-1 flex items-center justify-center pt-6' : ''}`}
       >
         <div
-          className={`w-full bg-card rounded-3xl border border-border px-5 py-6 space-y-4 shadow-lg ${fullScreen ? 'max-w-md' : ''}`}
+          className={`w-full bg-card rounded-3xl border border-border px-5 py-6 space-y-4 shadow-lg transition-shadow ${fullScreen ? 'max-w-md' : ''} ${getHeroCardGlowClass(heroSurge)}`}
         >
           <p className="text-[13px] font-body uppercase tracking-wide text-muted-foreground text-center">
             {t('bestZoneNow')}
@@ -522,25 +541,30 @@ export default function DriveScreen() {
 
               <div className="flex justify-center items-center gap-3">
                 <DemandBadge score={heroZone.score} size="giant" />
-                {(() => {
-                  const surge = surgeMap?.get(heroZone.id);
-                  return surge && surge.surgeClass !== 'normal' ? (
-                    <SurgeIndicator
-                      surgeClass={surge.surgeClass}
-                      multiplier={surge.surgeMultiplier}
-                      size="lg"
-                      showMultiplier
-                    />
-                  ) : null;
-                })()}
+                {hasActiveSurge(heroSurge) && (
+                  <SurgeIndicator
+                    surgeClass={heroSurge.surgeClass}
+                    multiplier={heroSurge.surgeMultiplier}
+                    size="lg"
+                    showMultiplier
+                  />
+                )}
               </div>
 
               <div className="space-y-2 pt-2">
                 <Button
-                  onClick={() => openGoogleMapsNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
+                  onClick={() =>
+                    setNavZone({
+                      id: heroZone.id,
+                      name: heroZone.name,
+                      latitude: heroZone.latitude,
+                      longitude: heroZone.longitude,
+                      score: heroZone.score,
+                    })
+                  }
                   className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
-                  <GoogleMapsIcon className="w-6 h-6 flex-shrink-0" /> Google Maps
+                  <Car className="w-6 h-6 flex-shrink-0" /> Naviguer
                 </Button>
                 <Button
                   onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
@@ -640,7 +664,7 @@ export default function DriveScreen() {
           <h3 className="text-[14px] font-display font-bold text-muted-foreground uppercase tracking-wide">
             {t('nextSlots')}
           </h3>
-          {nextZones.map((zone) => {
+          {nextZones.map((zone, i) => {
             const dc = getDemandClass(zone.score);
             const dist = getDistance(zone);
             return (
@@ -648,12 +672,15 @@ export default function DriveScreen() {
                 key={zone.id}
                 onClick={() =>
                   setNavZone({
+                    id: zone.id,
                     name: zone.name,
-                    lat: zone.latitude,
-                    lng: zone.longitude,
+                    latitude: zone.latitude,
+                    longitude: zone.longitude,
+                    score: zone.score,
                   })
                 }
-                className={`flex items-center justify-between bg-card rounded-xl border-l-4 ${dc.border} border border-border px-4 py-3 gap-3 cursor-pointer active:scale-[0.98] transition-transform`}
+                style={{ animationDelay: `${i * 40}ms` }}
+                className={`flex items-center justify-between bg-card rounded-xl border-l-4 ${dc.border} border border-border px-4 py-3 gap-3 cursor-pointer active:scale-[0.98] transition-transform animate-slide-up`}
               >
                 <div className="flex-1 min-w-0">
                   <span className="text-[17px] font-display font-semibold block leading-tight break-words">
@@ -676,13 +703,13 @@ export default function DriveScreen() {
         </div>
       )}
 
-      <NavigationSheet
-        open={!!navZone}
-        onClose={() => setNavZone(null)}
-        zoneName={navZone?.name ?? ''}
-        latitude={navZone?.lat ?? 0}
-        longitude={navZone?.lng ?? 0}
-      />
+      {navZone && (
+        <CustomNavigationMap
+          destination={navZone}
+          candidateZones={modeZones}
+          onClose={() => setNavZone(null)}
+        />
+      )}
 
       {/* 15-min arrival countdown overlay */}
       {isCountingDown && arrivedZoneName && (

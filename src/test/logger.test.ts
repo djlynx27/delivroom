@@ -1,5 +1,9 @@
-import { logger } from '@/lib/logger';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@sentry/react', () => ({ captureMessage: vi.fn() }));
+
+import { logger, remoteTransport, sanitizeContext } from '@/lib/logger';
+import * as Sentry from '@sentry/react';
 
 describe('logger', () => {
   let consoleSpy: {
@@ -70,5 +74,53 @@ describe('logger', () => {
     logger.warn('no context');
     const args = consoleSpy.warn.mock.calls[0] as unknown[];
     expect(args).toHaveLength(2);
+  });
+});
+
+describe('remoteTransport', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('forwards warn/error to Sentry but skips debug/info', () => {
+    const captureSpy = vi.mocked(Sentry.captureMessage);
+
+    remoteTransport({
+      level: 'error',
+      message: 'boom',
+      timestamp: new Date().toISOString(),
+    });
+    remoteTransport({
+      level: 'debug',
+      message: 'noisy',
+      timestamp: new Date().toISOString(),
+    });
+
+    expect(captureSpy).toHaveBeenCalledOnce();
+    expect(captureSpy).toHaveBeenCalledWith(
+      'boom',
+      expect.objectContaining({ level: 'error' })
+    );
+  });
+});
+
+describe('sanitizeContext', () => {
+  it('redacts sensitive keys but keeps the rest', () => {
+    const clean = sanitizeContext({
+      zone: 'Plateau',
+      authToken: 'abc123',
+      latitude: 45.5,
+      driverEmail: 'x@y.com',
+    });
+    expect(clean).toEqual({
+      zone: 'Plateau',
+      authToken: '[redacted]',
+      latitude: '[redacted]',
+      driverEmail: '[redacted]',
+    });
+  });
+
+  it('returns undefined for undefined input', () => {
+    expect(sanitizeContext(undefined)).toBeUndefined();
   });
 });

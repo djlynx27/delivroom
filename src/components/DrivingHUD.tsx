@@ -1,5 +1,6 @@
 import { useHaptics } from '@/hooks/useHaptics';
-import { launchGoogleMapsNavigation } from '@/lib/hotspots';
+import { SurgeIndicator } from '@/components/SurgeIndicator';
+import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -14,9 +15,11 @@ export interface DrivingHUDZone {
 
 interface DrivingHUDProps {
   heroZone: DrivingHUDZone | null;
+  heroSurge?: SurgeResult | null;
   nextZone?: DrivingHUDZone | null;
   earningsToday?: number;
   speedKmh?: number | null;
+  onNavigate: (zone: DrivingHUDZone) => void;
   onExit: () => void;
 }
 
@@ -62,10 +65,12 @@ function ExitButton({
 
 function HeroZoneDisplay({
   heroZone,
+  heroSurge,
   score,
   color,
 }: {
   heroZone: DrivingHUDZone | null;
+  heroSurge?: SurgeResult | null;
   score: number;
   color: string;
 }) {
@@ -83,14 +88,25 @@ function HeroZoneDisplay({
         {heroZone.name}
       </div>
 
+      {/* key={score} remounts the node so the pop animation replays whenever
+          the score itself changes, not on every unrelated re-render. */}
       <div
-        className="text-9xl font-black tabular-nums leading-none"
+        key={score}
+        className="text-9xl font-black tabular-nums leading-none animate-spring-pop"
         style={{ color }}
         aria-label={`Score: ${score} sur 100`}
       >
         {score}
       </div>
       <div className="text-white/30 text-2xl font-semibold">/100</div>
+
+      {heroSurge && heroSurge.surgeClass !== 'normal' && (
+        <SurgeIndicator
+          surgeClass={heroSurge.surgeClass}
+          multiplier={heroSurge.surgeMultiplier}
+          size="lg"
+        />
+      )}
 
       {heroZone.distKm !== undefined ? (
         <div className="text-white/50 text-2xl font-semibold mt-1">
@@ -133,9 +149,11 @@ function NextZonePill({ nextZone }: { nextZone?: DrivingHUDZone | null }) {
  */
 export function DrivingHUD({
   heroZone,
+  heroSurge,
   nextZone,
   earningsToday = 0,
   speedKmh,
+  onNavigate,
   onExit,
 }: DrivingHUDProps) {
   const { vibrate } = useHaptics();
@@ -151,11 +169,7 @@ export function DrivingHUD({
   function handleNavClick() {
     if (!heroZone) return;
     vibrate('navigation');
-    launchGoogleMapsNavigation(
-      heroZone.name,
-      heroZone.latitude,
-      heroZone.longitude
-    );
+    onNavigate(heroZone);
   }
 
   function handleExitClick() {
@@ -198,7 +212,12 @@ export function DrivingHUD({
 
       <div className="flex-1 flex flex-col items-center justify-center px-6 gap-2">
         <Car className="w-9 h-9 opacity-30" style={{ color }} />
-        <HeroZoneDisplay heroZone={heroZone} score={score} color={color} />
+        <HeroZoneDisplay
+          heroZone={heroZone}
+          heroSurge={heroSurge}
+          score={score}
+          color={color}
+        />
       </div>
 
       <NextZonePill nextZone={nextZone} />
@@ -226,7 +245,7 @@ export function DrivingHUD({
             color: '#08081a',
             minHeight: 72,
           }}
-          aria-label={`Naviguer vers ${heroZone?.name ?? 'zone'} via Google Maps`}
+          aria-label={`Naviguer vers ${heroZone?.name ?? 'zone'}`}
         >
           NAVIGUER
         </button>
