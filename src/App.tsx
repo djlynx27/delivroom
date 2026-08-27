@@ -7,7 +7,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/contexts/I18nContext';
 import { useAnonAuth } from '@/hooks/useAnonAuth';
 import * as Sentry from '@sentry/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
 import { ThemeProvider } from 'next-themes';
 import {
@@ -77,6 +77,25 @@ function SwUpdatePrompt() {
     return () =>
       window.removeEventListener('delivroom:sw-need-refresh', onNeedRefresh);
   }, []);
+  return null;
+}
+
+// Trips (quick-log via MacroDroid, another device, the admin panel...) can
+// land in Supabase while the PWA is backgrounded. staleTime alone won't
+// pick that up until 5 minutes pass, so "Aujourd'hui"/the Drive HUD can
+// read stale earnings right after the driver switches back. Force a
+// refetch on every foreground instead of waiting out the cache window.
+function TripsResumeSync() {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === 'visible') {
+        queryClient.invalidateQueries({ queryKey: ['trips-feed'] });
+      }
+    }
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [queryClient]);
   return null;
 }
 
@@ -240,6 +259,7 @@ const App = () => (
           <TooltipProvider>
             <Sonner />
             <SwUpdatePrompt />
+            <TripsResumeSync />
             <BrowserRouter
               future={{
                 v7_startTransition: true,

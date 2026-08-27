@@ -1,13 +1,8 @@
 import { useTrips, type TripWithZone } from '@/hooks/useTrips';
 import { getTripRevenue, summarizeTrips } from '@/lib/tripAnalytics';
+import { getMontrealDayStart } from '@/lib/timezone';
 import { RefreshCw } from 'lucide-react';
 import { useMemo } from 'react';
-
-function getTodayStart(): Date {
-  const start = new Date();
-  start.setHours(0, 0, 0, 0);
-  return start;
-}
 
 export function formatMoney(amount: number): string {
   return `${Math.round(amount ?? 0)} $`;
@@ -112,7 +107,7 @@ export default function TodayScreen() {
   const { data: trips, isLoading, isError, refetch, isRefetching } = useTrips(200);
 
   const todayTrips = useMemo(() => {
-    const todayStart = getTodayStart();
+    const todayStart = getMontrealDayStart();
     return (trips ?? [])
       .filter((trip) => {
         const startedAt = toValidDate(trip.started_at);
@@ -126,7 +121,7 @@ export default function TodayScreen() {
   }, [trips]);
 
   const summary = useMemo(
-    () => summarizeTrips(todayTrips, getTodayStart()),
+    () => summarizeTrips(todayTrips, getMontrealDayStart()),
     [todayTrips]
   );
 

@@ -36,6 +36,7 @@ import {
 import { openWazeNav } from '@/lib/hotspots';
 import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
 import type { SurgeResult } from '@/lib/surgeEngine';
+import { getMontrealDayStart } from '@/lib/timezone';
 import { summarizeTrips } from '@/lib/tripAnalytics';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -269,9 +270,7 @@ export default function DriveScreen() {
   const { data: todayTrips, isLoading: tripsLoading } = useTrips(200);
   const todayEarnings = useMemo(() => {
     if (tripsLoading || !todayTrips) return 0;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    return summarizeTrips(todayTrips, todayStart).revenue;
+    return summarizeTrips(todayTrips, getMontrealDayStart()).revenue;
   }, [todayTrips, tripsLoading]);
 
   const gpsLabel =
