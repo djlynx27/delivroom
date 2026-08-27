@@ -3,20 +3,31 @@ import { hasFiniteCoordinates } from '@/lib/demandUtils';
 import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
 import {
+  buildGoogleMapsProspectingUrl,
   getDriveRoute,
   type DriveRouteResult,
   type NavigationMode,
   type RouteCandidateZone,
+  type RoutePoint,
 } from '@/services/routing';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Map, { Layer, Marker, Source, type MapRef } from 'react-map-gl';
 import type { UserLocationResult } from '@/hooks/useUserLocation';
-import { X } from 'lucide-react';
+import { Compass, Navigation2, X } from 'lucide-react';
 import { GoogleMapsIcon, WazeIcon } from '@/components/NavIcons';
 import { useUserLocation } from '@/hooks/useUserLocation';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+
+// "Drive Navigation" camera: close and tilted like Google/Waze turn-by-turn,
+// vs. a flat top-down overview when the driver toggles to north-up.
+const FOLLOW_PITCH = 60;
+const FOLLOW_ZOOM = 17.5;
+const NORTH_UP_PITCH = 0;
+const NORTH_UP_ZOOM = 15;
+
+type OrientationMode = 'follow' | 'north-up';
 
 interface CustomNavigationMapProps {
   destination: RouteCandidateZone;
@@ -147,6 +158,7 @@ function RouteOverlays({
   routeError,
   locationStatus,
   showFallbackLine,
+  origin,
 }: {
   destination: RouteCandidateZone;
   routes: RouteByMode;
@@ -155,6 +167,7 @@ function RouteOverlays({
   routeError: string | null;
   locationStatus: UserLocationResult['status'];
   showFallbackLine: boolean;
+  origin: RoutePoint | null;
 }) {
   const activeRoute = routes[mode];
   const otherMode: NavigationMode = mode === 'direct' ? 'prospection' : 'direct';
@@ -171,6 +184,7 @@ function RouteOverlays({
           otherRoute={routes[otherMode] ?? null}
           mode={mode}
           isLoading={isLoadingRoute}
+          origin={origin}
         />
       )}
     </>
@@ -213,6 +227,30 @@ function NavTopBar({
 
       <div className="w-10" />
     </div>
+  );
+}
+
+function OrientationToggle({
+  mode,
+  onToggle,
+}: {
+  mode: OrientationMode;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className="absolute right-3 bottom-28 z-10 rounded-full bg-black/60 backdrop-blur w-11 h-11 flex items-center justify-center text-white"
+      aria-label={
+        mode === 'follow' ? 'Passer en vue Nord en haut' : 'Suivre la route (3D)'
+      }
+    >
+      {mode === 'follow' ? (
+        <Navigation2 className="w-5 h-5" />
+      ) : (
+        <Compass className="w-5 h-5" />
+      )}
+    </button>
   );
 }
 
@@ -272,20 +310,61 @@ function RouteComparisonLine({
   );
 }
 
+function formatHotZonesLabel(mode: NavigationMode, waypointCount: number): string | null {
+  if (mode !== 'prospection' || waypointCount === 0) return null;
+  const plural = waypointCount > 1 ? 's' : '';
+  return `${waypointCount} zone${plural} chaude${plural}`;
+}
+
+function resolveExportOrigin(
+  mode: NavigationMode,
+  waypointCount: number,
+  origin: RoutePoint | null
+): RoutePoint | null {
+  if (mode !== 'prospection' || waypointCount === 0) return null;
+  return origin;
+}
+
+function ExportProspectionButton({
+  origin,
+  destination,
+  waypoints,
+}: {
+  origin: RoutePoint;
+  destination: RouteCandidateZone;
+  waypoints: RouteCandidateZone[];
+}) {
+  return (
+    <button
+      onClick={() =>
+        window.open(buildGoogleMapsProspectingUrl(origin, destination, waypoints), '_system')
+      }
+      className="mt-3 w-full gap-2.5 flex items-center justify-center text-[15px] font-display font-bold h-12 rounded-xl bg-primary text-primary-foreground"
+    >
+      <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" />
+      Ouvrir dans Google Maps (Route optimisée)
+    </button>
+  );
+}
+
 function RouteInfoBar({
   destination,
   activeRoute,
   otherRoute,
   mode,
   isLoading,
+  origin,
 }: {
   destination: RouteCandidateZone;
   activeRoute: DriveRouteResult;
   otherRoute: DriveRouteResult | null;
   mode: NavigationMode;
   isLoading: boolean;
+  origin: RoutePoint | null;
 }) {
   const waypointCount = activeRoute.waypointsUsed.length;
+  const hotZonesLabel = formatHotZonesLabel(mode, waypointCount);
+  const exportOrigin = resolveExportOrigin(mode, waypointCount, origin);
   return (
     <div className="absolute bottom-0 left-0 right-0 z-10 bg-card border-t border-border px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
       <p className="text-[16px] font-display font-bold text-foreground truncate">
@@ -293,17 +372,18 @@ function RouteInfoBar({
       </p>
       <p className="text-[14px] text-muted-foreground font-body">
         {activeRoute.distanceKm.toFixed(1)} km · {Math.round(activeRoute.durationMin)} min
-        {mode === 'prospection' && waypointCount > 0 && (
-          <span>
-            {' '}
-            · {waypointCount} zone{waypointCount > 1 ? 's' : ''} chaude
-            {waypointCount > 1 ? 's' : ''}
-          </span>
-        )}
+        {hotZonesLabel && <span> · {hotZonesLabel}</span>}
         {isLoading && <span> · Recalcul…</span>}
       </p>
       {mode === 'prospection' && otherRoute && (
         <RouteComparisonLine activeRoute={activeRoute} otherRoute={otherRoute} />
+      )}
+      {exportOrigin && (
+        <ExportProspectionButton
+          origin={exportOrigin}
+          destination={destination}
+          waypoints={activeRoute.waypointsUsed}
+        />
       )}
     </div>
   );
@@ -322,6 +402,7 @@ function CustomNavigationMapInner({
   const [routes, setRoutes] = useState<RouteByMode>({});
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
+  const [orientationMode, setOrientationMode] = useState<OrientationMode>('follow');
 
   const destinationValid = hasFiniteCoordinates(destination);
   const haveActiveRoute = !!routes[mode];
@@ -381,15 +462,20 @@ function CustomNavigationMapInner({
     return () => ctrl.abort();
   }, [origin, otherMode, destination, candidateZones, destinationValid, haveOtherRoute]);
 
-  // Follow mode: recenter + rotate to heading on every GPS update.
+  // Follow mode: recenter + rotate to heading on every GPS update, tilted
+  // in close like Google/Waze turn-by-turn. North-up mode recenters flat
+  // with bearing locked to 0, for a classic overview instead.
   useEffect(() => {
     if (!location || !hasFiniteCoordinates(location) || !mapRef.current) return;
+    const isFollow = orientationMode === 'follow';
     mapRef.current.easeTo({
       center: [location.longitude, location.latitude],
-      bearing: location.heading ?? undefined,
+      bearing: isFollow ? location.heading ?? undefined : 0,
+      pitch: isFollow ? FOLLOW_PITCH : NORTH_UP_PITCH,
+      zoom: isFollow ? FOLLOW_ZOOM : NORTH_UP_ZOOM,
       duration: 500,
     });
-  }, [location]);
+  }, [location, orientationMode]);
 
   const activeRoute = routes[mode] ?? null;
 
@@ -454,8 +540,8 @@ function CustomNavigationMapInner({
           initialViewState={{
             longitude: origin?.lng ?? destination.longitude,
             latitude: origin?.lat ?? destination.latitude,
-            zoom: 15,
-            pitch: 45,
+            zoom: FOLLOW_ZOOM,
+            pitch: FOLLOW_PITCH,
           }}
           mapboxAccessToken={MAPBOX_TOKEN}
           mapStyle="mapbox://styles/mapbox/dark-v11"
@@ -476,6 +562,13 @@ function CustomNavigationMapInner({
 
       <NavTopBar mode={mode} onModeChange={setMode} onClose={onClose} />
 
+      <OrientationToggle
+        mode={orientationMode}
+        onToggle={() =>
+          setOrientationMode((prev) => (prev === 'follow' ? 'north-up' : 'follow'))
+        }
+      />
+
       <RouteOverlays
         destination={destination}
         routes={routes}
@@ -484,6 +577,7 @@ function CustomNavigationMapInner({
         routeError={routeError}
         locationStatus={locationStatus}
         showFallbackLine={showFallbackLine}
+        origin={origin}
       />
     </div>
   );

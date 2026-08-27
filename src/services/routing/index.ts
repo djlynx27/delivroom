@@ -1,4 +1,5 @@
-import { fetchRoute } from './mapboxDirections';
+import { logger } from '@/lib/logger';
+import { fetchOsrmRoute, fetchRoute } from './mapboxDirections';
 import type {
   DriveRouteResult,
   NavigationMode,
@@ -18,7 +19,7 @@ export { selectProspectionWaypoints } from './waypointSelector';
 
 /**
  * Direct mode: origin → destination, fastest path.
- * Prospection mode: origin → up to 5 high-demand zones along the way →
+ * Prospection mode: origin → up to 3 high-demand zones along the way →
  * destination, capped so the detour never exceeds +50% of the direct trip.
  */
 export async function getDriveRoute(
@@ -41,7 +42,48 @@ export async function getDriveRoute(
     { lat: destination.latitude, lng: destination.longitude },
   ];
 
-  const route = await fetchRoute(points, options);
+  try {
+    const route = await fetchRoute(points, options);
+    return { ...route, waypointsUsed };
+  } catch (err) {
+    if (options.signal?.aborted) throw err;
+    // Mapbox down/rate-limited/bad request: fall back to OSRM's public
+    // router rather than surfacing an error and leaving the driver with a
+    // blank map — same points, same result shape.
+    logger.warn('Mapbox Directions failed, falling back to OSRM', {
+      mode,
+      message: err instanceof Error ? err.message : String(err),
+    });
+    const route = await fetchOsrmRoute(points, options);
+    return { ...route, waypointsUsed };
+  }
+}
 
-  return { ...route, waypointsUsed };
+/**
+ * Builds an official Google Maps Directions deep link carrying the
+ * prospection route's own waypoints, so tapping "Open in Google Maps" hands
+ * the driver the same sweep Delivroom computed instead of a plain
+ * origin→destination line. Google Maps deep links get unwieldy well before
+ * Mapbox's 25-coordinate limit, so this is capped independently at 4 —
+ * enough to convey a real detour without turning into a maze of pins.
+ */
+export function buildGoogleMapsProspectingUrl(
+  origin: RoutePoint,
+  destination: RouteCandidateZone,
+  waypoints: RouteCandidateZone[]
+): string {
+  const strategicWaypoints = waypoints.slice(0, 4);
+  const params = new URLSearchParams({
+    api: '1',
+    origin: `${origin.lat},${origin.lng}`,
+    destination: `${destination.latitude},${destination.longitude}`,
+    travelmode: 'driving',
+  });
+  if (strategicWaypoints.length > 0) {
+    params.set(
+      'waypoints',
+      strategicWaypoints.map((z) => `${z.latitude},${z.longitude}`).join('|')
+    );
+  }
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
 }

@@ -1,3 +1,4 @@
+import { hasFiniteCoordinates } from '@/lib/demandUtils';
 import type { RouteCandidateZone, RoutePoint } from './types';
 
 // Equirectangular approximation — good enough at city scale (a few km) and
@@ -32,7 +33,8 @@ function distanceKm(a: Vec2, b: Vec2): number {
 }
 
 export interface WaypointSelectionOptions {
-  /** Max waypoints to keep, ranked by score. Default 5 (spec target: 3-5). */
+  /** Max waypoints to keep, ranked by score. Default 3 — Mapbox Directions
+   * caps total coordinates at 25, and a tight detour reads better anyway. */
   maxWaypoints?: number;
   /** Perpendicular distance (km) from the origin→destination line a candidate may sit. Default 2. */
   corridorBufferKm?: number;
@@ -54,7 +56,7 @@ export function selectProspectionWaypoints(
   options: WaypointSelectionOptions = {}
 ): RouteCandidateZone[] {
   const {
-    maxWaypoints = 5,
+    maxWaypoints = 3,
     corridorBufferKm = 2,
     maxDetourRatio = 1.5,
     destinationId,
@@ -67,8 +69,13 @@ export function selectProspectionWaypoints(
 
   type Scored = { zone: RouteCandidateZone; vec: Vec2; t: number };
 
+  // Bad seed data (null/NaN lat-lng) must never reach the corridor math —
+  // it silently coerces (null - n = -n) into a bogus-but-finite point
+  // instead of throwing, so it can slip through and reach Mapbox as a
+  // malformed coordinate. Drop it here, before any math touches it.
   const inCorridor: Scored[] = candidates
     .filter((zone) => zone.id !== destinationId)
+    .filter((zone) => hasFiniteCoordinates(zone))
     .map((zone) => {
       const vec = toLocalKm(origin, { lat: zone.latitude, lng: zone.longitude });
       // Perpendicular distance from the infinite origin→destination line.
