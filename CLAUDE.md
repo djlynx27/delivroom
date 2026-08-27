@@ -148,6 +148,15 @@ Thresholds dans `vitest.config.ts`. Build CI échoue sous seuil.
 npm run test:run && npm run type-check && npm run lint && git commit -m "type(scope): description"
 ```
 
+### Auto-commit + auto-push (règle permanente, depuis 2026-08-27)
+Après CHAQUE fix/feature validé par `type-check` + `lint` + `vitest run` (0 erreur) :
+1. Stage uniquement les fichiers de ce fix précis (jamais `git add -A`/`.` — voir règle globale sur les fichiers sensibles/artefacts de build).
+2. Commit avec message conventional clair.
+3. Push direct vers la branche active (`main` en pratique) pour déclencher le déploiement Vercel.
+4. Ne PAS demander confirmation avant de commit/push — confirmer seulement APRÈS, avec le hash/plage de commit poussée.
+
+Cette autorisation couvre le commit + push normal. Reste soumis à confirmation : tout `--force`, `reset --hard`, réécriture d'historique, ou action touchant autre chose que le working tree local (ex. suppression de branche distante, modif de secrets Vercel/Supabase).
+
 ### Souveraineté des données
 - Gemini : Edge Functions uniquement, jamais côté client
 - Aucune donnée user envoyée à APIs tierces sans consentement
