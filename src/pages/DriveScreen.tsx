@@ -5,7 +5,7 @@ import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
 import { WazeIcon } from '@/components/NavIcons';
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
-import type { RouteCandidateZone } from '@/services/routing';
+import { buildOneTapNavigationUrl, type RouteCandidateZone } from '@/services/routing';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
 import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
 import { QuickDecideWidget } from '@/components/QuickDecideWidget';
@@ -570,15 +570,16 @@ export default function DriveScreen() {
 
               <div className="space-y-2 pt-2">
                 <Button
-                  onClick={() =>
-                    setNavZone({
-                      id: heroZone.id,
-                      name: heroZone.name,
-                      latitude: heroZone.latitude,
-                      longitude: heroZone.longitude,
-                      score: heroZone.score,
-                    })
-                  }
+                  onClick={() => {
+                    const origin = location
+                      ? { lat: location.latitude, lng: location.longitude }
+                      : null;
+                    window.location.href = buildOneTapNavigationUrl(
+                      origin,
+                      heroZone,
+                      modeZones
+                    );
+                  }}
                   className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   <Car className="w-6 h-6 flex-shrink-0" /> Naviguer

@@ -1,3 +1,4 @@
+import { getGoogleMapsNavUrl } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
 import { fetchOsrmRoute, fetchRoute } from './mapboxDirections';
 import type {
@@ -86,4 +87,26 @@ export function buildGoogleMapsProspectingUrl(
     );
   }
   return `https://www.google.com/maps/dir/?${params.toString()}`;
+}
+
+/**
+ * 1-tap navigation: no in-app map, no route fetch, no confirmation — just
+ * the URL to hand straight to `window.location.href`. Waypoint selection is
+ * pure geometry (no network call), so this resolves synchronously even
+ * though the full in-app nav view needs a Directions API round-trip for the
+ * drawn line. Falls back to a plain destination link when GPS isn't locked
+ * yet rather than blocking the tap.
+ */
+export function buildOneTapNavigationUrl(
+  origin: RoutePoint | null,
+  destination: RouteCandidateZone,
+  candidateZones: RouteCandidateZone[]
+): string {
+  if (!origin) {
+    return getGoogleMapsNavUrl(destination.name, destination.latitude, destination.longitude);
+  }
+  const waypoints = selectProspectionWaypoints(origin, destination, candidateZones, {
+    destinationId: destination.id,
+  });
+  return buildGoogleMapsProspectingUrl(origin, destination, waypoints);
 }
