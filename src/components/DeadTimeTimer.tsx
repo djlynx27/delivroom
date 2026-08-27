@@ -1,31 +1,43 @@
 import { useActivityDetection } from '@/hooks/useActivityDetection';
 import { AlertTriangle, Pause, Timer } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-const LS_KEY = 'geohustle_dead_time';
+// Above this, `elapsed` is untrustworthy (a stale timestamp survived a bad
+// state transition) rather than a real dead-time streak — clamp to 00:00
+// instead of showing a five-figure minute count.
+const MAX_DEAD_TIME_MS = 24 * 60 * 60 * 1000;
 
-interface DeadTimeState {
+interface TimerState {
   startedAt: number | null;
-  accumulated: number; // ms accumulated before current session
+  accumulated: number; // ms accumulated before the current running segment
   paused: boolean;
 }
 
-function loadState(): DeadTimeState {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    if (raw) return JSON.parse(raw) as DeadTimeState;
-  } catch {
-    // localStorage unavailable; fall back to default timer state.
-  }
-  return { startedAt: Date.now(), accumulated: 0, paused: false };
+function initialState(libreMode: boolean): TimerState {
+  return libreMode
+    ? { startedAt: Date.now(), accumulated: 0, paused: false }
+    : { startedAt: null, accumulated: 0, paused: true };
 }
 
-function saveState(s: DeadTimeState) {
-  try {
-    localStorage.setItem(LS_KEY, JSON.stringify(s));
-  } catch {
-    // ignore storage errors
-  }
+/**
+ * Central guard for the mm:ss display — any negative, non-finite, or >24h
+ * elapsed value renders as 00:00 instead of computing garbage minutes.
+ * Returns `mins` too so the "warning" threshold below reads the same
+ * clamped number the display shows, instead of risking a second unclamped
+ * computation drifting from what's on screen.
+ */
+export function formatMinutes(elapsedMs: number): { display: string; mins: number } {
+  const safeMs =
+    Number.isFinite(elapsedMs) && elapsedMs >= 0 && elapsedMs <= MAX_DEAD_TIME_MS
+      ? elapsedMs
+      : 0;
+  const seconds = Math.floor(safeMs / 1000);
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return {
+    display: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
+    mins,
+  };
 }
 
 function getTimerAppearance(paused: boolean, warning: boolean) {
@@ -57,100 +69,63 @@ function getTimerAppearance(paused: boolean, warning: boolean) {
 
 interface Props {
   nearestZoneName?: string | null;
+  /** Real Libre/Occupé status from the Drive tab. Defaults to true (always counting) for screens with no such toggle. */
+  libreMode?: boolean;
 }
 
-export function DeadTimeTimer({ nearestZoneName }: Props) {
-  const [state, setState] = useState<DeadTimeState>(loadState);
+export function DeadTimeTimer({ nearestZoneName, libreMode = true }: Props) {
+  const [state, setState] = useState<TimerState>(() => initialState(libreMode));
   const [elapsed, setElapsed] = useState(0);
   const { activity } = useActivityDetection();
+  const prevLibreRef = useRef(libreMode);
 
-  // Persist state to localStorage on every change
+  // Reset to exactly 0 the instant libreMode flips true; hide (and drop any
+  // running segment) the instant it flips false — no cross-status carryover.
   useEffect(() => {
-    saveState(state);
-  }, [state]);
+    if (libreMode === prevLibreRef.current) return;
+    prevLibreRef.current = libreMode;
+    setState(initialState(libreMode));
+  }, [libreMode]);
 
-  // Listen for trip start/end events
+  // Pause or resume based on detected movement, only while actually libre —
+  // a status flip already reset/hid the timer above, this just handles
+  // walking/driving within an ongoing libre streak.
   useEffect(() => {
-    function onTripStart() {
-      setState((prev) => {
-        const now = Date.now();
-        const totalAccum =
-          prev.accumulated +
-          (prev.startedAt && !prev.paused ? now - prev.startedAt : 0);
-        const next = { startedAt: null, accumulated: totalAccum, paused: true };
-        saveState(next);
-        return next;
-      });
-    }
-    function onTripEnd() {
-      setState(() => {
-        const next: DeadTimeState = {
-          startedAt: Date.now(),
-          accumulated: 0,
-          paused: false,
-        };
-        saveState(next);
-        return next;
-      });
-    }
-    window.addEventListener('trip-start', onTripStart);
-    window.addEventListener('trip-end', onTripEnd);
-    return () => {
-      window.removeEventListener('trip-start', onTripStart);
-      window.removeEventListener('trip-end', onTripEnd);
-    };
-  }, []);
-
-  // Pause or resume timer based on detected activity
-  useEffect(() => {
+    if (!libreMode) return;
     if (activity === 'walking' || activity === 'in_vehicle') {
-      // Pause timer if user is moving
       setState((prev) => {
         if (prev.paused) return prev;
         const now = Date.now();
         const totalAccum =
-          prev.accumulated +
-          (prev.startedAt && !prev.paused ? now - prev.startedAt : 0);
-        const next = { startedAt: null, accumulated: totalAccum, paused: true };
-        saveState(next);
-        return next;
+          prev.accumulated + (prev.startedAt ? now - prev.startedAt : 0);
+        return { startedAt: null, accumulated: totalAccum, paused: true };
       });
     } else if (activity === 'stationary' || activity === 'unknown') {
-      // Resume timer if user is stationary or unknown
       setState((prev) => {
         if (!prev.paused) return prev;
-        const next = {
-          startedAt: Date.now(),
-          accumulated: prev.accumulated,
-          paused: false,
-        };
-        saveState(next);
-        return next;
+        return { startedAt: Date.now(), accumulated: prev.accumulated, paused: false };
       });
     }
-  }, [activity]);
+  }, [activity, libreMode]);
 
-  // Tick every second
+  // Tick every second while running.
   useEffect(() => {
-    if (state.paused) {
+    if (!libreMode || state.paused) {
       setElapsed(state.accumulated);
       return;
     }
     const tick = () => {
       const now = Date.now();
-      const total =
-        state.accumulated + (state.startedAt ? now - state.startedAt : 0);
-      setElapsed(total);
+      setElapsed(state.accumulated + (state.startedAt ? now - state.startedAt : 0));
     };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [state]);
+  }, [state, libreMode]);
 
-  const seconds = Math.floor(elapsed / 1000);
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  const display = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  if (!libreMode) return null;
+
+  const { display, mins } = formatMinutes(elapsed);
   const isWarning = mins >= 10;
   const appearance = getTimerAppearance(state.paused, isWarning);
 

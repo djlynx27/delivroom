@@ -32,10 +32,7 @@ import {
   setConservativePresencePreference,
   setStoredDriverMode,
 } from '@/lib/driverPreferences';
-import {
-  openWazeNav,
-  launchGoogleMapsNavigation,
-} from '@/lib/hotspots';
+import { openWazeNav } from '@/lib/hotspots';
 import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
@@ -240,7 +237,13 @@ export default function DriveScreen() {
   } = useArrivalCountdown(heroZone, location, () => {
     const next = nextZones[0];
     if (next) {
-      launchGoogleMapsNavigation(next.name, next.latitude, next.longitude);
+      setNavZone({
+        id: next.id,
+        name: next.name,
+        latitude: next.latitude,
+        longitude: next.longitude,
+        score: next.score,
+      });
     }
   });
 
@@ -328,7 +331,7 @@ export default function DriveScreen() {
 
       {/* Multi-platform online tracker + switch suggestions */}
       <div className="px-4 mt-2">
-        <PlatformSwitchBanner />
+        <PlatformSwitchBanner driverMode={driverMode} />
       </div>
 
       {/* Mode filter tabs — colour-coded per compass doc (blue=rideshare, amber=delivery) */}
@@ -414,11 +417,13 @@ export default function DriveScreen() {
             const nextLibreMode = !libreMode;
 
             if (nextLibreMode && heroZone) {
-              launchGoogleMapsNavigation(
-                heroZone.name,
-                heroZone.latitude,
-                heroZone.longitude
-              );
+              setNavZone({
+                id: heroZone.id,
+                name: heroZone.name,
+                latitude: heroZone.latitude,
+                longitude: heroZone.longitude,
+                score: heroZone.score,
+              });
             }
 
             setLibreMode(nextLibreMode);
@@ -504,7 +509,7 @@ export default function DriveScreen() {
       {/* Dead time + weekly goal */}
       {!fullScreen && (
         <div className="px-4 space-y-2 mb-2">
-          <DeadTimeTimer nearestZoneName={heroZone?.name} />
+          <DeadTimeTimer nearestZoneName={heroZone?.name} libreMode={libreMode} />
           <WeeklyGoalDisplay />
         </div>
       )}
