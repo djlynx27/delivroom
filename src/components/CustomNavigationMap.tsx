@@ -66,10 +66,24 @@ function WaypointPin({ zone, order }: { zone: RouteCandidateZone; order: number 
  */
 function useLockedOrigin(location: UserLocationResult['location']) {
   const originRef = useRef<{ lat: number; lng: number } | null>(null);
-  if (!originRef.current && location) {
+  if (!originRef.current && location && hasFiniteCoordinates(location)) {
     originRef.current = { lat: location.latitude, lng: location.longitude };
   }
   return originRef.current;
+}
+
+/**
+ * True once we know the Directions API failed for the active mode and there's
+ * no cached route to fall back on — the signal to draw a straight fallback
+ * line instead of leaving the map blank.
+ */
+function shouldShowFallbackLine(
+  routeError: string | null,
+  activeRoute: DriveRouteResult | null,
+  origin: { lat: number; lng: number } | null,
+  destinationValid: boolean
+): boolean {
+  return !!routeError && !activeRoute && !!origin && destinationValid;
 }
 
 function RouteMapLayers({
@@ -78,12 +92,14 @@ function RouteMapLayers({
   location,
   destination,
   waypointsUsed,
+  isFallbackLine,
 }: {
   routeGeojson: GeoJSON.Feature | null;
   mode: NavigationMode;
   location: UserLocationResult['location'];
   destination: RouteCandidateZone;
   waypointsUsed: RouteCandidateZone[];
+  isFallbackLine: boolean;
 }) {
   return (
     <>
@@ -95,7 +111,8 @@ function RouteMapLayers({
             layout={{ 'line-join': 'round', 'line-cap': 'round' }}
             paint={{
               'line-color': mode === 'prospection' ? '#f59e0b' : '#3b82f6',
-              'line-width': 5,
+              'line-width': isFallbackLine ? 4 : 5,
+              ...(isFallbackLine ? { 'line-dasharray': [2, 2] } : {}),
             }}
           />
         </Source>
@@ -129,6 +146,7 @@ function RouteOverlays({
   isLoadingRoute,
   routeError,
   locationStatus,
+  showFallbackLine,
 }: {
   destination: RouteCandidateZone;
   routes: RouteByMode;
@@ -136,13 +154,16 @@ function RouteOverlays({
   isLoadingRoute: boolean;
   routeError: string | null;
   locationStatus: UserLocationResult['status'];
+  showFallbackLine: boolean;
 }) {
   const activeRoute = routes[mode];
   const otherMode: NavigationMode = mode === 'direct' ? 'prospection' : 'direct';
   return (
     <>
       {locationStatus === 'error' && <GpsUnavailableBanner />}
-      {routeError && !activeRoute && <RouteErrorBanner destination={destination} />}
+      {routeError && !activeRoute && (
+        <RouteErrorBanner destination={destination} showFallbackLine={showFallbackLine} />
+      )}
       {activeRoute && (
         <RouteInfoBar
           destination={destination}
@@ -203,10 +224,20 @@ function GpsUnavailableBanner() {
   );
 }
 
-function RouteErrorBanner({ destination }: { destination: RouteCandidateZone }) {
+function RouteErrorBanner({
+  destination,
+  showFallbackLine,
+}: {
+  destination: RouteCandidateZone;
+  showFallbackLine: boolean;
+}) {
   return (
     <div className="absolute bottom-24 left-3 right-3 z-10 rounded-xl bg-red-600/90 backdrop-blur text-white text-[13px] px-4 py-3 flex items-center justify-between gap-3">
-      <span>Itinéraire indisponible.</span>
+      <span>
+        {showFallbackLine
+          ? 'Calcul de route alternatif… ligne directe affichée en attendant.'
+          : 'Itinéraire indisponible.'}
+      </span>
       <button
         onClick={() =>
           openGoogleMapsNav(
@@ -361,10 +392,35 @@ function CustomNavigationMapInner({
   }, [location]);
 
   const activeRoute = routes[mode] ?? null;
+
+  // Directions API down/rate-limited and no cached route for this mode: draw
+  // a straight origin→destination line so the driver still sees a heading to
+  // follow instead of a blank map with just an error banner.
+  const showFallbackLine = shouldShowFallbackLine(
+    routeError,
+    activeRoute,
+    origin,
+    destinationValid
+  );
   const routeGeojson: GeoJSON.Feature | null = useMemo(() => {
-    if (!activeRoute) return null;
-    return { type: 'Feature', properties: {}, geometry: activeRoute.geometry };
-  }, [activeRoute]);
+    if (activeRoute) {
+      return { type: 'Feature', properties: {}, geometry: activeRoute.geometry };
+    }
+    if (showFallbackLine && origin) {
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'LineString',
+          coordinates: [
+            [origin.lng, origin.lat],
+            [destination.longitude, destination.latitude],
+          ],
+        },
+      };
+    }
+    return null;
+  }, [activeRoute, showFallbackLine, origin, destination]);
 
   if (!destinationValid) {
     return (
@@ -410,6 +466,7 @@ function CustomNavigationMapInner({
           location={location}
           destination={destination}
           waypointsUsed={activeRoute?.waypointsUsed ?? []}
+          isFallbackLine={showFallbackLine}
         />
       </Map>
 
@@ -422,6 +479,7 @@ function CustomNavigationMapInner({
         isLoadingRoute={isLoadingRoute}
         routeError={routeError}
         locationStatus={locationStatus}
+        showFallbackLine={showFallbackLine}
       />
     </div>
   );

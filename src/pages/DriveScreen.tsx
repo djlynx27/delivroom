@@ -24,6 +24,7 @@ import { useDemandScores } from '@/hooks/useDemandScores';
 import { useHaptics } from '@/hooks/useHaptics';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
+import { useTrips } from '@/hooks/useTrips';
 import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import {
@@ -35,6 +36,7 @@ import {
 import { openWazeNav } from '@/lib/hotspots';
 import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
 import type { SurgeResult } from '@/lib/surgeEngine';
+import { summarizeTrips } from '@/lib/tripAnalytics';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -262,6 +264,16 @@ export default function DriveScreen() {
   const heroDistance = getDistance(heroZone);
   const heroSurge = heroZone ? surgeMap?.get(heroZone.id) : null;
 
+  // Real earnings so far today for the HUD's "Gains" tile — falls back to 0
+  // while trips are still loading or there simply are none yet, never NaN.
+  const { data: todayTrips, isLoading: tripsLoading } = useTrips(200);
+  const todayEarnings = useMemo(() => {
+    if (tripsLoading || !todayTrips) return 0;
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    return summarizeTrips(todayTrips, todayStart).revenue;
+  }, [todayTrips, tripsLoading]);
+
   const gpsLabel =
     status === 'loading'
       ? t('gettingLocation')
@@ -471,6 +483,7 @@ export default function DriveScreen() {
               : null
           }
           heroSurge={heroSurge}
+          earningsToday={todayEarnings}
           speedKmh={speedKmh}
           onNavigate={(zone) =>
             setNavZone({

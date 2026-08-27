@@ -117,11 +117,21 @@ function HeroZoneDisplay({
   );
 }
 
-function NextZonePill({ nextZone }: { nextZone?: DrivingHUDZone | null }) {
+function NextZonePill({
+  nextZone,
+  onNavigate,
+}: {
+  nextZone?: DrivingHUDZone | null;
+  onNavigate: (zone: DrivingHUDZone) => void;
+}) {
   if (!nextZone) return null;
 
   return (
-    <div className="mx-6 mb-3 px-5 py-3 rounded-2xl bg-white/5 flex items-center justify-between gap-3">
+    <button
+      onClick={() => onNavigate(nextZone)}
+      className="mx-6 mb-3 min-h-16 px-5 py-3 rounded-2xl bg-white/5 active:bg-white/10 active:scale-[0.98] transition-transform flex items-center justify-between gap-3"
+      aria-label={`Naviguer vers la prochaine zone : ${nextZone.name}`}
+    >
       <span className="text-white/40 text-lg">Prochaine</span>
       <span className="text-white text-xl font-semibold flex-1 text-center truncate">
         {nextZone.name}
@@ -132,7 +142,7 @@ function NextZonePill({ nextZone }: { nextZone?: DrivingHUDZone | null }) {
       >
         {nextZone.score}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -220,7 +230,7 @@ export function DrivingHUD({
         />
       </div>
 
-      <NextZonePill nextZone={nextZone} />
+      <NextZonePill nextZone={nextZone} onNavigate={onNavigate} />
 
       {/* ── Row 4: Earnings + Navigate CTA ── */}
       <div className="px-6 pb-10 flex gap-4">
