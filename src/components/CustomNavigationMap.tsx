@@ -403,6 +403,7 @@ function CustomNavigationMapInner({
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [orientationMode, setOrientationMode] = useState<OrientationMode>('follow');
+  const [mapCrashed, setMapCrashed] = useState(false);
 
   const destinationValid = hasFiniteCoordinates(destination);
   const haveActiveRoute = !!routes[mode];
@@ -533,7 +534,8 @@ function CustomNavigationMapInner({
   return (
     <div className="fixed inset-0 z-50 bg-background">
       <ErrorBoundary
-        fallback={<MapCanvasFallback destination={destination} />}
+        fallback={<MapCanvasFallback destination={destination} onClose={onClose} />}
+        onError={() => setMapCrashed(true)}
       >
         <Map
           ref={mapRef}
@@ -560,25 +562,33 @@ function CustomNavigationMapInner({
         </Map>
       </ErrorBoundary>
 
-      <NavTopBar mode={mode} onModeChange={setMode} onClose={onClose} />
+      {/* The Mapbox canvas crashing leaves nothing for these overlays to
+          describe (no route line, no camera to orient) — MapCanvasFallback
+          is a clean, self-contained recovery screen with its own close
+          button instead of stale chrome piling on top of it. */}
+      {!mapCrashed && (
+        <>
+          <NavTopBar mode={mode} onModeChange={setMode} onClose={onClose} />
 
-      <OrientationToggle
-        mode={orientationMode}
-        onToggle={() =>
-          setOrientationMode((prev) => (prev === 'follow' ? 'north-up' : 'follow'))
-        }
-      />
+          <OrientationToggle
+            mode={orientationMode}
+            onToggle={() =>
+              setOrientationMode((prev) => (prev === 'follow' ? 'north-up' : 'follow'))
+            }
+          />
 
-      <RouteOverlays
-        destination={destination}
-        routes={routes}
-        mode={mode}
-        isLoadingRoute={isLoadingRoute}
-        routeError={routeError}
-        locationStatus={locationStatus}
-        showFallbackLine={showFallbackLine}
-        origin={origin}
-      />
+          <RouteOverlays
+            destination={destination}
+            routes={routes}
+            mode={mode}
+            isLoadingRoute={isLoadingRoute}
+            routeError={routeError}
+            locationStatus={locationStatus}
+            showFallbackLine={showFallbackLine}
+            origin={origin}
+          />
+        </>
+      )}
     </div>
   );
 }
@@ -602,13 +612,28 @@ export function CustomNavigationMap(props: CustomNavigationMapProps) {
 
 /**
  * Shown when the Mapbox WebGL canvas itself throws (GPU context loss on some
- * Android devices, driver crash, etc.) — scoped tightly around <Map> so the
- * rest of the nav chrome (top bar, close button) stays mounted and the
- * driver still has Google Maps/Waze one tap away instead of a dead screen.
+ * Android devices, driver crash, etc.). The rest of the nav chrome (top bar,
+ * route banners, orientation toggle) is hidden while this is up — see
+ * `mapCrashed` in CustomNavigationMapInner — so this owns its own close
+ * button and is the only thing on screen instead of stale overlays piling
+ * on top of a dead canvas.
  */
-function MapCanvasFallback({ destination }: { destination: RouteCandidateZone }) {
+function MapCanvasFallback({
+  destination,
+  onClose,
+}: {
+  destination: RouteCandidateZone;
+  onClose: () => void;
+}) {
   return (
-    <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-6 text-center bg-background">
+    <div className="w-full h-full flex flex-col items-center justify-center gap-4 px-6 text-center bg-background relative">
+      <button
+        onClick={onClose}
+        className="absolute top-[calc(env(safe-area-inset-top)+0.75rem)] left-3 rounded-full bg-black/60 backdrop-blur w-10 h-10 flex items-center justify-center text-white"
+        aria-label="Fermer la navigation"
+      >
+        <X className="w-5 h-5" />
+      </button>
       <div>
         <h2 className="text-base font-display font-bold text-foreground">
           Carte indisponible

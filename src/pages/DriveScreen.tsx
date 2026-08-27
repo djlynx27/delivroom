@@ -39,7 +39,7 @@ import type { SurgeResult } from '@/lib/surgeEngine';
 import { getMontrealDayStart } from '@/lib/timezone';
 import { summarizeTrips } from '@/lib/tripAnalytics';
 import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 interface WakeLockNavigator extends Navigator {
@@ -229,6 +229,21 @@ export default function DriveScreen() {
     .filter((z) => !heroZone || z.id !== heroZone.id)
     .slice(0, 6);
 
+  // Zero-friction 1-tap navigation: no in-app Mapbox view, no confirmation --
+  // straight to the Google Maps app with the prospection waypoints baked in.
+  // Used by the hero "Naviguer" button, the Driving HUD tiles, and the
+  // 15-minute arrival auto-routing below, so the recommended-destination
+  // flow never opens CustomNavigationMap.
+  const navigateOneTap = useCallback(
+    (zone: RouteCandidateZone) => {
+      const origin = location
+        ? { lat: location.latitude, lng: location.longitude }
+        : null;
+      window.location.href = buildOneTapNavigationUrl(origin, zone, modeZones);
+    },
+    [location, modeZones]
+  );
+
   // 15-minute auto-routing: when driver arrives at heroZone, countdown then
   // auto-navigate to nextZones[0] in Google Maps.
   const {
@@ -239,15 +254,7 @@ export default function DriveScreen() {
     launchNow,
   } = useArrivalCountdown(heroZone, location, () => {
     const next = nextZones[0];
-    if (next) {
-      setNavZone({
-        id: next.id,
-        name: next.name,
-        latitude: next.latitude,
-        longitude: next.longitude,
-        score: next.score,
-      });
-    }
+    if (next) navigateOneTap(next);
   });
 
   const getDistance = (
@@ -428,13 +435,7 @@ export default function DriveScreen() {
             const nextLibreMode = !libreMode;
 
             if (nextLibreMode && heroZone) {
-              setNavZone({
-                id: heroZone.id,
-                name: heroZone.name,
-                latitude: heroZone.latitude,
-                longitude: heroZone.longitude,
-                score: heroZone.score,
-              });
+              navigateOneTap(heroZone);
             }
 
             setLibreMode(nextLibreMode);
@@ -484,15 +485,7 @@ export default function DriveScreen() {
           heroSurge={heroSurge}
           earningsToday={todayEarnings}
           speedKmh={speedKmh}
-          onNavigate={(zone) =>
-            setNavZone({
-              id: zone.id,
-              name: zone.name,
-              latitude: zone.latitude,
-              longitude: zone.longitude,
-              score: zone.score,
-            })
-          }
+          onNavigate={navigateOneTap}
           onExit={() => {
             setHudDismissedManually(true);
             setHudActive(false);
@@ -570,16 +563,7 @@ export default function DriveScreen() {
 
               <div className="space-y-2 pt-2">
                 <Button
-                  onClick={() => {
-                    const origin = location
-                      ? { lat: location.latitude, lng: location.longitude }
-                      : null;
-                    window.location.href = buildOneTapNavigationUrl(
-                      origin,
-                      heroZone,
-                      modeZones
-                    );
-                  }}
+                  onClick={() => navigateOneTap(heroZone)}
                   className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   <Car className="w-6 h-6 flex-shrink-0" /> Naviguer

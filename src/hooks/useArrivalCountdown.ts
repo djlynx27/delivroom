@@ -72,6 +72,19 @@ export function useArrivalCountdown(
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
+  // Keep the latest targetZone reachable from cancel() below without making
+  // it a dependency (cancel must stay referentially stable).
+  const targetZoneRef = useRef(targetZone);
+  targetZoneRef.current = targetZone;
+
+  // A zone the driver explicitly dismissed (X / cancel) while still parked
+  // inside it — without this, dismissing does nothing observable: cancel()
+  // clears countdownState, which re-runs the arrival-detection effect below,
+  // which immediately sees "still within 300 m" and re-arms the exact same
+  // countdown, making the modal look stuck. Cleared once the driver actually
+  // leaves the radius, so a genuine later arrival still counts.
+  const dismissedZoneIdRef = useRef<string | null>(null);
+
   // Persist countdown state on every change
   useEffect(() => {
     saveCountdownState(countdownState);
@@ -79,7 +92,7 @@ export function useArrivalCountdown(
 
   // Arrival detection — only fires when not already counting down
   useEffect(() => {
-    if (!targetZone || !userLocation || countdownState) return;
+    if (!targetZone || !userLocation) return;
 
     const distKm = haversineKm(
       userLocation.latitude,
@@ -88,13 +101,20 @@ export function useArrivalCountdown(
       targetZone.longitude
     );
 
-    if (distKm <= ARRIVAL_RADIUS_KM) {
-      setCountdownState({
-        zoneId: targetZone.id,
-        zoneName: targetZone.name,
-        arrivedAt: Date.now(),
-      });
+    if (distKm > ARRIVAL_RADIUS_KM) {
+      if (dismissedZoneIdRef.current === targetZone.id) {
+        dismissedZoneIdRef.current = null;
+      }
+      return;
     }
+
+    if (countdownState || dismissedZoneIdRef.current === targetZone.id) return;
+
+    setCountdownState({
+      zoneId: targetZone.id,
+      zoneName: targetZone.name,
+      arrivedAt: Date.now(),
+    });
   }, [targetZone, userLocation, countdownState]);
 
   // Countdown timer — ticks every second while active
@@ -125,11 +145,13 @@ export function useArrivalCountdown(
   }, [countdownState]);
 
   const cancel = useCallback(() => {
+    dismissedZoneIdRef.current = targetZoneRef.current?.id ?? null;
     setCountdownState(null);
     setSecondsRemaining(COUNTDOWN_SECONDS);
   }, []);
 
   const launchNow = useCallback(() => {
+    dismissedZoneIdRef.current = targetZoneRef.current?.id ?? null;
     setCountdownState(null);
     setSecondsRemaining(COUNTDOWN_SECONDS);
     onCompleteRef.current();
