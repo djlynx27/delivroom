@@ -3,6 +3,21 @@ import type { TablesInsert } from '@/integrations/supabase/types';
 
 export type DemandLevel = 'high' | 'medium' | 'low';
 
+/**
+ * True when a zone has finite lat/lng. Zones with null/NaN coordinates
+ * (bad seed data, a row missed by a migration) crash Leaflet/Mapbox map
+ * constructors synchronously — L.map({ center: [NaN, NaN] }) throws instead
+ * of degrading gracefully, and that throw escapes any local map error
+ * boundary since it happens in the coordinate object passed in, not in a
+ * caught render. Filter zones through this before they reach a map.
+ */
+export function hasFiniteCoordinates(zone: {
+  latitude: number;
+  longitude: number;
+}): boolean {
+  return Number.isFinite(zone.latitude) && Number.isFinite(zone.longitude);
+}
+
 export function normalize24hTime(time: string): string {
   const [rawHours = '0', rawMinutes = '0'] = time.slice(0, 5).split(':');
   const hours = Number.parseInt(rawHours, 10);

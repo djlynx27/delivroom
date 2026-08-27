@@ -1,7 +1,7 @@
 import { CitySelect } from '@/components/CitySelect';
+import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { DemandBadge } from '@/components/DemandBadge';
 import { HourlyWeatherStrip } from '@/components/HourlyWeatherStrip';
-import { NavigationSheet } from '@/components/NavigationSheet';
 import { ShiftOptimizer } from '@/components/ShiftOptimizer';
 import { Input } from '@/components/ui/input';
 import {
@@ -27,6 +27,7 @@ import {
 } from '@/lib/demandUtils';
 import { getHomeConstraintsSettings } from '@/lib/driverPreferences';
 import { computeDemandScore, type WeatherCondition } from '@/lib/scoringEngine';
+import type { RouteCandidateZone } from '@/services/routing';
 import {
   useCallback,
   useEffect,
@@ -72,11 +73,7 @@ export default function PlanningScreen() {
     userLocation?.longitude
   );
 
-  const [navZone, setNavZone] = useState<{
-    name: string;
-    lat: number;
-    lng: number;
-  } | null>(null);
+  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
 
   const { data: cities = [] } = useCities();
   const { data: zones = [] } = useZones(cityId);
@@ -363,9 +360,11 @@ export default function PlanningScreen() {
                 onClick={() =>
                   zone &&
                   setNavZone({
+                    id: zone.id,
                     name: zone.name,
-                    lat: zone.latitude,
-                    lng: zone.longitude,
+                    latitude: zone.latitude,
+                    longitude: zone.longitude,
+                    score: slot.demand_score,
                   })
                 }
                 className={`flex items-center justify-between bg-card rounded-xl border-l-4 ${dc.border} border border-border p-4 gap-3 transition-all duration-500 cursor-pointer active:scale-[0.98] ${
@@ -396,13 +395,13 @@ export default function PlanningScreen() {
         })}
       </div>
 
-      <NavigationSheet
-        open={!!navZone}
-        onClose={() => setNavZone(null)}
-        zoneName={navZone?.name ?? ''}
-        latitude={navZone?.lat ?? 0}
-        longitude={navZone?.lng ?? 0}
-      />
+      {navZone && (
+        <CustomNavigationMap
+          destination={navZone}
+          candidateZones={[]}
+          onClose={() => setNavZone(null)}
+        />
+      )}
     </div>
   );
 }

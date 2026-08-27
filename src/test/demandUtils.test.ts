@@ -9,9 +9,33 @@ import {
   getDemandLevel,
   getSlotOrderMinutes,
   getUpcomingSlotTimes,
+  hasFiniteCoordinates,
   normalize24hTime,
 } from '@/lib/demandUtils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+describe('hasFiniteCoordinates', () => {
+  it('accepts finite lat/lng', () => {
+    expect(hasFiniteCoordinates({ latitude: 45.5, longitude: -73.6 })).toBe(true);
+  });
+
+  it('rejects NaN coordinates', () => {
+    expect(hasFiniteCoordinates({ latitude: NaN, longitude: -73.6 })).toBe(false);
+  });
+
+  it('rejects null/undefined coordinates', () => {
+    expect(
+      hasFiniteCoordinates({ latitude: null as unknown as number, longitude: -73.6 })
+    ).toBe(false);
+    expect(
+      hasFiniteCoordinates({ latitude: 45.5, longitude: undefined as unknown as number })
+    ).toBe(false);
+  });
+
+  it('rejects Infinity', () => {
+    expect(hasFiniteCoordinates({ latitude: Infinity, longitude: -73.6 })).toBe(false);
+  });
+});
 
 describe('normalize24hTime', () => {
   it('pads single-digit hours and minutes', () => {

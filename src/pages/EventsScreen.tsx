@@ -1,4 +1,5 @@
 import { CitySelect } from '@/components/CitySelect';
+import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { Button } from '@/components/ui/button';
 import { useI18n } from '@/contexts/I18nContext';
 import { useAutoCity } from '@/hooks/useAutoCity';
@@ -11,9 +12,9 @@ import {
   type TicketmasterEvent,
 } from '@/hooks/useTicketmaster';
 import { useUserLocation } from '@/hooks/useUserLocation';
-import { openGoogleMapsNav } from '@/lib/hotspots';
+import type { RouteCandidateZone } from '@/services/routing';
 import { Calendar, Clock, Navigation, Star, Users } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
 // The `events` DB table is only ever seeded manually (no ingestion edge
 // function populates it — see supabase advisor audit), so it's sparse
@@ -86,7 +87,15 @@ function CategoryBadge({ category }: { category: string }) {
   );
 }
 
-function EventCard({ event, isToday }: { event: AppEvent; isToday: boolean }) {
+function EventCard({
+  event,
+  isToday,
+  onNavigate,
+}: {
+  event: AppEvent;
+  isToday: boolean;
+  onNavigate: (event: AppEvent) => void;
+}) {
   const { t, locale } = useI18n();
   const now = new Date();
   const endAt = new Date(event.end_at);
@@ -158,11 +167,13 @@ function EventCard({ event, isToday }: { event: AppEvent; isToday: boolean }) {
 
       {!event.is_holiday && (
         <Button
-          onClick={() => openGoogleMapsNav(event.venue, event.latitude, event.longitude)}
-          className="w-full h-14 text-[16px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+          onClick={() => onNavigate(event)}
+          className="w-full h-14 px-4 py-3 text-[16px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 min-w-0"
         >
-          <Navigation className="w-4 h-4" />
-          {t('navigateTo')} {event.venue}
+          <Navigation className="w-4 h-4 flex-shrink-0" />
+          <span className="truncate min-w-0">
+            {t('navigateTo')} {event.venue}
+          </span>
         </Button>
       )}
     </div>
@@ -183,6 +194,17 @@ export default function EventsScreen() {
   const { data: cities = [] } = useCities();
   const { data: dbEvents = [] } = useEvents(cityId);
   const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
+  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
+
+  const handleNavigate = (event: AppEvent) => {
+    setNavZone({
+      id: event.id,
+      name: event.venue,
+      latitude: event.latitude,
+      longitude: event.longitude,
+      score: 0,
+    });
+  };
 
   const events = useMemo(() => {
     const dbIds = new Set(dbEvents.map((e) => e.name + e.start_at));
@@ -254,7 +276,7 @@ export default function EventsScreen() {
           </p>
         )}
         {todayEvents.map((e) => (
-          <EventCard key={e.id} event={e} isToday />
+          <EventCard key={e.id} event={e} isToday onNavigate={handleNavigate} />
         ))}
 
         {/* Next 7 days */}
@@ -267,9 +289,17 @@ export default function EventsScreen() {
           </p>
         )}
         {upcomingEvents.map((e) => (
-          <EventCard key={e.id} event={e} isToday={false} />
+          <EventCard key={e.id} event={e} isToday={false} onNavigate={handleNavigate} />
         ))}
       </div>
+
+      {navZone && (
+        <CustomNavigationMap
+          destination={navZone}
+          candidateZones={[]}
+          onClose={() => setNavZone(null)}
+        />
+      )}
     </div>
   );
 }

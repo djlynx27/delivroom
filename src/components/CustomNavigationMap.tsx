@@ -1,3 +1,5 @@
+import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { hasFiniteCoordinates } from '@/lib/demandUtils';
 import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
 import {
@@ -21,6 +23,8 @@ interface CustomNavigationMapProps {
   candidateZones: RouteCandidateZone[];
   onClose: () => void;
 }
+
+type RouteByMode = Partial<Record<NavigationMode, DriveRouteResult>>;
 
 function DriverPuck({ heading }: { heading: number | null | undefined }) {
   return (
@@ -97,7 +101,7 @@ function RouteMapLayers({
         </Source>
       )}
 
-      {location && (
+      {location && hasFiniteCoordinates(location) && (
         <Marker longitude={location.longitude} latitude={location.latitude} anchor="center">
           <DriverPuck heading={location.heading} />
         </Marker>
@@ -120,27 +124,30 @@ function RouteMapLayers({
 
 function RouteOverlays({
   destination,
-  route,
+  routes,
   mode,
   isLoadingRoute,
   routeError,
   locationStatus,
 }: {
   destination: RouteCandidateZone;
-  route: DriveRouteResult | null;
+  routes: RouteByMode;
   mode: NavigationMode;
   isLoadingRoute: boolean;
   routeError: string | null;
   locationStatus: UserLocationResult['status'];
 }) {
+  const activeRoute = routes[mode];
+  const otherMode: NavigationMode = mode === 'direct' ? 'prospection' : 'direct';
   return (
     <>
       {locationStatus === 'error' && <GpsUnavailableBanner />}
-      {routeError && <RouteErrorBanner destination={destination} />}
-      {route && !routeError && (
+      {routeError && !activeRoute && <RouteErrorBanner destination={destination} />}
+      {activeRoute && (
         <RouteInfoBar
           destination={destination}
-          route={route}
+          activeRoute={activeRoute}
+          otherRoute={routes[otherMode] ?? null}
           mode={mode}
           isLoading={isLoadingRoute}
         />
@@ -216,25 +223,45 @@ function RouteErrorBanner({ destination }: { destination: RouteCandidateZone }) 
   );
 }
 
+function RouteComparisonLine({
+  activeRoute,
+  otherRoute,
+}: {
+  activeRoute: DriveRouteResult;
+  otherRoute: DriveRouteResult;
+}) {
+  const deltaMin = Math.round(activeRoute.durationMin - otherRoute.durationMin);
+  const deltaKm = activeRoute.distanceKm - otherRoute.distanceKm;
+  return (
+    <p className="text-[12px] text-amber-500 font-body mt-0.5">
+      vs direct : {deltaMin >= 0 ? '+' : ''}
+      {deltaMin} min · {deltaKm >= 0 ? '+' : ''}
+      {deltaKm.toFixed(1)} km
+    </p>
+  );
+}
+
 function RouteInfoBar({
   destination,
-  route,
+  activeRoute,
+  otherRoute,
   mode,
   isLoading,
 }: {
   destination: RouteCandidateZone;
-  route: DriveRouteResult;
+  activeRoute: DriveRouteResult;
+  otherRoute: DriveRouteResult | null;
   mode: NavigationMode;
   isLoading: boolean;
 }) {
-  const waypointCount = route.waypointsUsed.length;
+  const waypointCount = activeRoute.waypointsUsed.length;
   return (
     <div className="absolute bottom-0 left-0 right-0 z-10 bg-card border-t border-border px-4 py-4 pb-[calc(env(safe-area-inset-bottom)+1rem)]">
       <p className="text-[16px] font-display font-bold text-foreground truncate">
         {destination.name}
       </p>
       <p className="text-[14px] text-muted-foreground font-body">
-        {route.distanceKm.toFixed(1)} km · {Math.round(route.durationMin)} min
+        {activeRoute.distanceKm.toFixed(1)} km · {Math.round(activeRoute.durationMin)} min
         {mode === 'prospection' && waypointCount > 0 && (
           <span>
             {' '}
@@ -244,11 +271,14 @@ function RouteInfoBar({
         )}
         {isLoading && <span> · Recalcul…</span>}
       </p>
+      {mode === 'prospection' && otherRoute && (
+        <RouteComparisonLine activeRoute={activeRoute} otherRoute={otherRoute} />
+      )}
     </div>
   );
 }
 
-export function CustomNavigationMap({
+function CustomNavigationMapInner({
   destination,
   candidateZones,
   onClose,
@@ -258,12 +288,18 @@ export function CustomNavigationMap({
   const origin = useLockedOrigin(location);
 
   const [mode, setMode] = useState<NavigationMode>('direct');
-  const [route, setRoute] = useState<DriveRouteResult | null>(null);
+  const [routes, setRoutes] = useState<RouteByMode>({});
   const [routeError, setRouteError] = useState<string | null>(null);
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
 
+  const destinationValid = hasFiniteCoordinates(destination);
+  const haveActiveRoute = !!routes[mode];
+
+  // Primary fetch: the mode the driver is currently viewing. Cached per mode
+  // so toggling Direct ⇄ Prospection is instant after the first computation
+  // instead of re-hitting the Directions API and flickering the route.
   useEffect(() => {
-    if (!origin || !MAPBOX_TOKEN) return;
+    if (!origin || !MAPBOX_TOKEN || !destinationValid || haveActiveRoute) return;
     const ctrl = new AbortController();
     setIsLoadingRoute(true);
     setRouteError(null);
@@ -273,7 +309,7 @@ export function CustomNavigationMap({
     })
       .then((result) => {
         if (ctrl.signal.aborted) return;
-        setRoute(result);
+        setRoutes((prev) => ({ ...prev, [mode]: result }));
       })
       .catch((err: unknown) => {
         if (ctrl.signal.aborted) return;
@@ -291,11 +327,32 @@ export function CustomNavigationMap({
       });
 
     return () => ctrl.abort();
-  }, [origin, mode, destination, candidateZones]);
+  }, [origin, mode, destination, candidateZones, destinationValid, haveActiveRoute]);
+
+  // Background fetch of the other mode, best-effort, so the info bar can show
+  // a real Direct-vs-Prospection delta as soon as the driver opens the map —
+  // failures here are silent, the primary mode above already handles errors.
+  const otherMode: NavigationMode = mode === 'direct' ? 'prospection' : 'direct';
+  const haveOtherRoute = !!routes[otherMode];
+  useEffect(() => {
+    if (!origin || !MAPBOX_TOKEN || !destinationValid || haveOtherRoute) return;
+    const ctrl = new AbortController();
+    getDriveRoute(origin, destination, candidateZones, otherMode, {
+      signal: ctrl.signal,
+    })
+      .then((result) => {
+        if (ctrl.signal.aborted) return;
+        setRoutes((prev) => ({ ...prev, [otherMode]: result }));
+      })
+      .catch(() => {
+        // Comparison data only — the visible mode's own fetch surfaces errors.
+      });
+    return () => ctrl.abort();
+  }, [origin, otherMode, destination, candidateZones, destinationValid, haveOtherRoute]);
 
   // Follow mode: recenter + rotate to heading on every GPS update.
   useEffect(() => {
-    if (!location || !mapRef.current) return;
+    if (!location || !hasFiniteCoordinates(location) || !mapRef.current) return;
     mapRef.current.easeTo({
       center: [location.longitude, location.latitude],
       bearing: location.heading ?? undefined,
@@ -303,10 +360,22 @@ export function CustomNavigationMap({
     });
   }, [location]);
 
+  const activeRoute = routes[mode] ?? null;
   const routeGeojson: GeoJSON.Feature | null = useMemo(() => {
-    if (!route) return null;
-    return { type: 'Feature', properties: {}, geometry: route.geometry };
-  }, [route]);
+    if (!activeRoute) return null;
+    return { type: 'Feature', properties: {}, geometry: activeRoute.geometry };
+  }, [activeRoute]);
+
+  if (!destinationValid) {
+    return (
+      <NavFallback
+        title="Coordonnées de zone invalides"
+        message="Cette zone n'a pas de position GPS valide — impossible de calculer un itinéraire."
+        destination={destination}
+        onClose={onClose}
+      />
+    );
+  }
 
   if (!MAPBOX_TOKEN) {
     return (
@@ -340,7 +409,7 @@ export function CustomNavigationMap({
           mode={mode}
           location={location}
           destination={destination}
-          waypointsUsed={route?.waypointsUsed ?? []}
+          waypointsUsed={activeRoute?.waypointsUsed ?? []}
         />
       </Map>
 
@@ -348,13 +417,30 @@ export function CustomNavigationMap({
 
       <RouteOverlays
         destination={destination}
-        route={route}
+        routes={routes}
         mode={mode}
         isLoadingRoute={isLoadingRoute}
         routeError={routeError}
         locationStatus={locationStatus}
       />
     </div>
+  );
+}
+
+export function CustomNavigationMap(props: CustomNavigationMapProps) {
+  return (
+    <ErrorBoundary
+      fallback={
+        <NavFallback
+          title="Erreur de navigation"
+          message="La carte a rencontré un problème inattendu — utilise une app externe pour cette course."
+          destination={props.destination}
+          onClose={props.onClose}
+        />
+      }
+    >
+      <CustomNavigationMapInner {...props} />
+    </ErrorBoundary>
   );
 }
 
@@ -376,30 +462,34 @@ function NavFallback({
         <p className="text-sm text-muted-foreground mt-1">{message}</p>
       </div>
       <div className="flex flex-col gap-2 w-full max-w-xs">
-        <button
-          onClick={() =>
-            openGoogleMapsNav(
-              destination.name,
-              destination.latitude,
-              destination.longitude
-            )
-          }
-          className="w-full gap-2.5 flex items-center justify-center text-[16px] font-display font-bold h-14 rounded-xl bg-primary text-primary-foreground"
-        >
-          <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" /> Google Maps
-        </button>
-        <button
-          onClick={() =>
-            openWazeNav(
-              destination.name,
-              destination.latitude,
-              destination.longitude
-            )
-          }
-          className="w-full gap-2.5 flex items-center justify-center text-[16px] font-display font-bold h-14 rounded-xl bg-secondary text-secondary-foreground"
-        >
-          <WazeIcon className="w-5 h-5 flex-shrink-0" /> Waze
-        </button>
+        {hasFiniteCoordinates(destination) && (
+          <>
+            <button
+              onClick={() =>
+                openGoogleMapsNav(
+                  destination.name,
+                  destination.latitude,
+                  destination.longitude
+                )
+              }
+              className="w-full gap-2.5 flex items-center justify-center text-[16px] font-display font-bold h-14 rounded-xl bg-primary text-primary-foreground"
+            >
+              <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" /> Google Maps
+            </button>
+            <button
+              onClick={() =>
+                openWazeNav(
+                  destination.name,
+                  destination.latitude,
+                  destination.longitude
+                )
+              }
+              className="w-full gap-2.5 flex items-center justify-center text-[16px] font-display font-bold h-14 rounded-xl bg-secondary text-secondary-foreground"
+            >
+              <WazeIcon className="w-5 h-5 flex-shrink-0" /> Waze
+            </button>
+          </>
+        )}
         <button
           onClick={onClose}
           className="w-full h-12 rounded-xl border border-border text-muted-foreground font-display"

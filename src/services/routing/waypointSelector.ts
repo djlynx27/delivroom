@@ -20,6 +20,13 @@ function toLocalKm(origin: RoutePoint, point: RoutePoint): Vec2 {
   };
 }
 
+function fromLocalKm(origin: RoutePoint, vec: Vec2): RoutePoint {
+  return {
+    lat: origin.lat + vec.y / KM_PER_DEG_LAT,
+    lng: origin.lng + vec.x / kmPerDegLng(origin.lat),
+  };
+}
+
 function distanceKm(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -97,5 +104,66 @@ export function selectProspectionWaypoints(
     selected = selected.filter((s) => s !== worst);
   }
 
-  return orderedByRoute(selected).map((s) => s.zone);
+  if (selected.length > 0) {
+    return orderedByRoute(selected).map((s) => s.zone);
+  }
+
+  // No real high-demand zone qualified (empty candidate list, or none within
+  // the corridor / detour budget) — prospection mode must still diverge from
+  // the direct route, so sweep a nearby boulevard instead of silently
+  // collapsing to the same line.
+  return resolvePatrolFallback(origin, destVec, routeLenKm, maxDetourRatio);
+}
+
+function resolvePatrolFallback(
+  origin: RoutePoint,
+  destVec: Vec2,
+  routeLenKm: number,
+  maxDetourRatio: number
+): RouteCandidateZone[] {
+  // Below ~600 m there's no room to loop.
+  if (routeLenKm < 0.6) return [];
+  const patrol = buildPatrolWaypoint(origin, destVec, routeLenKm, maxDetourRatio);
+  return patrol ? [patrol] : [];
+}
+
+/**
+ * Synthesizes a single off-route point near the route's midpoint so the
+ * Directions API is forced through nearby streets instead of retracing the
+ * direct line. Not a real zone — Mapbox snaps it to the closest road, which
+ * is enough to produce a genuine "patrol the neighbouring boulevard" detour.
+ */
+function buildPatrolWaypoint(
+  origin: RoutePoint,
+  destVec: Vec2,
+  routeLenKm: number,
+  maxDetourRatio: number
+): RouteCandidateZone | null {
+  const midpoint: Vec2 = { x: destVec.x / 2, y: destVec.y / 2 };
+  // Perpendicular unit vector to the route direction.
+  const perp = { x: -destVec.y / routeLenKm, y: destVec.x / routeLenKm };
+
+  // Budget the sweep so the round trip through the offset point stays within
+  // the detour cap: 2 legs of ~sqrt((routeLenKm/2)^2 + offset^2) vs routeLenKm.
+  const maxRoundTripKm = routeLenKm * maxDetourRatio;
+  const halfRouteKm = routeLenKm / 2;
+  const maxOffsetKm = Math.sqrt(
+    Math.max(0, (maxRoundTripKm / 2) ** 2 - halfRouteKm ** 2)
+  );
+  const offsetKm = Math.min(maxOffsetKm, 1.5, routeLenKm * 0.35);
+  if (offsetKm < 0.15) return null;
+
+  const sweepVec: Vec2 = {
+    x: midpoint.x + perp.x * offsetKm,
+    y: midpoint.y + perp.y * offsetKm,
+  };
+  const point = fromLocalKm(origin, sweepVec);
+
+  return {
+    id: 'patrol-sweep',
+    name: 'Boulevard voisin',
+    latitude: point.lat,
+    longitude: point.lng,
+    score: 0,
+  };
 }

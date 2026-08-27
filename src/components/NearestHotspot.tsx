@@ -1,11 +1,12 @@
+import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { GoogleMapsIcon } from '@/components/NavIcons';
 import { useZones } from '@/hooks/useSupabase';
 import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { getDemandLevel } from '@/lib/demandUtils';
 import { scoreAllZones, type WeatherCondition } from '@/lib/scoringEngine';
-import { openGoogleMapsNav } from '@/lib/hotspots';
-import { useMemo } from 'react';
+import type { RouteCandidateZone } from '@/services/routing';
+import { useMemo, useState } from 'react';
 
 function getBorderClass(level: ReturnType<typeof getDemandLevel>) {
   if (level === 'high') return 'border-l-[hsl(var(--demand-high))]';
@@ -81,6 +82,7 @@ function findNearestHotspot(
 
 export function NearestHotspot() {
   const { location: userLocation } = useUserLocation(30000);
+  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
 
   const { data: zonesMtl = [] } = useZones('mtl');
   const { data: zonesLvl = [] } = useZones('lvl');
@@ -120,7 +122,18 @@ export function NearestHotspot() {
     [userLocation, allZones, weatherMtl]
   );
 
-  if (!nearest) return null;
+  // navZone stays open even if `nearest` drops out (GPS blip, zone list
+  // refetch) — only render below the early-return-avoiding fragment so a
+  // transient loss of `nearest` doesn't yank away an open nav overlay.
+  const navOverlay = navZone && (
+    <CustomNavigationMap
+      destination={navZone}
+      candidateZones={[]}
+      onClose={() => setNavZone(null)}
+    />
+  );
+
+  if (!nearest) return navOverlay;
 
   const level = getDemandLevel(nearest.score);
   const borderClass = getBorderClass(level);
@@ -138,13 +151,22 @@ export function NearestHotspot() {
           </span>
         </div>
         <button
-          onClick={() => openGoogleMapsNav(nearest.name, nearest.latitude, nearest.longitude)}
+          onClick={() =>
+            setNavZone({
+              id: nearest.id,
+              name: nearest.name,
+              latitude: nearest.latitude,
+              longitude: nearest.longitude,
+              score: nearest.score,
+            })
+          }
           className="flex-shrink-0 flex items-center justify-center gap-1.5 bg-primary text-primary-foreground font-display font-bold text-[14px] rounded-lg h-12 px-3 hover:bg-primary/90 transition-colors"
         >
           <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" />
           GO
         </button>
       </div>
+      {navOverlay}
     </div>
   );
 }

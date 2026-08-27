@@ -74,10 +74,11 @@ describe('selectProspectionWaypoints', () => {
     expect(result.map((z) => z.id)).toEqual(['small-detour']);
   });
 
-  it('returns an empty array when there are no candidates in the corridor', () => {
+  it('falls back to a patrol waypoint when no candidates are in the corridor', () => {
     const candidates = [zone('far-off', 45.3, -73.2, 100)];
     const result = selectProspectionWaypoints(origin, destination, candidates);
-    expect(result).toEqual([]);
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('patrol-sweep');
   });
 
   it('returns an empty array when origin equals destination', () => {
@@ -85,5 +86,50 @@ describe('selectProspectionWaypoints', () => {
       zone('any', 45.51, -73.57, 100),
     ]);
     expect(result).toEqual([]);
+  });
+
+  it('falls back to a synthetic patrol waypoint when no real candidates qualify', () => {
+    // No candidates at all — the empty-corridor case the bug report described
+    // as "prospection route identical to direct".
+    const result = selectProspectionWaypoints(origin, destination, []);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('patrol-sweep');
+    // The synthetic point must actually be off the direct line, otherwise
+    // Mapbox would just retrace the same route.
+    const midLat = (origin.lat + destination.lat) / 2;
+    const midLng = (origin.lng + destination.lng) / 2;
+    const offLine =
+      Math.abs(result[0].latitude - midLat) > 0.0005 ||
+      Math.abs(result[0].longitude - midLng) > 0.0005;
+    expect(offLine).toBe(true);
+  });
+
+  it('skips the patrol fallback for a very short hop (nowhere to sweep)', () => {
+    const veryClose = { lat: origin.lat + 0.001, lng: origin.lng + 0.001 };
+    const result = selectProspectionWaypoints(origin, veryClose, []);
+    expect(result).toEqual([]);
+  });
+
+  it('keeps the patrol detour within the detour ratio budget', () => {
+    const result = selectProspectionWaypoints(origin, destination, [], {
+      maxDetourRatio: 1.2,
+    });
+    expect(result).toHaveLength(1);
+
+    const direct = Math.hypot(
+      (destination.lat - origin.lat) * 110.574,
+      (destination.lng - origin.lng) * 78.02
+    );
+    const viaPatrol =
+      Math.hypot(
+        (result[0].latitude - origin.lat) * 110.574,
+        (result[0].longitude - origin.lng) * 78.02
+      ) +
+      Math.hypot(
+        (destination.lat - result[0].latitude) * 110.574,
+        (destination.lng - result[0].longitude) * 78.02
+      );
+    expect(viaPatrol).toBeLessThanOrEqual(direct * 1.2 + 0.01);
   });
 });

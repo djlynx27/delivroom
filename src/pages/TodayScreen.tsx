@@ -5,7 +5,7 @@ import { CitySelect } from '@/components/CitySelect';
 import { DemandBadge } from '@/components/DemandBadge';
 import { useCities } from '@/hooks/useSupabase';
 import { useDemandScores } from '@/hooks/useDemandScores';
-import { formatTime24h, getCurrentSlotTime, getDemandClass } from '@/lib/demandUtils';
+import { formatTime24h, getCurrentSlotTime, getDemandClass, hasFiniteCoordinates } from '@/lib/demandUtils';
 import { getActiveTimeBoosts } from '@/lib/timeBoosts';
 import { Clock, PartyPopper, Download, WifiOff, Navigation, Bell, Ticket, Upload, Brain } from 'lucide-react';
 import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
@@ -18,13 +18,14 @@ import { useOnlineStatus } from '@/hooks/useOnlineStatus';
 import { useNotifications } from '@/hooks/useNotifications';
 import { Button } from '@/components/ui/button';
 import { useUserLocation, haversineKm } from '@/hooks/useUserLocation';
-import { NavigationSheet } from '@/components/NavigationSheet';
+import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { useCityId } from '@/hooks/useCityId';
-import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
+import { openWazeNav } from '@/lib/hotspots';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
 import { MultiAppStatus } from '@/components/MultiAppStatus';
 import { Skeleton } from '@/components/ui/skeleton';
+import type { RouteCandidateZone } from '@/services/routing';
 
 const CITY_CENTERS: Record<string, [number, number]> = {
   mtl: [45.5017, -73.5673],
@@ -42,7 +43,7 @@ export default function TodayScreen() {
   const isOnline = useOnlineStatus();
   const { enabled: notifEnabled, requestPermission } = useNotifications(cityId);
   const { location: userLocation } = useUserLocation();
-  const [navZone, setNavZone] = useState<{ name: string; lat: number; lng: number } | null>(null);
+  const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(new Date()), 15000);
@@ -58,6 +59,7 @@ export default function TodayScreen() {
 
   const rankedZones = useMemo(() => {
     return zones
+      .filter(hasFiniteCoordinates)
       .map(z => ({ ...z, score: scores.get(z.id) ?? 0 }))
       .sort((a, b) => b.score - a.score);
   }, [zones, scores]);
@@ -261,11 +263,19 @@ export default function TodayScreen() {
           {heroZone && (
             <div className="mt-4 space-y-2">
               <Button
-                onClick={() => openGoogleMapsNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
+                onClick={() =>
+                  setNavZone({
+                    id: heroZone.id,
+                    name: heroZone.name,
+                    latitude: heroZone.latitude,
+                    longitude: heroZone.longitude,
+                    score: heroZone.score,
+                  })
+                }
                 className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
               >
                 <Navigation className="w-5 h-5" />
-                🗺️ GO — Google Maps
+                🗺️ GO — Naviguer
               </Button>
               <Button
                 onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
@@ -285,7 +295,15 @@ export default function TodayScreen() {
           center={mapCenter}
           zoom={13}
           markers={mapMarkers}
-          onZoneClick={(z) => setNavZone({ name: z.name, lat: z.latitude, lng: z.longitude })}
+          onZoneClick={(z) =>
+            setNavZone({
+              id: z.id,
+              name: z.name,
+              latitude: z.latitude,
+              longitude: z.longitude,
+              score: z.demandScore ?? 0,
+            })
+          }
         />
       </div>
 
@@ -305,7 +323,15 @@ export default function TodayScreen() {
           return (
             <div
               key={zone.id}
-              onClick={() => setNavZone({ name: zone.name, lat: zone.latitude, lng: zone.longitude })}
+              onClick={() =>
+                setNavZone({
+                  id: zone.id,
+                  name: zone.name,
+                  latitude: zone.latitude,
+                  longitude: zone.longitude,
+                  score: zone.score,
+                })
+              }
               className={`flex items-center justify-between bg-card rounded-xl border-l-4 ${dc.border} border border-border p-4 gap-3 cursor-pointer active:scale-[0.98] transition-transform`}
             >
               <div className="flex-1 min-w-0">
@@ -331,13 +357,13 @@ export default function TodayScreen() {
         })}
       </div>
 
-      <NavigationSheet
-        open={!!navZone}
-        onClose={() => setNavZone(null)}
-        zoneName={navZone?.name ?? ''}
-        latitude={navZone?.lat ?? 0}
-        longitude={navZone?.lng ?? 0}
-      />
+      {navZone && (
+        <CustomNavigationMap
+          destination={navZone}
+          candidateZones={rankedZones}
+          onClose={() => setNavZone(null)}
+        />
+      )}
     </div>
   );
 }
