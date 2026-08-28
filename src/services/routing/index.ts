@@ -33,9 +33,12 @@ export async function getDriveRoute(
 ): Promise<DriveRouteResult> {
   const waypointsUsed =
     mode === 'prospection'
-      ? selectProspectionWaypoints(origin, destination, candidateZones, {
-          destinationId: destination.id,
-        })
+      ? selectProspectionWaypoints(
+          origin,
+          { lat: destination.latitude, lng: destination.longitude },
+          candidateZones,
+          { destinationId: destination.id }
+        )
       : [];
 
   const points: RoutePoint[] = [
@@ -72,7 +75,7 @@ export async function getDriveRoute(
 // ~11 m precision — a waypoint this close to the destination reads to
 // Google Maps as the same stop, which can make its label eclipse the actual
 // destination in the app's UI. Belt-and-suspenders on top of
-// waypointSelector's MIN_ENDPOINT_DISTANCE_KM filter: this guard protects
+// waypointSelector's MIN_DESTINATION_DISTANCE_KM filter: this guard protects
 // every caller of this function, not just the prospection selector.
 function coordKey(lat: number, lng: number): string {
   return `${lat.toFixed(4)},${lng.toFixed(4)}`;
@@ -99,7 +102,9 @@ export function buildGoogleMapsProspectingUrl(
       strategicWaypoints.map((z) => `${z.latitude},${z.longitude}`).join('|')
     );
   }
-  return `https://www.google.com/maps/dir/?${params.toString()}`;
+  const url = `https://www.google.com/maps/dir/?${params.toString()}`;
+  console.log('[routing] Google Maps prospection URL:', url);
+  return url;
 }
 
 /**
@@ -118,8 +123,11 @@ export function buildOneTapNavigationUrl(
   if (!origin) {
     return getGoogleMapsNavUrl(destination.name, destination.latitude, destination.longitude);
   }
-  const waypoints = selectProspectionWaypoints(origin, destination, candidateZones, {
-    destinationId: destination.id,
-  });
+  const waypoints = selectProspectionWaypoints(
+    origin,
+    { lat: destination.latitude, lng: destination.longitude },
+    candidateZones,
+    { destinationId: destination.id }
+  );
   return buildGoogleMapsProspectingUrl(origin, destination, waypoints);
 }

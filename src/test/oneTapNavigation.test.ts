@@ -23,6 +23,19 @@ describe('buildOneTapNavigationUrl', () => {
     expect(url).toContain('origin=45.51%2C-73.57');
     expect(url).toContain('destination=45.575%2C-73.75');
     expect(url).toContain('waypoints=');
+    // Regression guard: destination is a RouteCandidateZone (latitude/
+    // longitude), not a RoutePoint (lat/lng) — passing it straight into
+    // selectProspectionWaypoints's RoutePoint-typed destination param
+    // silently produced NaN,NaN throughout the corridor math (destVec,
+    // routeLenKm, the patrol-sweep fallback), which `toContain('waypoints=')`
+    // alone can't catch since a NaN,NaN waypoint still contains that string.
+    expect(url).not.toContain('NaN');
+    const waypointsParam = new URL(url).searchParams.get('waypoints') ?? '';
+    for (const pair of waypointsParam.split('|')) {
+      const [lat, lng] = pair.split(',').map(Number);
+      expect(Number.isFinite(lat)).toBe(true);
+      expect(Number.isFinite(lng)).toBe(true);
+    }
   });
 
   it('falls back to a plain destination link when GPS is not locked yet', () => {
