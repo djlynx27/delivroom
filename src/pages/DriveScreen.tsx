@@ -5,6 +5,7 @@ import {
   type AddressSearchResult,
 } from '@/components/drive/AddressSearchBox';
 import { AntiDeadheadCard } from '@/components/drive/AntiDeadheadCard';
+import { MarketRadarSheet } from '@/components/drive/MarketRadarSheet';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
@@ -36,6 +37,7 @@ import { useArrivalCountdown } from '@/hooks/useArrivalCountdown';
 import { nearestCityId, useAutoCity } from '@/hooks/useAutoCity';
 import { useCityId } from '@/hooks/useCityId';
 import { useDemandScores } from '@/hooks/useDemandScores';
+import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
 import { findNearestZone } from '@/hooks/useNotifications';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
@@ -45,14 +47,21 @@ import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import {
   getConservativePresencePreference,
+  getDriverFingerprint,
   getStoredDriverMode,
   setConservativePresencePreference,
   setStoredDriverMode,
 } from '@/lib/driverPreferences';
 import { openWazeNav } from '@/lib/hotspots';
 import {
+  applySaturationDegradation,
+  computeSaturationFactor,
+  useNearbyDrivers,
+} from '@/lib/realtime';
+import {
   getReturnCorridor,
   reweightZonesByDriverMode,
+  type DemandWindow,
   type ReturnCorridorResult,
   type ReturnCorridorStep,
 } from '@/lib/scoringEngine';
@@ -158,6 +167,7 @@ export default function DriveScreen() {
   const [conservativePresence, setConservativePresence] = useState(() =>
     getConservativePresencePreference()
   );
+  const [demandWindow, setDemandWindow] = useState<DemandWindow>('30m');
   const {
     scores,
     factors,
@@ -165,11 +175,20 @@ export default function DriveScreen() {
     isLoading: scoresLoading,
     surgeMap,
     zoneEventBadge,
+    lyftSignalByZone,
   } = useDemandScores(cityId, {
     currentLat: location?.latitude ?? null,
     currentLng: location?.longitude ?? null,
     conservativePresence,
+    demandWindow,
   });
+  const { board: gasBoard } = useGasBoard(
+    'regular',
+    location ? { latitude: location.latitude, longitude: location.longitude } : null,
+    new Date()
+  );
+  const bestGasStation =
+    gasBoard?.slots.find((s) => s.kind === 'nearest-cheapest')?.station ?? null;
   const [fullScreen, setFullScreen] = useState(false);
   const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
 
@@ -274,11 +293,50 @@ export default function DriveScreen() {
           };
 
   // Ranked zones by score descending
+  // Market Radar: crowdsourced nearby-driver density (Supabase Realtime
+  // Presence) degrades a zone's ranked score slightly once it's saturated,
+  // rather than hiding it -- still worth knowing about, just less of a sure
+  // thing with 8 other drivers already circling it.
+  const driverFingerprint = useMemo(() => getDriverFingerprint(), []);
+  const zonesForPresence = useMemo(
+    () => zones.map((z) => ({ ...z, score: scores.get(z.id) ?? z.current_score ?? 50 })),
+    [zones, scores]
+  );
+  const { driversByZone, saturatedZoneIds } = useNearbyDrivers(
+    cityId,
+    location,
+    zonesForPresence,
+    driverFingerprint
+  );
+
   const rankedZones = useMemo(() => {
     return zones
-      .map((z) => ({ ...z, score: scores.get(z.id) ?? 0 }))
+      .map((z) => {
+        const score = scores.get(z.id) ?? 0;
+        return {
+          ...z,
+          score: saturatedZoneIds.has(z.id)
+            ? applySaturationDegradation(
+                score,
+                computeSaturationFactor(driversByZone.get(z.id) ?? 0, score)
+              )
+            : score,
+        };
+      })
       .sort((a, b) => b.score - a.score);
-  }, [zones, scores]);
+  }, [zones, scores, saturatedZoneIds, driversByZone]);
+
+  const marketRadarZones = useMemo(
+    () =>
+      rankedZones.slice(0, 10).map((zone) => ({
+        id: zone.id,
+        name: zone.name,
+        estimatedWaitMin: lyftSignalByZone.get(zone.id)?.estimatedWaitMin ?? null,
+        driverCount: driversByZone.get(zone.id) ?? 0,
+        isSaturated: saturatedZoneIds.has(zone.id),
+      })),
+    [rankedZones, lyftSignalByZone, driversByZone, saturatedZoneIds]
+  );
 
   // Reweight scores based on driver objective (rideshare vs delivery favor
   // different zone types) — see scoringEngine.reweightZonesByDriverMode
@@ -738,6 +796,13 @@ export default function DriveScreen() {
 
       {/* Full-screen toggle + GPS row */}
       <div className="px-4 mt-3 space-y-2">
+        <MarketRadarSheet
+          zones={marketRadarZones}
+          demandWindow={demandWindow}
+          onDemandWindowChange={setDemandWindow}
+          bestGasStation={bestGasStation}
+        />
+
         <Button
           variant="outline"
           className="w-full h-12 gap-2 font-display font-bold"

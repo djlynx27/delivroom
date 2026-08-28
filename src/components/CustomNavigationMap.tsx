@@ -1,7 +1,11 @@
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { PitStopLayer } from '@/components/map/PitStopLayer';
 import { hasFiniteCoordinates } from '@/lib/demandUtils';
+import { useGasBoard } from '@/hooks/useGasBoard';
+import type { GasBoard, RankedStation } from '@/lib/gasRanking';
 import { openGoogleMapsNav, openWazeNav } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
+import { type PitStop } from '@/lib/pitStops';
 import {
   buildGoogleMapsProspectingUrl,
   getDriveRoute,
@@ -95,6 +99,10 @@ function shouldShowFallbackLine(
   destinationValid: boolean
 ): boolean {
   return !!routeError && !activeRoute && !!origin && destinationValid;
+}
+
+function findBestGasStation(gasBoard: GasBoard | null): RankedStation | null {
+  return gasBoard?.slots.find((s) => s.kind === 'nearest-cheapest')?.station ?? null;
 }
 
 function RouteMapLayers({
@@ -254,6 +262,26 @@ function OrientationToggle({
   );
 }
 
+function PitStopToggle({
+  visible,
+  onToggle,
+}: {
+  visible: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      className={`absolute right-3 bottom-44 z-10 rounded-full backdrop-blur w-11 h-11 flex items-center justify-center text-white ${
+        visible ? 'bg-primary' : 'bg-black/60'
+      }`}
+      aria-label={visible ? 'Masquer les pit-stops' : 'Afficher les pit-stops'}
+    >
+      <span style={{ fontSize: '18px' }}>🚻</span>
+    </button>
+  );
+}
+
 function GpsUnavailableBanner() {
   return (
     <div className="absolute top-[calc(env(safe-area-inset-top)+4.25rem)] left-3 right-3 z-10 rounded-lg bg-red-600/90 text-white text-[12px] px-3 py-2 text-center">
@@ -404,6 +432,37 @@ function CustomNavigationMapInner({
   const [isLoadingRoute, setIsLoadingRoute] = useState(false);
   const [orientationMode, setOrientationMode] = useState<OrientationMode>('follow');
   const [mapCrashed, setMapCrashed] = useState(false);
+  const [showPitStops, setShowPitStops] = useState(false);
+
+  // Pit-Stop layer: 24/7 restrooms (curated list) + best-priced nearby gas
+  // (live, via the same board the Gas tab uses) — reused, not refetched.
+  const { board: gasBoard } = useGasBoard('regular', location, new Date());
+  const bestGasStation = findBestGasStation(gasBoard);
+
+  function navigateViaPitStop(waypoint: {
+    id: string;
+    name: string;
+    latitude: number;
+    longitude: number;
+  }) {
+    if (!origin) return;
+    window.location.href = buildGoogleMapsProspectingUrl(origin, destination, [
+      { ...waypoint, score: 0 },
+    ]);
+  }
+
+  function handleSelectRestroom(stop: PitStop) {
+    navigateViaPitStop(stop);
+  }
+
+  function handleSelectGas(station: RankedStation) {
+    navigateViaPitStop({
+      id: station.key,
+      name: station.name,
+      latitude: station.lat,
+      longitude: station.lng,
+    });
+  }
 
   const destinationValid = hasFiniteCoordinates(destination);
   const haveActiveRoute = !!routes[mode];
@@ -559,6 +618,12 @@ function CustomNavigationMapInner({
             waypointsUsed={activeRoute?.waypointsUsed ?? []}
             isFallbackLine={showFallbackLine}
           />
+          <PitStopLayer
+            visible={showPitStops}
+            bestGasStation={bestGasStation}
+            onSelectRestroom={handleSelectRestroom}
+            onSelectGas={handleSelectGas}
+          />
         </Map>
       </ErrorBoundary>
 
@@ -575,6 +640,11 @@ function CustomNavigationMapInner({
             onToggle={() =>
               setOrientationMode((prev) => (prev === 'follow' ? 'north-up' : 'follow'))
             }
+          />
+
+          <PitStopToggle
+            visible={showPitStops}
+            onToggle={() => setShowPitStops((v) => !v)}
           />
 
           <RouteOverlays

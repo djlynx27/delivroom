@@ -33,8 +33,10 @@ import {
 } from '@/lib/lyftStrategy';
 import { getObservedZoneScore } from '@/lib/observedScore';
 import {
+  DEMAND_WINDOW_MINUTES,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
+  type DemandWindow,
   type WeatherCondition,
 } from '@/lib/scoringEngine';
 import {
@@ -68,6 +70,8 @@ interface UseDemandScoresOptions {
   currentLat?: number | null;
   currentLng?: number | null;
   conservativePresence?: boolean;
+  /** Market Radar time window filter — defaults to '30m'. */
+  demandWindow?: DemandWindow;
 }
 
 interface OvernightRealityCapInput {
@@ -174,6 +178,7 @@ export function useDemandScores(
   cityId: string,
   options: UseDemandScoresOptions = {}
 ) {
+  const demandWindow: DemandWindow = options.demandWindow ?? '30m';
   const queryClient = useQueryClient();
   const { data: zones = [], isLoading: zonesLoading } = useZones(cityId);
   const { data: weather } = useWeather(cityId);
@@ -353,13 +358,14 @@ export function useDemandScores(
     queryKey: [
       'lyft-platform-signals',
       cityId,
+      demandWindow,
       zones.map((zone) => zone.id).join('|'),
     ],
     queryFn: async () => {
       if (!cityId || zones.length === 0) return [];
 
       const lookbackStart = new Date(
-        now.getTime() - 30 * 60 * 1000
+        now.getTime() - DEMAND_WINDOW_MINUTES[demandWindow] * 60 * 1000
       ).toISOString();
       const { data, error } = await supabase
         .from('platform_signals')
@@ -632,6 +638,7 @@ export function useDemandScores(
           trafficCongestion:
             trafficByZone.get(zone.id) ?? averageTrafficCongestion,
           transitDisruption: stmStatus?.disruptionScore ?? 0,
+          demandWindow,
         })
       );
 
@@ -736,6 +743,7 @@ export function useDemandScores(
     options.currentLat,
     options.currentLng,
     stmStatus,
+    demandWindow,
   ]);
 
   // ── Surge computation per zone ──────────────────────────────────────────

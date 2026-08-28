@@ -50,7 +50,32 @@ export interface ScoringContext {
   transitDisruption?: number;
   trafficCongestion?: number;
   winterConditions?: number;
+  /** Market Radar time window — how heavily recent activity outweighs the
+   * longer-run baseline. Defaults to '30m' (matches the previous hardcoded
+   * platform_signals lookback). */
+  demandWindow?: DemandWindow;
 }
+
+// ── Market Radar: demand time-window filter ───────────────────────────────
+export type DemandWindow = '5m' | '30m' | '1h';
+
+export const DEMAND_WINDOW_MINUTES: Record<DemandWindow, number> = {
+  '5m': 5,
+  '30m': 30,
+  '1h': 60,
+};
+
+/**
+ * How much weight zone history within the window gets vs. the longer-run
+ * baseline (getHistoricalFactor's weighted-last-12-observations average).
+ * The tighter the window, the more aggressively it trusts what just
+ * happened over the general pattern for this hour/day.
+ */
+export const DEMAND_WINDOW_RECENCY_WEIGHT: Record<DemandWindow, number> = {
+  '5m': 0.9,
+  '30m': 0.6,
+  '1h': 0.35,
+};
 
 export const DEFAULT_WEIGHTS: WeightConfig = {
   timeOfDay: 0.25,
@@ -568,6 +593,36 @@ function getHistoricalFactor(
   return clamp01(weightedAverage / 100);
 }
 
+/**
+ * Blends the long-run historical factor with whatever activity fell inside
+ * `window` (e.g. the driver picked "5m" in Market Radar) — a tight window
+ * with real recent signal dominates the score; an empty window just falls
+ * back to the baseline unchanged.
+ */
+export function applyDemandWindow(
+  baselineFactor: number,
+  history: ZoneHistory[],
+  zoneId: string | null | undefined,
+  now: Date,
+  window: DemandWindow
+): number {
+  if (!zoneId) return baselineFactor;
+
+  const windowMs = DEMAND_WINDOW_MINUTES[window] * 60_000;
+  const recent = history.filter(
+    (entry) =>
+      entry.zoneId === zoneId &&
+      now.getTime() - new Date(entry.timestamp).getTime() <= windowMs
+  );
+  if (recent.length === 0) return baselineFactor;
+
+  const recentFactor = clamp01(
+    recent.reduce((sum, e) => sum + e.observedScore, 0) / recent.length / 100
+  );
+  const weight = DEMAND_WINDOW_RECENCY_WEIGHT[window];
+  return clamp01(recentFactor * weight + baselineFactor * (1 - weight));
+}
+
 function getWeatherFactor(weather: WeatherCondition | null): number {
   if (!weather) return 0.25;
   const multiplierBoost = clamp01((getWeatherMultiplier(weather) - 1) / 0.4);
@@ -617,7 +672,13 @@ export function calculateDemandFactors(
     dayOfWeek: getDayOfWeekFactor(zone.type, now),
     weather: getWeatherFactor(weather),
     events: clamp01(eventBoostPoints / 30),
-    historicalEarnings: getHistoricalFactor(zone, context?.history),
+    historicalEarnings: applyDemandWindow(
+      getHistoricalFactor(zone, context?.history),
+      context?.history ?? [],
+      zone.id,
+      now,
+      context?.demandWindow ?? '30m'
+    ),
     transitDisruption: clamp01(context?.transitDisruption ?? 0),
     trafficCongestion: clamp01(context?.trafficCongestion ?? 0),
     winterConditions: clamp01(
