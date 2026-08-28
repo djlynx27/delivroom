@@ -22,9 +22,9 @@ function zone(
 describe('selectProspectionWaypoints', () => {
   it('keeps only candidates inside the corridor, ordered along the route', () => {
     const candidates = [
-      zone('on-route-low', 45.53, -73.595, 40), // near the line, low score
-      zone('on-route-high', 45.545, -73.61, 90), // near the line, closer to destination
-      zone('far-off', 45.53, -73.4, 95), // high score but way off the corridor
+      zone('on-route-low', 45.53, -73.595, 40, 'commercial'), // near the line, low score
+      zone('on-route-high', 45.545, -73.61, 90, 'commercial'), // near the line, closer to destination
+      zone('far-off', 45.53, -73.4, 95, 'commercial'), // high score but way off the corridor
     ];
 
     const result = selectProspectionWaypoints(origin, destination, candidates);
@@ -34,8 +34,8 @@ describe('selectProspectionWaypoints', () => {
 
   it('excludes the destination itself if present in candidates', () => {
     const candidates = [
-      zone('dest-dup', destination.lat, destination.lng, 99),
-      zone('on-route', 45.53, -73.595, 50),
+      zone('dest-dup', destination.lat, destination.lng, 99, 'commercial'),
+      zone('on-route', 45.53, -73.595, 50, 'commercial'),
     ];
 
     const result = selectProspectionWaypoints(origin, destination, candidates, {
@@ -47,7 +47,7 @@ describe('selectProspectionWaypoints', () => {
 
   it('caps at maxWaypoints, keeping the highest scores', () => {
     const candidates = Array.from({ length: 8 }, (_, i) =>
-      zone(`z${i}`, 45.51 + i * 0.005, -73.57 - i * 0.005, i * 10)
+      zone(`z${i}`, 45.51 + i * 0.005, -73.57 - i * 0.005, i * 10, 'commercial')
     );
 
     const result = selectProspectionWaypoints(origin, destination, candidates, {
@@ -65,8 +65,8 @@ describe('selectProspectionWaypoints', () => {
     const candidates = [
       // Both far off-corridor so the corridor filter alone wouldn't exclude
       // them (wide buffer below) — the detour cap must do the trimming.
-      zone('big-detour', 45.4, -73.3, 20),
-      zone('small-detour', 45.53, -73.6, 80),
+      zone('big-detour', 45.4, -73.3, 20, 'commercial'),
+      zone('small-detour', 45.53, -73.6, 80, 'commercial'),
     ];
 
     const result = selectProspectionWaypoints(origin, destination, candidates, {
@@ -157,8 +157,8 @@ describe('selectProspectionWaypoints', () => {
     // Two candidates far off-corridor (wide buffer bypasses the corridor
     // filter) so only the detour-ratio trim decides between them.
     const candidates = [
-      zone('big-detour', 45.4, -73.3, 20),
-      zone('small-detour', 45.53, -73.6, 80),
+      zone('big-detour', 45.4, -73.3, 20, 'commercial'),
+      zone('small-detour', 45.53, -73.6, 80, 'commercial'),
     ];
     const result = selectProspectionWaypoints(origin, destination, candidates, {
       corridorBufferKm: 50,
@@ -176,7 +176,8 @@ describe('selectProspectionWaypoints', () => {
       'overshoot',
       origin.lat + (destination.lat - origin.lat) * 3,
       origin.lng + (destination.lng - origin.lng) * 3,
-      100
+      100,
+      'commercial'
     );
     const result = selectProspectionWaypoints(origin, destination, [overshoot]);
     expect(result.map((z) => z.id)).not.toContain('overshoot');
@@ -207,10 +208,10 @@ describe('selectProspectionWaypoints', () => {
     );
   });
 
-  it('keeps a candidate with no type at all (synthetic/unlabeled waypoints are unknown, not excluded)', () => {
+  it('excludes a candidate with no type at all (unverifiable — e.g. an untyped zone-discovery promote like "Nan Hair Stylist")', () => {
     const candidates = [zone('no-type', 45.53, -73.595, 80, undefined)];
     const result = selectProspectionWaypoints(origin, destination, candidates);
-    expect(result.map((z) => z.id)).toContain('no-type');
+    expect(result.map((z) => z.id)).not.toContain('no-type');
   });
 
   it('Chomedey -> Montmorency (real Delivroom zone coordinates, ~2 km direct): total route never exceeds 3.5 km', () => {

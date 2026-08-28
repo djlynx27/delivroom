@@ -53,10 +53,15 @@ export interface WaypointSelectionOptions {
 // actually has (individual businesses aren't in the zones table).
 const HUB_ZONE_TYPES = new Set(['transport', 'métro', 'aéroport', 'commercial', 'tourisme']);
 
-/** Zones with no `type` (e.g. the synthetic patrol-sweep waypoint) are
- * unknown, not rejected — there's nothing to judge them against. */
+// An untyped zone can't be verified as a real hub — treating "unknown" as
+// "allowed" is exactly how an isolated business (e.g. a promoted
+// zone-discovery entry with no type set, like "Nan Hair Stylist") slipped
+// through as a prospection waypoint. Reject anything not explicitly typed.
+// The synthetic patrol-sweep waypoint (buildPatrolWaypoint) never passes
+// through this filter — it's the fallback path's own return value, not a
+// `candidates` entry — so it's unaffected by this being strict.
 function isHubZone(zone: RouteCandidateZone): boolean {
-  return zone.type === undefined || HUB_ZONE_TYPES.has(zone.type);
+  return zone.type !== undefined && HUB_ZONE_TYPES.has(zone.type);
 }
 
 /** Per-waypoint incremental detour: how much longer the trip gets from
