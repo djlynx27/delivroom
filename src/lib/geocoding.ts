@@ -111,7 +111,9 @@ export async function geocodeSuggestions(
     proximity,
   });
   const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json?${params}`;
-  console.log('[geocoding] Request URL:', url);
+  const redactedUrl = new URL(url);
+  redactedUrl.searchParams.set('access_token', '<redacted>');
+  console.log('[geocoding] Request URL:', redactedUrl.toString());
 
   try {
     const res = await fetch(url, { signal: options.signal });
