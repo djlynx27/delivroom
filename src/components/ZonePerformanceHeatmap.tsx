@@ -111,7 +111,15 @@ function buildZoneEarningsPerHour(trips: ZonePerformanceTrip[]) {
   return earningsPerHour;
 }
 
-function buildZoneColors({
+export interface ZonePerf {
+  color: HeatmapColor;
+  earningsPerHour: number | null;
+}
+
+// Empty map = no trip data at all for the selected hour/day (distinct from a
+// zone that has no data individually, which gets a 'grey' entry below) — the
+// caller renders a section-wide empty state instead of a wall of grey cards.
+export function buildZonePerformance({
   trips,
   hour,
   day,
@@ -121,7 +129,7 @@ function buildZoneColors({
   hour: string;
   day: string;
   zones: Zone[];
-}) {
+}): Map<string, ZonePerf> {
   const selectedHour = parseInt(hour, 10);
   const selectedDay = parseInt(day, 10);
   const matchingTrips = getMatchingTrips({ trips, selectedHour, selectedDay });
@@ -129,31 +137,23 @@ function buildZoneColors({
   const values = Object.values(earningsPerHour);
 
   if (values.length === 0) {
-    return new Map<string, HeatmapColor>();
+    return new Map<string, ZonePerf>();
   }
 
   const average =
     values.reduce((first, second) => first + second, 0) / values.length;
-  const result = new Map<string, HeatmapColor>();
+  const result = new Map<string, ZonePerf>();
 
   for (const zone of zones) {
     const eph = earningsPerHour[zone.id];
     if (eph === undefined) {
-      result.set(zone.id, 'grey');
+      result.set(zone.id, { color: 'grey', earningsPerHour: null });
       continue;
     }
 
-    if (eph >= average * 1.2) {
-      result.set(zone.id, 'green');
-      continue;
-    }
-
-    if (eph >= average * 0.8) {
-      result.set(zone.id, 'yellow');
-      continue;
-    }
-
-    result.set(zone.id, 'red');
+    const color: HeatmapColor =
+      eph >= average * 1.2 ? 'green' : eph >= average * 0.8 ? 'yellow' : 'red';
+    result.set(zone.id, { color, earningsPerHour: eph });
   }
 
   return result;
@@ -176,29 +176,49 @@ function HeatmapLegend() {
 
 function HeatmapZoneList({
   zones,
-  zoneColors,
+  perf,
 }: {
   zones: Zone[];
-  zoneColors: Map<string, HeatmapColor>;
+  perf: Map<string, ZonePerf>;
 }) {
   return (
     <div className="space-y-1.5 max-h-[300px] overflow-y-auto">
       {zones.map((zone) => {
-        const color = zoneColors.get(zone.id) || 'grey';
+        const { color, earningsPerHour } = perf.get(zone.id) ?? {
+          color: 'grey' as HeatmapColor,
+          earningsPerHour: null,
+        };
         return (
           <div
             key={zone.id}
-            className={`rounded-lg border px-3 py-2 ${colorClasses[color]}`}
+            className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${colorClasses[color]}`}
           >
-            <span className="text-[13px] font-display font-semibold">
-              {zone.name}
-            </span>
-            <span className="text-[11px] ml-2 capitalize opacity-70">
-              {zone.type}
+            <div className="min-w-0">
+              <span className="text-[13px] font-display font-semibold">
+                {zone.name}
+              </span>
+              <span className="text-[11px] ml-2 capitalize opacity-70">
+                {zone.type}
+              </span>
+            </div>
+            {/* Explicit metric/badge so a performance card never reads like
+             * the plain CRUD rows below it. */}
+            <span className="text-[11px] font-semibold flex-shrink-0">
+              {earningsPerHour !== null
+                ? `${earningsPerHour.toFixed(0)} $/h`
+                : colorLabels.grey}
             </span>
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function PerformanceEmptyState({ dayLabel, hour }: { dayLabel: string; hour: string }) {
+  return (
+    <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-[13px] text-muted-foreground">
+      Aucune donnée de performance enregistrée pour {dayLabel} {hour.padStart(2, '0')}:00.
     </div>
   );
 }
@@ -208,10 +228,11 @@ export function ZonePerformanceHeatmap({ zones }: Props) {
   const [day, setDay] = useState(String(new Date().getDay()));
   const { data: trips = [] } = useZonePerformance();
 
-  const zoneColors = useMemo(
-    () => buildZoneColors({ trips, hour, day, zones }),
+  const perf = useMemo(
+    () => buildZonePerformance({ trips, hour, day, zones }),
     [trips, hour, day, zones]
   );
+  const dayLabel = DAYS.find((d) => d.value === day)?.label ?? '';
 
   return (
     <div className="space-y-3">
@@ -250,7 +271,11 @@ export function ZonePerformanceHeatmap({ zones }: Props) {
       </div>
 
       <HeatmapLegend />
-      <HeatmapZoneList zones={zones} zoneColors={zoneColors} />
+      {perf.size === 0 ? (
+        <PerformanceEmptyState dayLabel={dayLabel} hour={hour} />
+      ) : (
+        <HeatmapZoneList zones={zones} perf={perf} />
+      )}
     </div>
   );
 }

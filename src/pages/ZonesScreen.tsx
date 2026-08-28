@@ -201,7 +201,15 @@ export default function ZonesScreen() {
           <ZonePerformanceHeatmap zones={zones} />
         </div>
 
-        <div className="relative z-[1] mt-4 space-y-2">
+        <hr className="my-5 border-border" />
+
+        <div className="relative z-[1] flex items-center justify-between mb-2">
+          <h2 className="text-[14px] font-display font-bold">
+            Gestion des zones ({filteredZones.length})
+          </h2>
+        </div>
+
+        <div className="relative z-[1] space-y-2">
           {filteredZones.length === 0 && search.trim() && (
             <p className="text-[14px] text-muted-foreground font-body text-center py-4">
               {t('noResults')}
