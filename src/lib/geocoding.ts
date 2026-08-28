@@ -5,6 +5,15 @@
 // Quebec addresses well enough for our needs (driver pickup pins, never
 // life-safety routing).
 
+import { HOTSPOTS } from './hotspots';
+
+function normalizeForMatch(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // strip accents
+    .toLowerCase();
+}
+
 // Read at call time (not module scope) so tests can stub the env var —
 // same pattern as services/routing/mapboxDirections.ts.
 function getMapboxToken(): string | undefined {
@@ -76,10 +85,35 @@ export interface GeocodeSuggestion {
 // instead of Mapbox searching all of Quebec.
 const MONTREAL_AREA_BBOX = '-74.10,45.20,-73.30,45.75';
 
+// Coordinate precision (~10m) used to dedupe a local hub against the Mapbox
+// result for the same place, so it isn't listed twice.
+function coordKey(lat: number, lng: number): string {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`;
+}
+
+/**
+ * Local-first match against Delivroom's curated major hubs (malls, arenas,
+ * the airport, casino...). These outrank Mapbox results — a driver typing
+ * "carrefour" or "centre bell" wants the venue, not a nearby street match —
+ * and resolve instantly with no network round-trip.
+ */
+function matchLocalHubs(query: string): GeocodeSuggestion[] {
+  const q = normalizeForMatch(query);
+  if (q.length < 2) return [];
+  return HOTSPOTS.filter((h) => normalizeForMatch(h.name).includes(q)).map((h) => ({
+    id: `hotspot-${h.id}`,
+    name: h.name,
+    latitude: h.lat,
+    longitude: h.lng,
+  }));
+}
+
 /**
  * Live address/POI autocomplete for the Drive search box. Unlike
  * forwardGeocode (single best match for the zone-promote flow), this
  * returns up to 5 candidates so the driver picks the right one while typing.
+ * Curated major hubs (see matchLocalHubs) are matched locally and always
+ * ranked first, ahead of the Mapbox API results.
  */
 export async function geocodeSuggestions(
   query: string,
@@ -91,8 +125,9 @@ export async function geocodeSuggestions(
   } = {},
 ): Promise<GeocodeSuggestion[]> {
   const trimmed = query.trim();
+  const localMatches = matchLocalHubs(trimmed);
   const token = getMapboxToken();
-  if (!token || !trimmed) return [];
+  if (!token || !trimmed) return localMatches;
 
   const proximity = options.proximity
     ? `${options.proximity.longitude},${options.proximity.latitude}`
@@ -117,12 +152,13 @@ export async function geocodeSuggestions(
 
   try {
     const res = await fetch(url, { signal: options.signal });
-    if (!res.ok) return [];
+    if (!res.ok) return localMatches;
     const data = (await res.json()) as {
       features?: { id?: string; center?: [number, number]; place_name?: string }[];
     };
     console.log('[geocoding] Mapbox raw response:', data);
-    return (data.features ?? [])
+    const localKeys = new Set(localMatches.map((h) => coordKey(h.latitude, h.longitude)));
+    const mapboxMatches = (data.features ?? [])
       .filter((f): f is { id?: string; center: [number, number]; place_name: string } =>
         !!f.center && !!f.place_name,
       )
@@ -131,11 +167,13 @@ export async function geocodeSuggestions(
         name: f.place_name,
         longitude: f.center[0],
         latitude: f.center[1],
-      }));
+      }))
+      .filter((f) => !localKeys.has(coordKey(f.latitude, f.longitude)));
+    return [...localMatches, ...mapboxMatches].slice(0, 5);
   } catch (err) {
     if (options.signal?.aborted) return [];
     console.error('[geocoding] geocodeSuggestions failed:', err);
-    return [];
+    return localMatches;
   }
 }
 

@@ -86,11 +86,39 @@ describe("geocodeSuggestions", () => {
     mockFetchOnce({ features: [CENTRE_BELL_FEATURE] });
     expect(await geocodeSuggestions("   ")).toEqual([]);
 
+    // No token: still resolves the curated local hub match (no network call).
     vi.stubEnv("VITE_MAPBOX_TOKEN", "");
-    expect(await geocodeSuggestions("centre bell")).toEqual([]);
+    expect(await geocodeSuggestions("centre bell")).toEqual([
+      { id: "hotspot-centre-bell", name: "Centre Bell", latitude: 45.4961, longitude: -73.5693 },
+    ]);
     vi.stubEnv("VITE_MAPBOX_TOKEN", "test-token");
 
+    // Mapbox HTTP error: falls back to the local hub match instead of [].
     mockFetchOnce({}, false, 500);
-    expect(await geocodeSuggestions("centre bell")).toEqual([]);
+    expect(await geocodeSuggestions("centre bell")).toEqual([
+      { id: "hotspot-centre-bell", name: "Centre Bell", latitude: 45.4961, longitude: -73.5693 },
+    ]);
+
+    // Query with no local hub match and a real HTTP error: empty.
+    mockFetchOnce({}, false, 500);
+    expect(await geocodeSuggestions("xyzzy nonexistent place")).toEqual([]);
+  });
+
+  it("ranks curated local hubs first and dedupes against Mapbox's own result for the same venue", async () => {
+    mockFetchOnce({
+      features: [
+        {
+          id: "poi.carrefour-laval-mapbox",
+          center: [-73.7519, 45.5702],
+          place_name: "Carrefour Laval, 3035 Boul. le Carrefour, Laval, Québec",
+        },
+      ],
+    });
+
+    const results = await geocodeSuggestions("carrefour laval");
+
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe("hotspot-carrefour-laval");
+    expect(results[0].name).toBe("Carrefour Laval");
   });
 });
