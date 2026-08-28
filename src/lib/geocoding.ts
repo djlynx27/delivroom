@@ -58,6 +58,65 @@ export async function forwardGeocode(
   }
 }
 
+export interface GeocodeSuggestion {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+// Roughly Greater Montréal: Montréal, Laval, Longueuil/Rive-Sud, and the
+// North Shore towns Delivroom tracks (Terrebonne, Sainte-Thérèse,
+// Blainville, Boisbriand, Rosemère) — keeps autocomplete relevant and fast
+// instead of Mapbox searching all of Quebec.
+const MONTREAL_AREA_BBOX = '-74.3,45.2,-73.0,45.9';
+
+/**
+ * Live address/POI autocomplete for the Drive search box. Unlike
+ * forwardGeocode (single best match for the zone-promote flow), this
+ * returns up to 5 candidates so the driver picks the right one while typing.
+ */
+export async function geocodeSuggestions(
+  query: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<GeocodeSuggestion[]> {
+  const trimmed = query.trim();
+  if (!MAPBOX_TOKEN || !trimmed) return [];
+
+  const encoded = encodeURIComponent(trimmed);
+  const url =
+    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json` +
+    `?access_token=${MAPBOX_TOKEN}` +
+    `&country=CA` +
+    `&types=address,poi` +
+    `&autocomplete=true` +
+    `&limit=5` +
+    `&bbox=${MONTREAL_AREA_BBOX}` +
+    `&proximity=-73.5673,45.5017`;
+
+  try {
+    const res = await fetch(url, { signal: options.signal });
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      features?: { id?: string; center?: [number, number]; place_name?: string }[];
+    };
+    return (data.features ?? [])
+      .filter((f): f is { id?: string; center: [number, number]; place_name: string } =>
+        !!f.center && !!f.place_name,
+      )
+      .map((f) => ({
+        id: f.id ?? `${f.center[0]},${f.center[1]}`,
+        name: f.place_name,
+        longitude: f.center[0],
+        latitude: f.center[1],
+      }));
+  } catch (err) {
+    if (options.signal?.aborted) return [];
+    console.error('[geocoding] geocodeSuggestions failed:', err);
+    return [];
+  }
+}
+
 // Compact city keyword map (mirrors the edge function's guessCityId) so the
 // promote dialog can auto-fill city_id from the address or Mapbox place_name
 // when the discovery's city_hint is null — one less field the driver must know.

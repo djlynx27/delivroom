@@ -1,5 +1,9 @@
 import { ArrivalCountdown } from '@/components/ArrivalCountdown';
 import { CitySelect } from '@/components/CitySelect';
+import {
+  AddressSearchBox,
+  type AddressSearchResult,
+} from '@/components/drive/AddressSearchBox';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
@@ -244,6 +248,14 @@ export default function DriveScreen() {
     [location, modeZones]
   );
 
+  // Address search: the picked address/POI becomes the active nav target
+  // and fires the same 1-tap Google Maps handoff as the hero recommendation
+  // — history-saving is handled inside AddressSearchBox itself. score: 0
+  // since a manually searched address was never demand-scored.
+  const handleAddressSelect = (result: AddressSearchResult) => {
+    navigateOneTap({ ...result, score: 0 });
+  };
+
   // 15-minute auto-routing: when driver arrives at heroZone, countdown then
   // auto-navigate to nextZones[0] in Google Maps.
   const {
@@ -335,6 +347,13 @@ export default function DriveScreen() {
       className="flex flex-col h-full pb-36 bg-background text-foreground overflow-y-auto"
       data-mode={driverMode}
     >
+      {/* Address search — floating overlay, sticks above the hero card while
+          scrolling. 1-tap: picking a result goes straight to Google Maps,
+          same as the recommended-zone flow, no in-app map detour. */}
+      <div className="sticky top-0 z-20 px-4 pt-2 pb-3 bg-gradient-to-b from-background via-background/95 to-transparent">
+        <AddressSearchBox onSelect={handleAddressSelect} />
+      </div>
+
       {/* Shift tally — running $/h based on actual fares logged today */}
       <div className="px-4 mt-2">
         <ShiftTally />
