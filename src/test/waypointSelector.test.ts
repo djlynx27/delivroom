@@ -290,4 +290,58 @@ describe('selectProspectionWaypoints', () => {
     expect(waypointsParam).toBe('45.515,-73.575');
     expect(new URL(url).searchParams.get('destination')).toBe('45.4969,-73.5698');
   });
+
+  describe('Place Dupuis -> Centre Bell (real ~2.1km-direct short trip)', () => {
+    // Real coordinates. Direct distance ~2.1km straight-line (~2.5km on real
+    // downtown one-way streets, per the bug report). Both synthetic hub
+    // candidates below sit only 150m off the corridor axis (t=0.4 and
+    // t=0.7) — a genuinely small, legitimate detour each — to prove the
+    // short-trip cap keeps only 1 even when more than one qualifies.
+    const placeDupuis = { lat: 45.5155, lng: -73.5637 };
+    const centreBell = { lat: 45.4969, lng: -73.5698 };
+    const onAxisNearOrigin = zone('waypoint-a', 45.50775, -73.56427, 70, 'transport'); // t≈0.4, 150m off-axis
+    const onAxisNearDest = zone('waypoint-b', 45.50217, -73.5661, 85, 'métro'); // t≈0.7, 150m off-axis
+    // Highest score of the three, but 600m off-axis — under the old flat
+    // 2km corridor buffer this would have won the pick and produced the
+    // real-world zigzag; the short-trip 300m buffer must reject it.
+    const offAxisHighScore = zone('waypoint-c', 45.50498, -73.55925, 95, 'commercial');
+
+    it('caps to exactly 1 waypoint even when 2 legitimately qualify', () => {
+      const result = selectProspectionWaypoints(placeDupuis, centreBell, [
+        onAxisNearOrigin,
+        onAxisNearDest,
+      ]);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('waypoint-b'); // higher score of the two
+    });
+
+    it('rejects a high-scoring candidate more than 300m off-axis on a short trip', () => {
+      const result = selectProspectionWaypoints(placeDupuis, centreBell, [
+        onAxisNearOrigin,
+        onAxisNearDest,
+        offAxisHighScore,
+      ]);
+      expect(result.map((z) => z.id)).not.toContain('waypoint-c');
+    });
+
+    it('keeps the resulting route under 3.5km total (the reported bug produced 5.3km)', () => {
+      const result = selectProspectionWaypoints(placeDupuis, centreBell, [
+        onAxisNearOrigin,
+        onAxisNearDest,
+        offAxisHighScore,
+      ]);
+
+      const legs = [
+        placeDupuis,
+        ...result.map((w) => ({ lat: w.latitude, lng: w.longitude })),
+        centreBell,
+      ];
+      let totalKm = 0;
+      for (let i = 1; i < legs.length; i++) {
+        totalKm += haversineKm(legs[i - 1].lat, legs[i - 1].lng, legs[i].lat, legs[i].lng);
+      }
+
+      expect(totalKm).toBeLessThan(3.5);
+    });
+  });
 });

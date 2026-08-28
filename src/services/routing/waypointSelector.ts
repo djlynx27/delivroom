@@ -81,6 +81,18 @@ const MAX_SINGLE_WAYPOINT_DETOUR_RATIO = 0.15;
 // (scoringEngine.ts) wants when suggesting the nearest reachable zone.
 const MIN_DESTINATION_DISTANCE_KM = 0.5;
 
+// Under 5km, a 2km-wide corridor buffer is most of the trip's own length —
+// real downtown grids (one-way streets, the Ville-Marie tunnel) turn a
+// Euclidean-close "on the corridor" candidate into a genuine multi-km
+// zigzag once Mapbox snaps it to real roads (the Place Dupuis -> Centre
+// Bell report: 2.5km direct became a 5.3km loop). Straight-line geometry
+// can't see the road network, so the only reliable guard on a short trip is
+// to tighten what qualifies at all: a much narrower corridor and at most
+// one waypoint.
+const SHORT_TRIP_KM = 5;
+const SHORT_TRIP_MAX_WAYPOINTS = 1;
+const SHORT_TRIP_CORRIDOR_BUFFER_KM = 0.3;
+
 type Scored = { zone: RouteCandidateZone; vec: Vec2; t: number };
 
 // One row per evaluated candidate — printed as a console.table so a bad
@@ -200,6 +212,23 @@ function evaluateCandidate(
   return { ...withGeometry, accepted: true, reason: 'accepted — in corridor, within detour budget' };
 }
 
+function applyShortTripCaps(
+  routeLenKm: number,
+  maxWaypoints: number,
+  corridorBufferKm: number
+): { maxWaypoints: number; corridorBufferKm: number } {
+  if (routeLenKm >= SHORT_TRIP_KM) return { maxWaypoints, corridorBufferKm };
+  const capped = {
+    maxWaypoints: Math.min(maxWaypoints, SHORT_TRIP_MAX_WAYPOINTS),
+    corridorBufferKm: Math.min(corridorBufferKm, SHORT_TRIP_CORRIDOR_BUFFER_KM),
+  };
+  console.log(
+    `[waypointSelector] short trip (${routeLenKm.toFixed(2)}km < ${SHORT_TRIP_KM}km): ` +
+      `capping to ${capped.maxWaypoints} waypoint(s), corridor buffer ${capped.corridorBufferKm}km`
+  );
+  return capped;
+}
+
 /**
  * Picks the highest-demand zones that sit close to the driver's straight-line
  * path to `destination`, ordered along the route, trimmed so the resulting
@@ -225,6 +254,9 @@ export function selectProspectionWaypoints(
   const routeLenKm = distanceKm(originVec, destVec);
   if (routeLenKm === 0) return [];
 
+  const { maxWaypoints: effectiveMaxWaypoints, corridorBufferKm: effectiveCorridorBufferKm } =
+    applyShortTripCaps(routeLenKm, maxWaypoints, corridorBufferKm);
+
   const maxSingleDetourKm = routeLenKm * MAX_SINGLE_WAYPOINT_DETOUR_RATIO;
 
   const evaluations = candidates.map((zone) =>
@@ -234,7 +266,7 @@ export function selectProspectionWaypoints(
       originVec,
       destVec,
       routeLenKm,
-      corridorBufferKm,
+      effectiveCorridorBufferKm,
       maxSingleDetourKm,
       destinationId
     )
@@ -252,7 +284,7 @@ export function selectProspectionWaypoints(
 
   let selected = [...inCorridor]
     .sort((a, b) => b.zone.score - a.zone.score)
-    .slice(0, maxWaypoints);
+    .slice(0, effectiveMaxWaypoints);
 
   function pathLengthKm(ordered: Scored[]): number {
     const points = [originVec, ...ordered.map((s) => s.vec), destVec];
