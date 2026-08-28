@@ -80,7 +80,12 @@ describe('getReturnCorridor', () => {
     // farther from `current` (near the hub end), so the ~6 km extra deadhead
     // at $0.35/km should be enough to tip the ranking to the closer one.
     const closeCheap = zone('close-cheap', 45.511, -73.571, 56);
-    const farHot = zone('far-hot', 45.558, -73.617, 58);
+    // Near the hub end but >500m from `hub` itself — a candidate that close
+    // to the destination is now excluded outright (see
+    // MIN_DESTINATION_DISTANCE_KM in waypointSelector.ts), so this stays
+    // just outside that radius to keep testing the cost-adjustment ranking
+    // rather than the destination-proximity filter.
+    const farHot = zone('far-hot', 45.554, -73.612, 58);
 
     const result = getReturnCorridor(current, hub, [closeCheap, farHot], 6);
 

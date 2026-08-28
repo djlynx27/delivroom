@@ -69,12 +69,24 @@ export async function getDriveRoute(
  * Mapbox's 25-coordinate limit, so this is capped independently at 4 —
  * enough to convey a real detour without turning into a maze of pins.
  */
+// ~11 m precision — a waypoint this close to the destination reads to
+// Google Maps as the same stop, which can make its label eclipse the actual
+// destination in the app's UI. Belt-and-suspenders on top of
+// waypointSelector's MIN_ENDPOINT_DISTANCE_KM filter: this guard protects
+// every caller of this function, not just the prospection selector.
+function coordKey(lat: number, lng: number): string {
+  return `${lat.toFixed(4)},${lng.toFixed(4)}`;
+}
+
 export function buildGoogleMapsProspectingUrl(
   origin: RoutePoint,
   destination: RouteCandidateZone,
   waypoints: RouteCandidateZone[]
 ): string {
-  const strategicWaypoints = waypoints.slice(0, 4);
+  const destKey = coordKey(destination.latitude, destination.longitude);
+  const strategicWaypoints = waypoints
+    .filter((w) => coordKey(w.latitude, w.longitude) !== destKey)
+    .slice(0, 4);
   const params = new URLSearchParams({
     api: '1',
     origin: `${origin.lat},${origin.lng}`,

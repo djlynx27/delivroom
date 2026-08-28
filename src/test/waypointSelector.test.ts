@@ -264,4 +264,30 @@ describe('selectProspectionWaypoints', () => {
     const expectedOrder = waypoints.map((w) => `${w.latitude},${w.longitude}`).join('|');
     expect(waypointsParam).toBe(expectedOrder);
   });
+
+  it('rejects a hub sitting right next to the destination (Gare Centrale, ~430m from Centre Bell)', () => {
+    // Real Delivroom coordinates — Gare Centrale is close enough to Centre
+    // Bell that it passes every other filter (tiny insertion cost, t≈1,
+    // small perpendicular offset) and would otherwise become the last
+    // waypoint, immediately eclipsing the actual destination in Google Maps.
+    const centreBell = { lat: 45.4969, lng: -73.5698 };
+    const gareCentrale = zone('mtl-gc', 45.5003, -73.5672, 90, 'transport');
+    const farOrigin = { lat: 45.42, lng: -73.62 }; // well south-west, so Gare Centrale sits on the corridor
+
+    const result = selectProspectionWaypoints(farOrigin, centreBell, [gareCentrale]);
+    expect(result.map((z) => z.id)).not.toContain('mtl-gc');
+  });
+
+  it('buildGoogleMapsProspectingUrl never includes a waypoint that coincides with the destination', () => {
+    const dest = { id: 'dest', name: 'dest', latitude: 45.4969, longitude: -73.5698, score: 0 };
+    const duplicateOfDest = zone('duplicate', 45.4969, -73.5698, 90, 'transport');
+    const realWaypoint = zone('real', 45.515, -73.575, 60, 'transport');
+
+    const url = buildGoogleMapsProspectingUrl(origin, dest, [duplicateOfDest, realWaypoint]);
+    const waypointsParam = decodeURIComponent(new URL(url).searchParams.get('waypoints') ?? '');
+
+    expect(waypointsParam).not.toContain('45.4969');
+    expect(waypointsParam).toBe('45.515,-73.575');
+    expect(new URL(url).searchParams.get('destination')).toBe('45.4969,-73.5698');
+  });
 });

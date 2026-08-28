@@ -70,6 +70,17 @@ function isHubZone(zone: RouteCandidateZone): boolean {
  * path with other waypoints would still clear maxDetourRatio. */
 const MAX_SINGLE_WAYPOINT_DETOUR_RATIO = 0.15;
 
+// A hub sitting right on top of the destination (e.g. Gare Centrale, ~430 m
+// from Centre Bell) passes every other filter — tiny insertion cost, t≈1,
+// small perpendicular offset — and gets inserted as the last waypoint,
+// immediately before the destination. Google Maps then renders that
+// waypoint's name as the prominent "next stop" and the actual destination
+// reads as lost/wrong. Reject anything this close to the destination; it
+// adds no real detour value anyway. Deliberately NOT applied to the origin
+// side — a candidate near the origin is exactly what getReturnCorridor
+// (scoringEngine.ts) wants when suggesting the nearest reachable zone.
+const MIN_DESTINATION_DISTANCE_KM = 0.5;
+
 /**
  * Picks the highest-demand zones that sit close to the driver's straight-line
  * path to `destination`, ordered along the route, trimmed so the resulting
@@ -114,6 +125,9 @@ export function selectProspectionWaypoints(
       return { zone, vec, t, perpKm } as Scored & { perpKm: number };
     })
     .filter((c) => (c as Scored & { perpKm: number }).perpKm <= corridorBufferKm)
+    // Reject a candidate too close to the destination — see
+    // MIN_DESTINATION_DISTANCE_KM above.
+    .filter((c) => distanceKm(c.vec, destVec) >= MIN_DESTINATION_DISTANCE_KM)
     // Anti-backtrack: a candidate whose projection falls behind the origin
     // (t < 0) or past the destination (t > 1) forces a doubling-back zigzag
     // even when its insertion cost is small (e.g. 500 m behind the origin on
