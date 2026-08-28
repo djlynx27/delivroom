@@ -8,10 +8,21 @@
 // source='screenshot'/platform='lyft'; this migration only added the one
 // genuinely new field (nearby_drivers_count).
 //
+// See docs/ingest-lyft-screenshots-macrodroid.md for the full external
+// integration guide (MacroDroid HTTP Request setup, example payload).
+//
+// Auth: header  Authorization: Bearer <INGEST_LYFT_API_KEY>
+//   A dedicated shared secret (not the Supabase anon/service key), same
+//   pattern as quick-log-trip. Deploy with:
+//     supabase functions deploy ingest-lyft-screenshots --no-verify-jwt
+//
 // POST body: {
-//   wait_times_image_url: string,
-//   recent_demand_image_url: string,
-//   nearby_drivers_image_url: string,
+//   // each image as EITHER a pre-uploaded Storage URL OR raw/data-URI base64
+//   // -- MacroDroid can't easily authenticate a separate Storage upload
+//   // step, so the *_base64 fields let it POST everything in one shot.
+//   wait_times_image_url?: string,      wait_times_image_base64?: string,
+//   recent_demand_image_url?: string,   recent_demand_image_base64?: string,
+//   nearby_drivers_image_url?: string,  nearby_drivers_image_base64?: string,
 //   latitude: number,
 //   longitude: number,
 //   zone_id?: string  -- skips GPS-based zone resolution when provided
@@ -23,7 +34,12 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
-import { haversineKm, parseLyftSnapshot, type LyftSnapshot } from './lyftSnapshot.ts';
+import {
+  decodeBase64Image,
+  haversineKm,
+  parseLyftSnapshot,
+  type LyftSnapshot,
+} from './lyftSnapshot.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -33,11 +49,19 @@ const corsHeaders = {
 
 interface RequestBody {
   wait_times_image_url?: string;
+  wait_times_image_base64?: string;
   recent_demand_image_url?: string;
+  recent_demand_image_base64?: string;
   nearby_drivers_image_url?: string;
+  nearby_drivers_image_base64?: string;
   latitude?: number;
   longitude?: number;
   zone_id?: string;
+}
+
+interface ImageSlot {
+  url?: string;
+  base64?: string;
 }
 
 interface ZoneRow {
@@ -50,6 +74,7 @@ interface EnvConfig {
   geminiKey: string | null;
   supabaseUrl: string | null;
   supabaseServiceKey: string | null;
+  apiKey: string | null;
 }
 
 function readEnv(): EnvConfig {
@@ -57,6 +82,7 @@ function readEnv(): EnvConfig {
     geminiKey: Deno.env.get('GEMINI_API_KEY') ?? null,
     supabaseUrl: Deno.env.get('SUPABASE_URL') ?? null,
     supabaseServiceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? null,
+    apiKey: Deno.env.get('INGEST_LYFT_API_KEY') ?? null,
   };
 }
 
@@ -91,16 +117,28 @@ serve(async (req) => {
 async function handleRequest(req: Request): Promise<Response> {
   if (req.method !== 'POST') return json({ error: 'POST requis' }, 405);
 
-  const body: RequestBody = await req.json().catch(() => ({}) as RequestBody);
   const env = readEnv();
+  if (!env.apiKey) {
+    return json({ error: 'Serveur mal configuré (clé API manquante)' }, 500);
+  }
+  const authHeader = req.headers.get('Authorization') ?? '';
+  const providedKey = authHeader.replace(/^Bearer\s+/i, '');
+  if (providedKey !== env.apiKey) {
+    return json({ error: 'Non autorisé' }, 401);
+  }
 
-  const imageUrls = [
-    body.wait_times_image_url,
-    body.recent_demand_image_url,
-    body.nearby_drivers_image_url,
+  const body: RequestBody = await req.json().catch(() => ({}) as RequestBody);
+
+  const slots: ImageSlot[] = [
+    { url: body.wait_times_image_url, base64: body.wait_times_image_base64 },
+    { url: body.recent_demand_image_url, base64: body.recent_demand_image_base64 },
+    { url: body.nearby_drivers_image_url, base64: body.nearby_drivers_image_base64 },
   ];
-  if (imageUrls.some((u) => !u)) {
-    return json({ error: 'Les 3 images (wait_times, recent_demand, nearby_drivers) sont requises' }, 400);
+  if (slots.some((s) => !s.url && !s.base64)) {
+    return json(
+      { error: 'Les 3 images (wait_times, recent_demand, nearby_drivers) sont requises, chacune en _url ou _base64' },
+      400
+    );
   }
   if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
     return json({ error: 'Coordonnées GPS requises' }, 400);
@@ -112,9 +150,10 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({ error: 'Serveur mal configuré (URL Supabase manquante)' }, 500);
   }
 
-  // SSRF guard: only ever fetch from this project's own Storage bucket.
-  for (const url of imageUrls) {
-    if (!url!.startsWith(`${env.supabaseUrl}/storage/v1/object/`)) {
+  // SSRF guard: a URL-based slot may only ever point at this project's own
+  // Storage bucket. base64 slots skip this entirely -- there's no fetch.
+  for (const slot of slots) {
+    if (slot.url && !slot.url.startsWith(`${env.supabaseUrl}/storage/v1/object/`)) {
       return json({ error: 'URL image refusée (hors du stockage de l\'app)' }, 400);
     }
   }
@@ -124,9 +163,9 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({ error: 'Trop de requêtes, réessaie dans une minute' }, 429);
   }
 
-  const fetched = await Promise.all(imageUrls.map((u) => fetchImage(u!)));
+  const fetched = await Promise.all(slots.map(resolveImage));
   if (fetched.some((f) => f === null)) {
-    return json({ error: 'Impossible de télécharger une des captures (URL expirée?)' }, 400);
+    return json({ error: 'Impossible de lire une des captures (URL expirée ou base64 invalide?)' }, 400);
   }
 
   const snapshot = await runGeminiVision(
@@ -175,6 +214,12 @@ async function fetchImage(url: string): Promise<FetchedImage | null> {
   } catch {
     return null;
   }
+}
+
+async function resolveImage(slot: ImageSlot): Promise<FetchedImage | null> {
+  if (slot.base64) return decodeBase64Image(slot.base64);
+  if (slot.url) return fetchImage(slot.url);
+  return null;
 }
 
 function toBase64(bytes: Uint8Array): string {

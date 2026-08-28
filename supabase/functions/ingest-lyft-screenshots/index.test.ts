@@ -6,7 +6,7 @@
 // Run with: deno test supabase/functions/ingest-lyft-screenshots/
 
 import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
-import { parseLyftSnapshot } from './lyftSnapshot.ts';
+import { decodeBase64Image, parseLyftSnapshot } from './lyftSnapshot.ts';
 
 Deno.test('parseLyftSnapshot: accepts a well-formed snapshot', () => {
   const result = parseLyftSnapshot({
@@ -75,4 +75,25 @@ Deno.test('parseLyftSnapshot: falls back to a safe default for a non-numeric fie
     nearby_drivers_count: 1,
   });
   assertEquals(result?.demand_score, 5); // documented fallback default
+});
+
+Deno.test('decodeBase64Image: decodes a data:image/... URI and extracts its mimeType', () => {
+  const result = decodeBase64Image('data:image/png;base64,aGk=');
+  assertEquals(result?.mimeType, 'image/png');
+  assertEquals(Array.from(result!.bytes), [104, 105]); // "hi"
+});
+
+Deno.test('decodeBase64Image: decodes a raw base64 string, defaulting to image/jpeg', () => {
+  const result = decodeBase64Image('aGk=');
+  assertEquals(result?.mimeType, 'image/jpeg');
+  assertEquals(Array.from(result!.bytes), [104, 105]);
+});
+
+Deno.test('decodeBase64Image: tolerates embedded whitespace/newlines in the base64 body', () => {
+  const result = decodeBase64Image('data:image/jpeg;base64,aG k=');
+  assertEquals(Array.from(result!.bytes), [104, 105]);
+});
+
+Deno.test('decodeBase64Image: returns null for invalid base64', () => {
+  assertEquals(decodeBase64Image('not-valid-base64!!!'), null);
 });

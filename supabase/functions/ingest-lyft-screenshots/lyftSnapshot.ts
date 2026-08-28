@@ -38,6 +38,31 @@ export function parseLyftSnapshot(raw: unknown): LyftSnapshot | null {
   };
 }
 
+export interface DecodedImage {
+  bytes: Uint8Array;
+  mimeType: string;
+}
+
+const DATA_URI_RE = /^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/s;
+
+/**
+ * Decodes a raw base64 string or a data:image/...;base64,... URI --
+ * MacroDroid's HTTP Request action can attach a file as either.
+ */
+export function decodeBase64Image(input: string): DecodedImage | null {
+  try {
+    const match = input.match(DATA_URI_RE);
+    const mimeType = match ? match[1] : 'image/jpeg';
+    const raw = match ? match[2] : input;
+    const binary = atob(raw.replace(/\s/g, ''));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return { bytes, mimeType };
+  } catch {
+    return null;
+  }
+}
+
 export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
