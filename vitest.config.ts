@@ -4,6 +4,13 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   plugins: [react()],
+  // vite.config.ts defines this from the git SHA / VERCEL_GIT_COMMIT_SHA —
+  // vitest doesn't load that config, so components referencing
+  // __COMMIT_SHA__ (VersionBadge.tsx) need a stand-in here too.
+  define: {
+    __COMMIT_SHA__: JSON.stringify('test'),
+    __APP_VERSION__: JSON.stringify('0.0.0'),
+  },
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),

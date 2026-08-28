@@ -1,11 +1,30 @@
 import { sentryVitePlugin } from '@sentry/vite-plugin';
 import react from '@vitejs/plugin-react';
+import { execFileSync } from 'child_process';
+import { readFileSync } from 'fs';
 import { defineConfig, loadEnv } from 'vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { buildFallbackYulStatus } from './src/lib/yulStatus';
 
 // https://vite.dev/config/
 import { resolve } from 'path';
+
+const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as {
+  version: string;
+};
+
+// Vercel sets this at build time (no config needed); falls back to the local
+// git HEAD for `npm run dev`/local builds. Never throws — a missing git repo
+// (fresh checkout without .git, some CI sandboxes) shouldn't fail the build.
+function resolveCommitSha(): string {
+  const vercelSha = process.env.VERCEL_GIT_COMMIT_SHA;
+  if (vercelSha) return vercelSha.slice(0, 7);
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString().trim();
+  } catch {
+    return 'dev';
+  }
+}
 
 function sendJson(
   res: {
@@ -132,6 +151,10 @@ export default defineConfig(({ mode }) => {
   };
 
   return {
+    define: {
+      __COMMIT_SHA__: JSON.stringify(resolveCommitSha()),
+      __APP_VERSION__: JSON.stringify(pkg.version),
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src'),

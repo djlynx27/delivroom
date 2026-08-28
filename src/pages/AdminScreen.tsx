@@ -1,5 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { VersionBadge } from '@/components/VersionBadge';
 import { useI18n } from '@/contexts/I18nContext';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import {
@@ -154,6 +155,10 @@ export default function AdminScreen() {
             <p>5. Lance ensuite l’analyse IA des scores.</p>
           </CardContent>
         </Card>
+
+        <div className="flex justify-center pt-2">
+          <VersionBadge />
+        </div>
       </div>
     </div>
   );
