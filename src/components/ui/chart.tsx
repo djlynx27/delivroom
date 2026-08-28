@@ -100,11 +100,22 @@ ${colorConfig
 
 const ChartTooltip = RechartsPrimitive.Tooltip;
 
+// Minimal shape of a recharts tooltip/legend payload entry — only the fields
+// this file actually reads, so we stay strict without importing recharts'
+// internal Payload types.
+interface ChartPayloadItem {
+  name?: string;
+  dataKey?: string | number;
+  value?: number | string;
+  color?: string;
+  payload?: Record<string, unknown>;
+}
+
 const ChartTooltipContent = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<'div'> & {
     active?: boolean;
-    payload?: Array<any>;
+    payload?: ChartPayloadItem[];
     label?: React.ReactNode;
     hideLabel?: boolean;
     hideIndicator?: boolean;
@@ -195,13 +206,12 @@ const ChartTooltipContent = React.forwardRef<
       >
         {!nestLabel ? tooltipLabel : null}
         <div className="grid gap-1.5">
-          {payload.map((item: any, index: number) => {
+          {payload.map((item, index) => {
             const key = `${nameKey || item.name || item.dataKey || 'value'}`;
             const itemConfig = getPayloadConfigFromPayload(config, item, key);
+            const fill = item.payload?.fill;
             const indicatorColor =
-              color ||
-              (item.payload as Record<string, unknown>)?.fill ||
-              item.color;
+              color || (typeof fill === 'string' ? fill : undefined) || item.color;
 
             return (
               <div
@@ -304,7 +314,7 @@ const ChartLegendContent = React.forwardRef<
           className
         )}
       >
-        {payload.map((item: any) => {
+        {payload.map((item) => {
           const key = `${nameKey || item.dataKey || 'value'}`;
           const itemConfig = getPayloadConfigFromPayload(config, item, key);
 

@@ -20,8 +20,9 @@ export { selectProspectionWaypoints } from './waypointSelector';
 
 /**
  * Direct mode: origin → destination, fastest path.
- * Prospection mode: origin → up to 3 high-demand zones along the way →
- * destination, capped so the detour never exceeds +50% of the direct trip.
+ * Prospection mode: origin → up to 3 high-demand hub zones along the way →
+ * destination, capped so the detour never exceeds +20% of the direct trip
+ * (waypointSelector's default maxDetourRatio = 1.2).
  */
 export async function getDriveRoute(
   origin: RoutePoint,

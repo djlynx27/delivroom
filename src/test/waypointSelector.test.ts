@@ -114,6 +114,23 @@ describe('selectProspectionWaypoints', () => {
     expect(result).toEqual([]);
   });
 
+  it('skips the patrol fallback below 1.5 km — road snapping blows up short sweeps', () => {
+    // ~1.2 km hop: geometry says a small offset fits the budget, but real
+    // roads amplify it (the 2.3 km→10 km Montmorency report) — no sweep.
+    const shortHop = { lat: origin.lat + 0.011, lng: origin.lng };
+    const result = selectProspectionWaypoints(origin, shortHop, []);
+    expect(result).toEqual([]);
+  });
+
+  it('rejects a candidate projecting behind the origin (anti-backtrack zigzag)', () => {
+    // 500 m behind the origin on the route axis, on a ~6.8 km trip: passes
+    // the per-waypoint 15% insertion-cost rule but forces a doubling-back
+    // start — the t∈[0,1] filter must drop it.
+    const behind = zone('behind-origin', 45.5064, -73.5664, 100, 'métro');
+    const result = selectProspectionWaypoints(origin, destination, [behind]);
+    expect(result.map((z) => z.id)).not.toContain('behind-origin');
+  });
+
   it('keeps the patrol detour within the detour ratio budget', () => {
     const result = selectProspectionWaypoints(origin, destination, [], {
       maxDetourRatio: 1.2,
@@ -136,7 +153,7 @@ describe('selectProspectionWaypoints', () => {
     expect(viaPatrol).toBeLessThanOrEqual(direct * 1.2 + 0.01);
   });
 
-  it('defaults maxDetourRatio to 1.25, not the old 1.5', () => {
+  it('defaults maxDetourRatio to 1.2 (strict — never +25% or +50%)', () => {
     // Two candidates far off-corridor (wide buffer bypasses the corridor
     // filter) so only the detour-ratio trim decides between them.
     const candidates = [

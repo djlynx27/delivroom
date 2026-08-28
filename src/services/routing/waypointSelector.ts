@@ -38,7 +38,7 @@ export interface WaypointSelectionOptions {
   maxWaypoints?: number;
   /** Perpendicular distance (km) from the origin→destination line a candidate may sit. Default 2. */
   corridorBufferKm?: number;
-  /** Detour cap vs the direct distance, e.g. 1.25 = +25%. Default 1.25. */
+  /** Detour cap vs the direct distance, e.g. 1.2 = +20%. Default 1.2. */
   maxDetourRatio?: number;
   /** Exclude a candidate matching this id (typically the destination zone itself). */
   destinationId?: string;
@@ -79,7 +79,7 @@ export function selectProspectionWaypoints(
   const {
     maxWaypoints = 3,
     corridorBufferKm = 2,
-    maxDetourRatio = 1.25,
+    maxDetourRatio = 1.2,
     destinationId,
   } = options;
 
@@ -109,6 +109,11 @@ export function selectProspectionWaypoints(
       return { zone, vec, t, perpKm } as Scored & { perpKm: number };
     })
     .filter((c) => (c as Scored & { perpKm: number }).perpKm <= corridorBufferKm)
+    // Anti-backtrack: a candidate whose projection falls behind the origin
+    // (t < 0) or past the destination (t > 1) forces a doubling-back zigzag
+    // even when its insertion cost is small (e.g. 500 m behind the origin on
+    // a 10 km trip). Only keep points that lie between the endpoints.
+    .filter((c) => c.t >= 0 && c.t <= 1)
     // Per-waypoint incremental detour: reject a candidate that alone would
     // stretch the trip more than MAX_SINGLE_WAYPOINT_DETOUR_RATIO, even if
     // combining it with others would still pass the overall maxDetourRatio.
@@ -160,8 +165,10 @@ function resolvePatrolFallback(
   routeLenKm: number,
   maxDetourRatio: number
 ): RouteCandidateZone[] {
-  // Below ~600 m there's no room to loop.
-  if (routeLenKm < 0.6) return [];
+  // Below ~1.5 km a sweep isn't worth the fuel: road snapping amplifies a
+  // small straight-line offset into a disproportionate real-world loop (the
+  // 2.3 km-direct-trip-turned-10 km Montmorency case). Short hop → direct.
+  if (routeLenKm < 1.5) return [];
   const patrol = buildPatrolWaypoint(origin, destVec, routeLenKm, maxDetourRatio);
   return patrol ? [patrol] : [];
 }
@@ -189,7 +196,10 @@ function buildPatrolWaypoint(
   const maxOffsetKm = Math.sqrt(
     Math.max(0, (maxRoundTripKm / 2) ** 2 - halfRouteKm ** 2)
   );
-  const offsetKm = Math.min(maxOffsetKm, 1.5, routeLenKm * 0.35);
+  // ponytail: straight-line geometry underestimates road distance — the 1.0 km
+  // hard cap (down from 1.5) absorbs that amplification; a road-network-aware
+  // budget would need a Directions round-trip this sync path can't afford.
+  const offsetKm = Math.min(maxOffsetKm, 1.0, routeLenKm * 0.25);
   if (offsetKm < 0.15) return null;
 
   const sweepVec: Vec2 = {

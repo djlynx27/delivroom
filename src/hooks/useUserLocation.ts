@@ -138,15 +138,17 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
     const id = setInterval(update, intervalMs);
 
     let watchId: string | number | null = null;
+    // Native watchPosition resolves asynchronously: if the effect is cleaned
+    // up before it resolves, the cleanup below sees watchId === null and the
+    // watch would leak (GPS held forever). The flag lets the late resolution
+    // clear itself.
+    let cancelled = false;
 
     const startWatching = async () => {
       if (Capacitor.isNativePlatform()) {
         try {
           watchId = await Geolocation.watchPosition(
-            {
-              enableHighAccuracy: true,
-              requestDaylightSavingsTime: true, // Not relevant but showing usage
-            },
+            { enableHighAccuracy: true },
             (pos, err) => {
               if (err) {
                 setError(getGeolocationErrorMessage(err));
@@ -155,6 +157,10 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
               }
             }
           );
+          if (cancelled && watchId !== null) {
+            void Geolocation.clearWatch({ id: watchId as string });
+            watchId = null;
+          }
         } catch (err) {
           setError(getGeolocationErrorMessage(err));
         }
@@ -176,6 +182,7 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
     void startWatching();
 
     return () => {
+      cancelled = true;
       clearInterval(id);
       if (watchId !== null) {
         if (Capacitor.isNativePlatform()) {
