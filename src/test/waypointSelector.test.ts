@@ -1,4 +1,6 @@
 import { selectProspectionWaypoints } from '@/services/routing/waypointSelector';
+import { buildGoogleMapsProspectingUrl } from '@/services/routing';
+import { haversineKm } from '@/hooks/useUserLocation';
 import type { RouteCandidateZone } from '@/services/routing/types';
 import { describe, expect, it } from 'vitest';
 
@@ -11,9 +13,10 @@ function zone(
   id: string,
   lat: number,
   lng: number,
-  score: number
+  score: number,
+  type?: string
 ): RouteCandidateZone {
-  return { id, name: id, latitude: lat, longitude: lng, score };
+  return { id, name: id, latitude: lat, longitude: lng, score, type };
 }
 
 describe('selectProspectionWaypoints', () => {
@@ -131,5 +134,116 @@ describe('selectProspectionWaypoints', () => {
         (destination.lng - result[0].longitude) * 78.02
       );
     expect(viaPatrol).toBeLessThanOrEqual(direct * 1.2 + 0.01);
+  });
+
+  it('defaults maxDetourRatio to 1.25, not the old 1.5', () => {
+    // Two candidates far off-corridor (wide buffer bypasses the corridor
+    // filter) so only the detour-ratio trim decides between them.
+    const candidates = [
+      zone('big-detour', 45.4, -73.3, 20),
+      zone('small-detour', 45.53, -73.6, 80),
+    ];
+    const result = selectProspectionWaypoints(origin, destination, candidates, {
+      corridorBufferKm: 50,
+    });
+    expect(result.map((z) => z.id)).toEqual(['small-detour']);
+  });
+
+  it('rejects a candidate that is perfectly on-corridor but a huge individual detour (past the destination and back)', () => {
+    // Sits exactly on the origin→destination line (perp = 0, so the
+    // corridor-buffer filter alone would never catch it) but 3x past the
+    // destination — inserting it means overshooting the destination and
+    // doubling back, a detour the per-waypoint 15% rule must reject even
+    // though the overall-path trim loop never gets a chance to see it.
+    const overshoot = zone(
+      'overshoot',
+      origin.lat + (destination.lat - origin.lat) * 3,
+      origin.lng + (destination.lng - origin.lng) * 3,
+      100
+    );
+    const result = selectProspectionWaypoints(origin, destination, [overshoot]);
+    expect(result.map((z) => z.id)).not.toContain('overshoot');
+  });
+
+  it('excludes non-hub zone types (résidentiel) even with a high score and good position', () => {
+    const candidates = [
+      zone('corner-store', 45.53, -73.595, 95, 'résidentiel'),
+      zone('mall', 45.545, -73.61, 40, 'commercial'),
+    ];
+    const result = selectProspectionWaypoints(origin, destination, candidates);
+    expect(result.map((z) => z.id)).toEqual(['mall']);
+  });
+
+  it('allows every documented hub type (transport, métro, aéroport, commercial, tourisme)', () => {
+    const candidates = [
+      zone('t1', 45.515, -73.575, 50, 'transport'),
+      zone('t2', 45.52, -73.58, 50, 'métro'),
+      zone('t3', 45.525, -73.585, 50, 'aéroport'),
+      zone('t4', 45.53, -73.59, 50, 'commercial'),
+      zone('t5', 45.535, -73.595, 50, 'tourisme'),
+    ];
+    const result = selectProspectionWaypoints(origin, destination, candidates, {
+      maxWaypoints: 5,
+    });
+    expect(new Set(result.map((z) => z.id))).toEqual(
+      new Set(['t1', 't2', 't3', 't4', 't5'])
+    );
+  });
+
+  it('keeps a candidate with no type at all (synthetic/unlabeled waypoints are unknown, not excluded)', () => {
+    const candidates = [zone('no-type', 45.53, -73.595, 80, undefined)];
+    const result = selectProspectionWaypoints(origin, destination, candidates);
+    expect(result.map((z) => z.id)).toContain('no-type');
+  });
+
+  it('Chomedey -> Montmorency (real Delivroom zone coordinates, ~2 km direct): total route never exceeds 3.5 km', () => {
+    // Real coordinates from supabase/migrations/20260731130000_fix_zone_coordinates.sql
+    const chomedey = { lat: 45.544154, lng: -73.739052 }; // lvl-chomedey-notre
+    const montmorency = { lat: 45.558353, lng: -73.721518 }; // lvl-mm (Station Montmorency)
+
+    const candidates = [
+      zone('centropolis', 45.5605, -73.7205, 90, 'commercial'),
+      zone('cegep-montmorency', 45.5599, -73.7191, 85, 'université'), // non-hub, must be excluded
+      zone('local-salon', 45.552, -73.730, 99, 'résidentiel'), // non-hub, must be excluded
+    ];
+
+    const waypoints = selectProspectionWaypoints(chomedey, montmorency, candidates, {
+      corridorBufferKm: 1.5,
+    });
+
+    const legs = [chomedey, ...waypoints.map((w) => ({ lat: w.latitude, lng: w.longitude })), montmorency];
+    let totalKm = 0;
+    for (let i = 1; i < legs.length; i++) {
+      totalKm += haversineKm(legs[i - 1].lat, legs[i - 1].lng, legs[i].lat, legs[i].lng);
+    }
+
+    expect(totalKm).toBeLessThanOrEqual(3.5);
+    expect(waypoints.map((w) => w.id)).not.toContain('cegep-montmorency');
+    expect(waypoints.map((w) => w.id)).not.toContain('local-salon');
+  });
+
+  it('orders waypoints in strict sequential geographic progression (no zigzag) in the Google Maps URL', () => {
+    // Three hubs strictly ordered along the route by construction; feeding
+    // them in shuffled input order must not change the output order.
+    const candidates = [
+      zone('near-dest', 45.55, -73.612, 60, 'commercial'),
+      zone('near-origin', 45.515, -73.575, 60, 'transport'),
+      zone('midway', 45.535, -73.595, 60, 'métro'),
+    ];
+
+    const waypoints = selectProspectionWaypoints(origin, destination, candidates, {
+      maxWaypoints: 3,
+    });
+
+    expect(waypoints.map((w) => w.id)).toEqual(['near-origin', 'midway', 'near-dest']);
+
+    const url = buildGoogleMapsProspectingUrl(
+      origin,
+      { id: 'dest', name: 'dest', latitude: destination.lat, longitude: destination.lng, score: 0 },
+      waypoints
+    );
+    const waypointsParam = decodeURIComponent(new URL(url).searchParams.get('waypoints') ?? '');
+    const expectedOrder = waypoints.map((w) => `${w.latitude},${w.longitude}`).join('|');
+    expect(waypointsParam).toBe(expectedOrder);
   });
 });

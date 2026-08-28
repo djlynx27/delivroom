@@ -38,11 +38,32 @@ export interface WaypointSelectionOptions {
   maxWaypoints?: number;
   /** Perpendicular distance (km) from the origin→destination line a candidate may sit. Default 2. */
   corridorBufferKm?: number;
-  /** Detour cap vs the direct distance, e.g. 1.5 = +50%. Default 1.5. */
+  /** Detour cap vs the direct distance, e.g. 1.25 = +25%. Default 1.25. */
   maxDetourRatio?: number;
   /** Exclude a candidate matching this id (typically the destination zone itself). */
   destinationId?: string;
 }
+
+// High-traffic hubs worth a prospection detour — transit stations, malls,
+// airports, hotel/tourism districts. Deliberately excludes zone types that
+// read as small/local rather than a real hub a rider would actually be
+// heading to or from (résidentiel, nightlife, université, médical,
+// événements) — the isolated-hairdresser/corner-store problem the ticket
+// describes, one level up at the zone-category granularity this catalog
+// actually has (individual businesses aren't in the zones table).
+const HUB_ZONE_TYPES = new Set(['transport', 'métro', 'aéroport', 'commercial', 'tourisme']);
+
+/** Zones with no `type` (e.g. the synthetic patrol-sweep waypoint) are
+ * unknown, not rejected — there's nothing to judge them against. */
+function isHubZone(zone: RouteCandidateZone): boolean {
+  return zone.type === undefined || HUB_ZONE_TYPES.has(zone.type);
+}
+
+/** Per-waypoint incremental detour: how much longer the trip gets from
+ * inserting just this one zone, as a share of the direct distance. Catches
+ * a candidate that individually detours too much even when the *combined*
+ * path with other waypoints would still clear maxDetourRatio. */
+const MAX_SINGLE_WAYPOINT_DETOUR_RATIO = 0.15;
 
 /**
  * Picks the highest-demand zones that sit close to the driver's straight-line
@@ -58,7 +79,7 @@ export function selectProspectionWaypoints(
   const {
     maxWaypoints = 3,
     corridorBufferKm = 2,
-    maxDetourRatio = 1.5,
+    maxDetourRatio = 1.25,
     destinationId,
   } = options;
 
@@ -69,6 +90,8 @@ export function selectProspectionWaypoints(
 
   type Scored = { zone: RouteCandidateZone; vec: Vec2; t: number };
 
+  const maxSingleDetourKm = routeLenKm * MAX_SINGLE_WAYPOINT_DETOUR_RATIO;
+
   // Bad seed data (null/NaN lat-lng) must never reach the corridor math —
   // it silently coerces (null - n = -n) into a bogus-but-finite point
   // instead of throwing, so it can slip through and reach Mapbox as a
@@ -76,6 +99,7 @@ export function selectProspectionWaypoints(
   const inCorridor: Scored[] = candidates
     .filter((zone) => zone.id !== destinationId)
     .filter((zone) => hasFiniteCoordinates(zone))
+    .filter(isHubZone)
     .map((zone) => {
       const vec = toLocalKm(origin, { lat: zone.latitude, lng: zone.longitude });
       // Perpendicular distance from the infinite origin→destination line.
@@ -84,7 +108,15 @@ export function selectProspectionWaypoints(
       const t = (vec.x * destVec.x + vec.y * destVec.y) / (routeLenKm * routeLenKm);
       return { zone, vec, t, perpKm } as Scored & { perpKm: number };
     })
-    .filter((c) => (c as Scored & { perpKm: number }).perpKm <= corridorBufferKm);
+    .filter((c) => (c as Scored & { perpKm: number }).perpKm <= corridorBufferKm)
+    // Per-waypoint incremental detour: reject a candidate that alone would
+    // stretch the trip more than MAX_SINGLE_WAYPOINT_DETOUR_RATIO, even if
+    // combining it with others would still pass the overall maxDetourRatio.
+    .filter((c) => {
+      const insertionCostKm =
+        distanceKm(originVec, c.vec) + distanceKm(c.vec, destVec) - routeLenKm;
+      return insertionCostKm <= maxSingleDetourKm;
+    });
 
   let selected = [...inCorridor]
     .sort((a, b) => b.zone.score - a.zone.score)

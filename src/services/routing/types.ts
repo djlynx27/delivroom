@@ -9,6 +9,11 @@ export interface RouteCandidateZone {
   latitude: number;
   longitude: number;
   score: number;
+  /** Zone category (e.g. 'commercial', 'transport') — used by
+   * waypointSelector to keep prospection stops to genuine high-traffic
+   * hubs. Absent for synthetic waypoints (patrol-sweep) and callers that
+   * don't carry it; treated as unknown, not excluded. */
+  type?: string;
 }
 
 export interface RouteGeometry {
