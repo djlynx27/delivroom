@@ -1,4 +1,5 @@
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import {
   addToSearchHistory,
   clearSearchHistory,
@@ -21,6 +22,10 @@ export interface AddressSearchResult {
 
 interface AddressSearchBoxProps {
   onSelect: (result: AddressSearchResult) => void;
+  /** Positioning/spacing overrides for the root element — the component
+   * itself carries no assumptions about where it's mounted (Drive tab
+   * overlay, Driving HUD, or elsewhere). */
+  className?: string;
 }
 
 function ResultRow({
@@ -126,12 +131,13 @@ function SuggestionsSection({
 }
 
 /**
- * Floating address/POI search for the Drive tab. Focus with an empty query
- * shows the last 5 searched addresses (delivroom_search_history);  typing
- * switches to live Mapbox Geocoding suggestions, debounced 300ms so a full
- * word only fires one request instead of one per keystroke.
+ * Floating address/POI search — self-contained, mounted both on the plain
+ * Drive tab and inside the Driving HUD. Focus with an empty query shows the
+ * last 5 searched addresses (delivroom_search_history); typing switches to
+ * live Mapbox Geocoding suggestions, debounced 300ms so a full word only
+ * fires one request instead of one per keystroke.
  */
-export function AddressSearchBox({ onSelect }: AddressSearchBoxProps) {
+export function AddressSearchBox({ onSelect, className }: AddressSearchBoxProps) {
   const [query, setQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<GeocodeSuggestion[]>([]);
@@ -185,7 +191,7 @@ export function AddressSearchBox({ onSelect }: AddressSearchBoxProps) {
   const showSuggestions = isFocused && query.trim() !== '';
 
   return (
-    <div className="relative">
+    <div className={cn('relative', className)}>
       <div className="flex items-center gap-2 bg-card/95 backdrop-blur border border-border rounded-2xl px-3.5 h-12 shadow-lg">
         <Search className="w-4 h-4 text-muted-foreground flex-shrink-0" />
         <Input
@@ -216,7 +222,7 @@ export function AddressSearchBox({ onSelect }: AddressSearchBoxProps) {
         // a row's onClick ever gets a chance to run.
         <div
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 right-0 mt-2 bg-card border border-border rounded-2xl shadow-xl overflow-y-auto max-h-[60vh] z-10"
+          className="absolute left-0 right-0 mt-2 bg-card border border-border rounded-2xl shadow-xl overflow-y-auto max-h-[60vh] z-[70]"
         >
           {showHistory && (
             <HistorySection

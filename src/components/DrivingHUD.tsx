@@ -1,4 +1,8 @@
 import { useHaptics } from '@/hooks/useHaptics';
+import {
+  AddressSearchBox,
+  type AddressSearchResult,
+} from '@/components/drive/AddressSearchBox';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, X } from 'lucide-react';
@@ -187,6 +191,15 @@ export function DrivingHUD({
     onExit();
   }
 
+  // Zero-friction from the HUD too: picking a searched address navigates
+  // immediately (history-saving already happened inside AddressSearchBox)
+  // and closes the HUD in the background, same as a manual exit, so the
+  // driver lands back on the normal Drive screen once Maps opens/returns.
+  function handleAddressSelect(result: AddressSearchResult) {
+    onNavigate({ ...result, score: 0 });
+    onExit();
+  }
+
   const score = heroZone?.score ?? 0;
   const color = getDemandColor(score);
   const timeStr = time.toLocaleTimeString('fr-CA', {
@@ -196,11 +209,19 @@ export function DrivingHUD({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col select-none touch-none overflow-hidden"
+      className="fixed inset-0 z-50 flex flex-col select-none touch-none overflow-visible"
       style={{ background: '#08081a' }}
       role="region"
       aria-label="Mode conduite actif"
     >
+      {/* Address search — sits above the clock/speed/metrics rows so it's
+          reachable without leaving the HUD. Suggestions/history dropdown
+          needs the HUD's overflow-visible + its own z-[70] (AddressSearchBox)
+          to paint over the rows below instead of being clipped. */}
+      <div className="px-4 pt-3">
+        <AddressSearchBox onSelect={handleAddressSelect} />
+      </div>
+
       {/* ── Row 1: Clock · Speed · Exit ── */}
       <div className="flex items-center justify-between px-6 pt-6 pb-2">
         <span
