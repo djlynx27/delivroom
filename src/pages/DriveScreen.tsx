@@ -7,6 +7,7 @@ import {
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
+import { EventBoostBadge } from '@/components/EventBoostBadge';
 import { WazeIcon } from '@/components/NavIcons';
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { buildOneTapNavigationUrl, type RouteCandidateZone } from '@/services/routing';
@@ -104,7 +105,14 @@ export default function DriveScreen() {
   const [conservativePresence, setConservativePresence] = useState(() =>
     getConservativePresencePreference()
   );
-  const { scores, factors, zones, isLoading: scoresLoading, surgeMap } = useDemandScores(cityId, {
+  const {
+    scores,
+    factors,
+    zones,
+    isLoading: scoresLoading,
+    surgeMap,
+    zoneEventBadge,
+  } = useDemandScores(cityId, {
     currentLat: location?.latitude ?? null,
     currentLng: location?.longitude ?? null,
     conservativePresence,
@@ -232,6 +240,7 @@ export default function DriveScreen() {
   const nextZones = modeZones
     .filter((z) => !heroZone || z.id !== heroZone.id)
     .slice(0, 6);
+  const heroEventBadge = heroZone ? zoneEventBadge.get(heroZone.id) : undefined;
 
   // Zero-friction 1-tap navigation: no in-app Mapbox view, no confirmation --
   // straight to the Google Maps app with the prospection waypoints baked in.
@@ -487,6 +496,9 @@ export default function DriveScreen() {
                   latitude: heroZone.latitude,
                   longitude: heroZone.longitude,
                   distKm: heroDistance ?? undefined,
+                  eventBadge: heroEventBadge
+                    ? { name: heroEventBadge.name, endAt: heroEventBadge.end_at }
+                    : null,
                 }
               : null
           }
@@ -565,6 +577,12 @@ export default function DriveScreen() {
                   <p className="text-[20px] font-display font-semibold text-muted-foreground">
                     📍 {heroDistance.toFixed(1)} km
                   </p>
+                )}
+                {heroEventBadge && (
+                  <EventBoostBadge
+                    name={heroEventBadge.name}
+                    endAt={heroEventBadge.end_at}
+                  />
                 )}
               </div>
 

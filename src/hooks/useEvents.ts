@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import { haversineKm } from '@/hooks/useUserLocation';
 import { useQuery } from '@tanstack/react-query';
 
 export interface AppEvent {
@@ -91,6 +92,33 @@ export function getEndingSoonEvents(
       diff > 0 &&
       diff <= withinMinutes * 60_000 &&
       isDemandRelevantEvent(e, now)
+    );
+  });
+}
+
+/**
+ * Picks the event whose boost applies to `zone` — a radius + zone-type
+ * match, same rule scoringEngine.ts uses to apply boost_multiplier.
+ * `candidates` should be ending-soon events first, then merely-active ones,
+ * so an event about to dump a crowd on the street outranks one that just
+ * started (used for the "⚡ [Event] — sortie prévue" badge).
+ */
+export function matchZoneEvent(
+  zone: { latitude: number; longitude: number; type: string },
+  candidates: AppEvent[]
+): AppEvent | undefined {
+  return candidates.find((event) => {
+    const appliesToZoneType =
+      event.boost_zone_types.length === 0 ||
+      event.boost_zone_types.includes(zone.type);
+    if (!appliesToZoneType) return false;
+    return (
+      haversineKm(
+        zone.latitude,
+        zone.longitude,
+        event.latitude,
+        event.longitude
+      ) <= event.boost_radius_km
     );
   });
 }

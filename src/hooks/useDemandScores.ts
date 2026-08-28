@@ -2,6 +2,7 @@ import {
   getActiveEvents,
   getEndingSoonEvents,
   getStartingSoonEvents,
+  matchZoneEvent,
   useEvents,
 } from '@/hooks/useEvents';
 import { useStmTransit } from '@/hooks/useStmTransit';
@@ -300,6 +301,21 @@ export function useDemandScores(
 
     return coverage;
   }, [zones, activeEvents]);
+
+  // Which specific event to show on a zone's "⚡ [Event] — sortie prévue"
+  // badge. Ending-soon events take priority over merely-active ones since
+  // they're the more urgent signal (attendees about to flood out).
+  const zoneEventBadge = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof matchZoneEvent>>();
+    const candidates = [...endingSoon, ...activeEvents];
+
+    for (const zone of zones) {
+      const match = matchZoneEvent(zone, candidates);
+      if (match) map.set(zone.id, match);
+    }
+
+    return map;
+  }, [zones, activeEvents, endingSoon]);
 
   const eventBoosts: ActiveEventBoost[] = useMemo(() => {
     const dbBoosts: ActiveEventBoost[] = activeEvents.map((e) => ({
@@ -800,6 +816,7 @@ export function useDemandScores(
     activeEvents,
     endingSoon,
     startingSoon,
+    zoneEventBadge,
     relevantTmEvents,
     trafficSnapshots,
     averageTrafficCongestion,

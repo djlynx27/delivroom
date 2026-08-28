@@ -3,6 +3,7 @@ import {
   getEndingSoonEvents,
   getStartingSoonEvents,
   isDemandRelevantEvent,
+  matchZoneEvent,
   type AppEvent,
 } from '@/hooks/useEvents';
 import { makeLocalDate, makeLocalIso } from '@/test/dateTestUtils';
@@ -81,6 +82,57 @@ describe('event demand relevance', () => {
     ];
 
     expect(getStartingSoonEvents(events, now, 90)).toHaveLength(1);
+  });
+});
+
+describe('matchZoneEvent', () => {
+  const nightlifeZone = { latitude: 45.508, longitude: -73.562, type: 'nightlife' };
+
+  it('matches a zone within the event radius and matching zone type', () => {
+    const event = makeEvent({
+      boost_zone_types: ['nightlife'],
+      boost_radius_km: 2,
+    });
+    expect(matchZoneEvent(nightlifeZone, [event])).toBe(event);
+  });
+
+  it('excludes a zone outside the boost radius even with a matching type', () => {
+    const farEvent = makeEvent({
+      boost_zone_types: ['nightlife'],
+      boost_radius_km: 1,
+      latitude: 45.6, // ~10 km away
+      longitude: -73.5,
+    });
+    expect(matchZoneEvent(nightlifeZone, [farEvent])).toBeUndefined();
+  });
+
+  it('excludes a zone whose type is not in boost_zone_types', () => {
+    const touristEvent = makeEvent({
+      boost_zone_types: ['tourisme'],
+      boost_radius_km: 5,
+    });
+    expect(matchZoneEvent(nightlifeZone, [touristEvent])).toBeUndefined();
+  });
+
+  it('applies to every zone type when boost_zone_types is empty', () => {
+    const cityWideEvent = makeEvent({ boost_zone_types: [], boost_radius_km: 5 });
+    expect(matchZoneEvent(nightlifeZone, [cityWideEvent])).toBe(cityWideEvent);
+  });
+
+  it('returns the first matching candidate, so callers control priority via ordering', () => {
+    const endingSoon = makeEvent({
+      id: 'ending-soon',
+      boost_zone_types: ['nightlife'],
+      boost_radius_km: 5,
+    });
+    const merelyActive = makeEvent({
+      id: 'active',
+      boost_zone_types: ['nightlife'],
+      boost_radius_km: 5,
+    });
+    expect(matchZoneEvent(nightlifeZone, [endingSoon, merelyActive])?.id).toBe(
+      'ending-soon'
+    );
   });
 });
 

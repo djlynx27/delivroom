@@ -3,6 +3,7 @@ import {
   AddressSearchBox,
   type AddressSearchResult,
 } from '@/components/drive/AddressSearchBox';
+import { EventBoostBadge } from '@/components/EventBoostBadge';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, X } from 'lucide-react';
@@ -15,6 +16,7 @@ export interface DrivingHUDZone {
   latitude: number;
   longitude: number;
   distKm?: number;
+  eventBadge?: { name: string; endAt: string } | null;
 }
 
 interface DrivingHUDProps {
@@ -117,6 +119,14 @@ function HeroZoneDisplay({
           {heroZone.distKm.toFixed(1)} km
         </div>
       ) : null}
+
+      {heroZone.eventBadge && (
+        <EventBoostBadge
+          name={heroZone.eventBadge.name}
+          endAt={heroZone.eventBadge.endAt}
+          className="mt-1"
+        />
+      )}
     </>
   );
 }
