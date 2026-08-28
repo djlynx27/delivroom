@@ -5,7 +5,11 @@
 // Quebec addresses well enough for our needs (driver pickup pins, never
 // life-safety routing).
 
-const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+// Read at call time (not module scope) so tests can stub the env var —
+// same pattern as services/routing/mapboxDirections.ts.
+function getMapboxToken(): string | undefined {
+  return import.meta.env.VITE_MAPBOX_TOKEN as string | undefined;
+}
 
 export interface GeocodeResult {
   latitude: number;
@@ -23,14 +27,15 @@ export async function forwardGeocode(
   address: string,
   countryHint = 'CA',
 ): Promise<GeocodeResult | null> {
-  if (!MAPBOX_TOKEN) {
+  const token = getMapboxToken();
+  if (!token) {
     console.warn('[geocoding] VITE_MAPBOX_TOKEN not configured');
     return null;
   }
   const encoded = encodeURIComponent(address);
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json` +
-    `?access_token=${MAPBOX_TOKEN}` +
+    `?access_token=${token}` +
     `&country=${countryHint}` +
     `&limit=1` +
     `&proximity=-73.5673,45.5017`; // bias toward downtown Montréal
@@ -78,21 +83,34 @@ const MONTREAL_AREA_BBOX = '-74.3,45.2,-73.0,45.9';
  */
 export async function geocodeSuggestions(
   query: string,
-  options: { signal?: AbortSignal } = {},
+  options: {
+    signal?: AbortSignal;
+    /** Driver's live GPS position — biases ranking toward nearby results.
+     * Falls back to downtown Montréal when unavailable (no GPS fix yet). */
+    proximity?: { latitude: number; longitude: number };
+  } = {},
 ): Promise<GeocodeSuggestion[]> {
   const trimmed = query.trim();
-  if (!MAPBOX_TOKEN || !trimmed) return [];
+  const token = getMapboxToken();
+  if (!token || !trimmed) return [];
+
+  const proximity = options.proximity
+    ? `${options.proximity.longitude},${options.proximity.latitude}`
+    : '-73.5673,45.5017'; // downtown Montréal fallback
 
   const encoded = encodeURIComponent(trimmed);
   const url =
     `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json` +
-    `?access_token=${MAPBOX_TOKEN}` +
+    `?access_token=${token}` +
     `&country=CA` +
-    `&types=address,poi` +
+    // poi first so iconic venues (Centre Bell, Place Bell, YUL) rank ahead
+    // of partial address matches; neighborhood/locality let bare district
+    // names ("Griffintown", "Chomedey") resolve too.
+    `&types=poi,address,neighborhood,locality` +
     `&autocomplete=true` +
     `&limit=5` +
     `&bbox=${MONTREAL_AREA_BBOX}` +
-    `&proximity=-73.5673,45.5017`;
+    `&proximity=${proximity}`;
 
   try {
     const res = await fetch(url, { signal: options.signal });

@@ -29,6 +29,8 @@ interface DrivingHUDProps {
   speedKmh?: number | null;
   /** Active return-corridor toward heroZone (anti-deadhead), if any. */
   returnCorridor?: { steps: ReturnCorridorStep[] } | null;
+  /** Driver GPS position, forwarded to AddressSearchBox for proximity bias. */
+  proximity?: { latitude: number; longitude: number };
   onNavigate: (zone: DrivingHUDZone) => void;
   onExit: () => void;
 }
@@ -192,6 +194,7 @@ export function DrivingHUD({
   earningsToday = 0,
   speedKmh,
   returnCorridor,
+  proximity,
   onNavigate,
   onExit,
 }: DrivingHUDProps) {
@@ -244,7 +247,7 @@ export function DrivingHUD({
           needs the HUD's overflow-visible + its own z-[70] (AddressSearchBox)
           to paint over the rows below instead of being clipped. */}
       <div className="px-4 pt-3">
-        <AddressSearchBox onSelect={handleAddressSelect} />
+        <AddressSearchBox onSelect={handleAddressSelect} proximity={proximity} />
       </div>
 
       {/* ── Row 1: Clock · Speed · Exit ── */}

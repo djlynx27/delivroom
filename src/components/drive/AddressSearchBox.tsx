@@ -26,6 +26,10 @@ interface AddressSearchBoxProps {
    * itself carries no assumptions about where it's mounted (Drive tab
    * overlay, Driving HUD, or elsewhere). */
   className?: string;
+  /** Driver's live GPS position — passed to Mapbox as proximity bias so
+   * nearby POIs/addresses rank first. Optional: geocoding falls back to a
+   * downtown-Montréal bias when absent. */
+  proximity?: { latitude: number; longitude: number };
 }
 
 function ResultRow({
@@ -137,7 +141,11 @@ function SuggestionsSection({
  * live Mapbox Geocoding suggestions, debounced 300ms so a full word only
  * fires one request instead of one per keystroke.
  */
-export function AddressSearchBox({ onSelect, className }: AddressSearchBoxProps) {
+export function AddressSearchBox({
+  onSelect,
+  className,
+  proximity,
+}: AddressSearchBoxProps) {
   const [query, setQuery] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [suggestions, setSuggestions] = useState<GeocodeSuggestion[]>([]);
@@ -148,6 +156,11 @@ export function AddressSearchBox({ onSelect, className }: AddressSearchBoxProps)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // Ref, not effect dep: GPS refreshes every ~15s and must not re-fire an
+  // in-flight search — only keystrokes should. The freshest fix is read
+  // when the debounce actually fires.
+  const proximityRef = useRef(proximity);
+  proximityRef.current = proximity;
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -164,7 +177,10 @@ export function AddressSearchBox({ onSelect, className }: AddressSearchBoxProps)
     debounceRef.current = setTimeout(() => {
       const ctrl = new AbortController();
       abortRef.current = ctrl;
-      geocodeSuggestions(trimmed, { signal: ctrl.signal })
+      geocodeSuggestions(trimmed, {
+        signal: ctrl.signal,
+        proximity: proximityRef.current,
+      })
         .then((results) => {
           if (ctrl.signal.aborted) return;
           setSuggestions(results);

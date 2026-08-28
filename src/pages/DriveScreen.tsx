@@ -503,7 +503,14 @@ export default function DriveScreen() {
           scrolling. 1-tap: picking a result goes straight to Google Maps,
           same as the recommended-zone flow, no in-app map detour. */}
       <div className="sticky top-0 z-20 px-4 pt-2 pb-3 bg-gradient-to-b from-background via-background/95 to-transparent">
-        <AddressSearchBox onSelect={handleAddressSelect} />
+        <AddressSearchBox
+          onSelect={handleAddressSelect}
+          proximity={
+            location
+              ? { latitude: location.latitude, longitude: location.longitude }
+              : undefined
+          }
+        />
       </div>
 
       {/* Shift tally — running $/h based on actual fares logged today */}
@@ -630,6 +637,11 @@ export default function DriveScreen() {
       {/* ── NHTSA Driving HUD overlay ── */}
       {hudActive && (
         <DrivingHUD
+          proximity={
+            location
+              ? { latitude: location.latitude, longitude: location.longitude }
+              : undefined
+          }
           heroZone={
             heroZone
               ? {
