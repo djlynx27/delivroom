@@ -81,6 +81,125 @@ const MAX_SINGLE_WAYPOINT_DETOUR_RATIO = 0.15;
 // (scoringEngine.ts) wants when suggesting the nearest reachable zone.
 const MIN_DESTINATION_DISTANCE_KM = 0.5;
 
+type Scored = { zone: RouteCandidateZone; vec: Vec2; t: number };
+
+// One row per evaluated candidate — printed as a console.table so a bad
+// prospection route can be diagnosed from the exact numbers instead of
+// guessing. Deliberately plain console (not `logger`): logger.debug is
+// stripped in production and logger's Sentry transport redacts lat/lng as
+// PII, both of which would hide the very values this is for. Stays local to
+// the device either way — never transmitted.
+interface CandidateEvaluation {
+  id: string;
+  name: string;
+  type: string | undefined;
+  isHub: boolean;
+  score: number;
+  perpKm: number | null;
+  t: number | null;
+  insertionCostKm: number | null;
+  distToDestKm: number | null;
+  accepted: boolean;
+  reason: string;
+}
+
+/** console.table row — same fields as CandidateEvaluation, minus the
+ * internal `vec` (a Vec2 object prints unreadably in a table). */
+function toTableRow(e: CandidateEvaluation & { vec: Vec2 | null }) {
+  return {
+    id: e.id,
+    name: e.name,
+    type: e.type,
+    isHub: e.isHub,
+    score: e.score,
+    perpKm: e.perpKm,
+    t: e.t,
+    insertionCostKm: e.insertionCostKm,
+    distToDestKm: e.distToDestKm,
+    accepted: e.accepted,
+    reason: e.reason,
+  };
+}
+
+function describeNonHubReason(type: string | undefined): string {
+  return type === undefined ? 'no type (unverifiable)' : `type "${type}" is not a hub`;
+}
+
+function describeBacktrackReason(t: number): string | null {
+  if (t < 0) return 'projects behind origin (backtrack)';
+  if (t > 1) return 'projects past destination (overshoot)';
+  return null;
+}
+
+function evaluateCandidate(
+  zone: RouteCandidateZone,
+  origin: RoutePoint,
+  originVec: Vec2,
+  destVec: Vec2,
+  routeLenKm: number,
+  corridorBufferKm: number,
+  maxSingleDetourKm: number,
+  destinationId: string | undefined
+): CandidateEvaluation & { vec: Vec2 | null } {
+  const base = {
+    id: zone.id,
+    name: zone.name,
+    type: zone.type,
+    isHub: isHubZone(zone),
+    score: zone.score,
+    perpKm: null,
+    t: null,
+    insertionCostKm: null,
+    distToDestKm: null,
+    vec: null,
+  };
+
+  if (zone.id === destinationId) {
+    return { ...base, accepted: false, reason: 'is the destination itself' };
+  }
+  // Bad seed data (null/NaN lat-lng) must never reach the corridor math — it
+  // silently coerces (null - n = -n) into a bogus-but-finite point instead
+  // of throwing, so it can slip through and reach Mapbox as a malformed
+  // coordinate. Reject here, before any math touches it.
+  if (!hasFiniteCoordinates(zone)) {
+    return { ...base, accepted: false, reason: 'invalid/missing coordinates' };
+  }
+  // An untyped or non-hub zone can't be verified as a real hub (see
+  // isHubZone) — reject before computing any geometry for it.
+  if (!base.isHub) {
+    return { ...base, accepted: false, reason: describeNonHubReason(zone.type) };
+  }
+
+  const vec = toLocalKm(origin, { lat: zone.latitude, lng: zone.longitude });
+  const cross = destVec.x * vec.y - destVec.y * vec.x;
+  const perpKm = Math.abs(cross) / routeLenKm;
+  const t = (vec.x * destVec.x + vec.y * destVec.y) / (routeLenKm * routeLenKm);
+  const distToDestKm = distanceKm(vec, destVec);
+  const insertionCostKm = distanceKm(originVec, vec) + distToDestKm - routeLenKm;
+  const withGeometry = { ...base, vec, perpKm, t, insertionCostKm, distToDestKm };
+
+  if (perpKm > corridorBufferKm) {
+    return { ...withGeometry, accepted: false, reason: `${perpKm.toFixed(2)}km off the corridor axis (max ${corridorBufferKm}km)` };
+  }
+  if (distToDestKm < MIN_DESTINATION_DISTANCE_KM) {
+    return { ...withGeometry, accepted: false, reason: `only ${(distToDestKm * 1000).toFixed(0)}m from destination (min ${MIN_DESTINATION_DISTANCE_KM * 1000}m)` };
+  }
+  // Anti-backtrack: a projection behind the origin (t<0) or past the
+  // destination (t>1) forces a doubling-back zigzag even when its insertion
+  // cost is small (e.g. 500m behind the origin on a 10km trip).
+  const backtrackReason = describeBacktrackReason(t);
+  if (backtrackReason) {
+    return { ...withGeometry, accepted: false, reason: backtrackReason };
+  }
+  if (insertionCostKm > maxSingleDetourKm) {
+    // Per-waypoint incremental detour: reject a candidate that alone would
+    // stretch the trip more than MAX_SINGLE_WAYPOINT_DETOUR_RATIO, even if
+    // combining it with others would still pass the overall maxDetourRatio.
+    return { ...withGeometry, accepted: false, reason: `+${insertionCostKm.toFixed(2)}km detour alone (max ${maxSingleDetourKm.toFixed(2)}km)` };
+  }
+  return { ...withGeometry, accepted: true, reason: 'accepted — in corridor, within detour budget' };
+}
+
 /**
  * Picks the highest-demand zones that sit close to the driver's straight-line
  * path to `destination`, ordered along the route, trimmed so the resulting
@@ -99,48 +218,37 @@ export function selectProspectionWaypoints(
     destinationId,
   } = options;
 
+  console.log('[waypointSelector] origin:', origin, 'destination:', destination);
+
   const originVec: Vec2 = { x: 0, y: 0 };
   const destVec = toLocalKm(origin, destination);
   const routeLenKm = distanceKm(originVec, destVec);
   if (routeLenKm === 0) return [];
 
-  type Scored = { zone: RouteCandidateZone; vec: Vec2; t: number };
-
   const maxSingleDetourKm = routeLenKm * MAX_SINGLE_WAYPOINT_DETOUR_RATIO;
 
-  // Bad seed data (null/NaN lat-lng) must never reach the corridor math —
-  // it silently coerces (null - n = -n) into a bogus-but-finite point
-  // instead of throwing, so it can slip through and reach Mapbox as a
-  // malformed coordinate. Drop it here, before any math touches it.
-  const inCorridor: Scored[] = candidates
-    .filter((zone) => zone.id !== destinationId)
-    .filter((zone) => hasFiniteCoordinates(zone))
-    .filter(isHubZone)
-    .map((zone) => {
-      const vec = toLocalKm(origin, { lat: zone.latitude, lng: zone.longitude });
-      // Perpendicular distance from the infinite origin→destination line.
-      const cross = destVec.x * vec.y - destVec.y * vec.x;
-      const perpKm = Math.abs(cross) / routeLenKm;
-      const t = (vec.x * destVec.x + vec.y * destVec.y) / (routeLenKm * routeLenKm);
-      return { zone, vec, t, perpKm } as Scored & { perpKm: number };
-    })
-    .filter((c) => (c as Scored & { perpKm: number }).perpKm <= corridorBufferKm)
-    // Reject a candidate too close to the destination — see
-    // MIN_DESTINATION_DISTANCE_KM above.
-    .filter((c) => distanceKm(c.vec, destVec) >= MIN_DESTINATION_DISTANCE_KM)
-    // Anti-backtrack: a candidate whose projection falls behind the origin
-    // (t < 0) or past the destination (t > 1) forces a doubling-back zigzag
-    // even when its insertion cost is small (e.g. 500 m behind the origin on
-    // a 10 km trip). Only keep points that lie between the endpoints.
-    .filter((c) => c.t >= 0 && c.t <= 1)
-    // Per-waypoint incremental detour: reject a candidate that alone would
-    // stretch the trip more than MAX_SINGLE_WAYPOINT_DETOUR_RATIO, even if
-    // combining it with others would still pass the overall maxDetourRatio.
-    .filter((c) => {
-      const insertionCostKm =
-        distanceKm(originVec, c.vec) + distanceKm(c.vec, destVec) - routeLenKm;
-      return insertionCostKm <= maxSingleDetourKm;
-    });
+  const evaluations = candidates.map((zone) =>
+    evaluateCandidate(
+      zone,
+      origin,
+      originVec,
+      destVec,
+      routeLenKm,
+      corridorBufferKm,
+      maxSingleDetourKm,
+      destinationId
+    )
+  );
+  console.log(`[waypointSelector] evaluated ${evaluations.length} candidate(s) (routeLenKm=${routeLenKm.toFixed(2)}):`);
+  console.table(evaluations.map(toTableRow));
+
+  const inCorridor: Scored[] = evaluations
+    .filter((e): e is CandidateEvaluation & { vec: Vec2; t: number; accepted: true } => e.accepted && e.vec !== null)
+    .map((e) => ({
+      zone: candidates.find((c) => c.id === e.id)!,
+      vec: e.vec,
+      t: e.t,
+    }));
 
   let selected = [...inCorridor]
     .sort((a, b) => b.zone.score - a.zone.score)
@@ -168,14 +276,25 @@ export function selectProspectionWaypoints(
   }
 
   if (selected.length > 0) {
-    return orderedByRoute(selected).map((s) => s.zone);
+    const finalWaypoints = orderedByRoute(selected).map((s) => s.zone);
+    console.log(
+      '[waypointSelector] final waypoints (ordered):',
+      finalWaypoints.map((z) => `${z.name} (${z.id})`)
+    );
+    return finalWaypoints;
   }
 
   // No real high-demand zone qualified (empty candidate list, or none within
   // the corridor / detour budget) — prospection mode must still diverge from
   // the direct route, so sweep a nearby boulevard instead of silently
   // collapsing to the same line.
-  return resolvePatrolFallback(origin, destVec, routeLenKm, maxDetourRatio);
+  const patrol = resolvePatrolFallback(origin, destVec, routeLenKm, maxDetourRatio);
+  const patrolPoint = patrol[0];
+  console.log(
+    '[waypointSelector] final waypoints: none qualified — patrol-sweep fallback:',
+    patrolPoint ? `${patrolPoint.latitude},${patrolPoint.longitude}` : '(none, route too short)'
+  );
+  return patrol;
 }
 
 function resolvePatrolFallback(
