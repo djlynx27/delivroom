@@ -18,6 +18,7 @@ import {
 import { useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
 import { buildProfitReportUpdate } from '@/lib/profitReportExtraction';
+import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Camera,
@@ -150,18 +151,39 @@ export function UniversalFileAnalyzer() {
         }
       };
 
+      let contentHash: string | null = null;
+      let uploadedFileName: string | null = null;
+
       if (mode === 'url') {
         imageUrl = urlInput.trim();
       } else if (file) {
         if (file.type.startsWith('image/')) {
-          const fileName = `${Date.now()}-${file.name}`;
+          // Dedup by content hash before spending a Gemini call — same
+          // pattern as ScreenshotAnalyzer/BulkScreenshotUploader. A re-drop
+          // of the same screenshot replays the cached result instead of
+          // re-uploading and re-analyzing it.
+          contentHash = await hashFile(file);
+          const existing = await findExistingUpload(contentHash);
+          if (existing?.analysis_result) {
+            const cached = existing.analysis_result as AnalysisResult;
+            setResult(cached);
+            if (cached.recommended_target) {
+              setSuggestedArea(cached.recommended_target);
+            } else {
+              smartRoute(cached);
+            }
+            toast.info('Ce fichier a déjà été analysé — résultat en cache');
+            return;
+          }
+
+          uploadedFileName = `${Date.now()}-${file.name}`;
           const { error: uploadErr } = await supabase.storage
             .from('driver-screenshots')
-            .upload(fileName, file, { contentType: file.type });
+            .upload(uploadedFileName, file, { contentType: file.type });
           if (uploadErr) throw uploadErr;
           const { data: urlData } = supabase.storage
             .from('driver-screenshots')
-            .getPublicUrl(fileName);
+            .getPublicUrl(uploadedFileName);
           imageUrl = urlData.publicUrl;
         } else {
           fileContent = await file.text();
@@ -227,6 +249,18 @@ export function UniversalFileAnalyzer() {
         setSuggestedArea(analysis.recommended_target);
       } else {
         smartRoute(analysis);
+      }
+
+      if (contentHash && uploadedFileName && file) {
+        await recordUpload({
+          contentHash,
+          filePath: uploadedFileName,
+          fileName: file.name,
+          fileSizeBytes: file.size,
+          mimeType: file.type,
+          source: 'manual',
+          analysisResult: analysis,
+        });
       }
 
       toast.success('Analyse terminée — propositions créées');

@@ -5,8 +5,8 @@
 // serve() at module load and would bind a listener on import).
 // Run with: deno test supabase/functions/ingest-lyft-screenshots/
 
-import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
-import { decodeBase64Image, parseLyftSnapshot } from './lyftSnapshot.ts';
+import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
+import { decodeBase64Image, hashImages, parseLyftSnapshot } from './lyftSnapshot.ts';
 
 Deno.test('parseLyftSnapshot: accepts a well-formed snapshot', () => {
   const result = parseLyftSnapshot({
@@ -96,4 +96,21 @@ Deno.test('decodeBase64Image: tolerates embedded whitespace/newlines in the base
 
 Deno.test('decodeBase64Image: returns null for invalid base64', () => {
   assertEquals(decodeBase64Image('not-valid-base64!!!'), null);
+});
+
+Deno.test('hashImages: identical byte content produces the same hash (retry dedup)', async () => {
+  const img = { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' };
+  const a = await hashImages([img, img, img]);
+  const b = await hashImages([
+    { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' },
+    { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' },
+    { bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' },
+  ]);
+  assertEquals(a, b);
+});
+
+Deno.test('hashImages: different byte content produces a different hash', async () => {
+  const a = await hashImages([{ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' }]);
+  const b = await hashImages([{ bytes: new Uint8Array([1, 2, 4]), mimeType: 'image/jpeg' }]);
+  assertNotEquals(a, b);
 });

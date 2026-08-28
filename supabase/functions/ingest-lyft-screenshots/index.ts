@@ -36,6 +36,7 @@ import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
 import {
   decodeBase64Image,
+  hashImages,
   haversineKm,
   parseLyftSnapshot,
   type LyftSnapshot,
@@ -167,11 +168,38 @@ async function handleRequest(req: Request): Promise<Response> {
   if (fetched.some((f) => f === null)) {
     return json({ error: 'Impossible de lire une des captures (URL expirée ou base64 invalide?)' }, 400);
   }
+  const images = fetched as FetchedImage[];
 
-  const snapshot = await runGeminiVision(
-    env.geminiKey,
-    fetched as FetchedImage[]
-  );
+  // Idempotency: a MacroDroid retry on a flaky connection re-POSTs the same
+  // 3 screenshots byte-for-byte. Skip the Gemini call entirely and replay
+  // the signal already recorded for this exact content within the last 5
+  // minutes, instead of re-billing Gemini for identical input.
+  const contentHash = await hashImages(images);
+  if (client) {
+    const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
+    const { data: recent } = await client
+      .from('platform_signals')
+      .select('zone_id, demand_level, estimated_wait_min, nearby_drivers_count')
+      .eq('content_hash', contentHash)
+      .gte('captured_at', cutoff)
+      .order('captured_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (recent) {
+      return json({
+        ok: true,
+        zone_id: recent.zone_id,
+        snapshot: {
+          demand_score: recent.demand_level,
+          wait_time_min: recent.estimated_wait_min,
+          nearby_drivers_count: recent.nearby_drivers_count,
+        },
+        replayed: true,
+      });
+    }
+  }
+
+  const snapshot = await runGeminiVision(env.geminiKey, images);
   if (!snapshot) {
     return json({ error: 'Gemini n\'a pas pu extraire un snapshot valide de ces captures' }, 502);
   }
@@ -190,6 +218,7 @@ async function handleRequest(req: Request): Promise<Response> {
       nearby_drivers_count: snapshot.nearby_drivers_count,
       source: 'screenshot',
       captured_at: new Date().toISOString(),
+      content_hash: contentHash,
     });
     if (error) console.error('ingest-lyft-screenshots: platform_signals insert failed', error);
   }
