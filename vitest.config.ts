@@ -13,8 +13,15 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
-    // Exclure les specs Playwright (src/e2e/) du runner Vitest
-    exclude: ['**/node_modules/**', '**/dist/**', 'src/e2e/**'],
+    // Exclure les specs Playwright (src/e2e/) et les tests Deno des Edge
+    // Functions (supabase/functions/**, imports https:// que le loader ESM
+    // de Node ne sait pas résoudre — voir supabase/functions/*/index.test.ts)
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      'src/e2e/**',
+      'supabase/functions/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov', 'html'],

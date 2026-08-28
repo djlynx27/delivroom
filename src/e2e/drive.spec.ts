@@ -31,9 +31,13 @@ test.describe('DriveScreen — Mode conduite', () => {
   });
 
   test("l'app gère l'absence de données sans crash", async ({ page }) => {
-    // Avec Supabase mocké retournant [], DriveScreen affiche un état vide
+    // Avec Supabase mocké retournant [], DriveScreen affiche un état vide.
+    // Le BottomNav est un signal non ambigu que l'app a fini de rendre --
+    // contrairement à div.min-h-screen, qui matche à la fois le wrapper de
+    // AppContent ET le fallback Suspense (AppLoading) pendant la brève
+    // fenêtre où les deux coexistent le temps que le chunk lazy se charge.
     await expect(page.getByText('Un problème est survenu')).not.toBeVisible();
-    await expect(page.locator('div.min-h-screen')).toBeVisible();
+    await expect(page.locator('nav').last()).toBeVisible();
   });
 
   test('peut naviguer vers /planning depuis DriveScreen', async ({ page }) => {

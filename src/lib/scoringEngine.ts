@@ -987,3 +987,70 @@ export function getReturnCorridor(
 
   return { active: steps.length > 0, directDistanceKm, steps };
 }
+
+// ── Lyft Realtime Factor (screenshot-ingested) ────────────────────────────
+// Fed by supabase/functions/ingest-lyft-screenshots -> platform_signals
+// (platform='lyft', source='screenshot'). demandScore is on Lyft's own
+// 1-10 "Recent Demand" scale, not this app's 0-100 zone score.
+export interface LyftRealtimeSignal {
+  demandScore: number; // 1-10
+  waitTimeMin: number;
+  nearbyDriversCount: number;
+}
+
+/**
+ * RealtimeScore = (demand_score / max(wait_time_min, 1)) *
+ *                 (1 / (1 + nearby_drivers_count * 0.35))
+ * Higher demand and shorter waits push it up; each extra rival driver
+ * discounts it further.
+ */
+export function computeLyftRealtimeScore(
+  demandScore: number,
+  waitTimeMin: number,
+  nearbyDriversCount: number
+): number {
+  return (
+    (demandScore / Math.max(waitTimeMin, 1)) *
+    (1 / (1 + nearbyDriversCount * 0.35))
+  );
+}
+
+export const SWEET_SPOT_MIN_DEMAND_SCORE = 7; // out of 10
+export const SWEET_SPOT_MAX_WAIT_MIN = 5;
+
+/** "Sweet Spot": high demand + low wait + zero local competition — the
+ * exact combination worth calling out over the continuous RealtimeScore. */
+export function isLyftSweetSpot(signal: LyftRealtimeSignal): boolean {
+  return (
+    signal.demandScore >= SWEET_SPOT_MIN_DEMAND_SCORE &&
+    signal.waitTimeMin <= SWEET_SPOT_MAX_WAIT_MIN &&
+    signal.nearbyDriversCount === 0
+  );
+}
+
+const SWEET_SPOT_BOOST_POINTS = 15;
+
+/**
+ * Overlays the Lyft realtime signal onto a zone's 0-100 score: a confirmed
+ * Sweet Spot gets a flat boost; otherwise the continuous RealtimeScore
+ * nudges the score by a small, capped amount (+/-8) so a middling signal
+ * can't swing the ranking as hard as a real Sweet Spot does.
+ */
+export function applyLyftRealtimeBoost(
+  score: number,
+  signal: LyftRealtimeSignal
+): number {
+  if (isLyftSweetSpot(signal)) {
+    return Math.min(100, Math.round(score + SWEET_SPOT_BOOST_POINTS));
+  }
+  const realtimeScore = computeLyftRealtimeScore(
+    signal.demandScore,
+    signal.waitTimeMin,
+    signal.nearbyDriversCount
+  );
+  // realtimeScore centers around ~2 for a mediocre 5-demand/5-min-wait/
+  // 2-drivers baseline -- only a signal clearly better or worse than that
+  // should move the score, and only by a bounded amount.
+  const nudge = Math.max(-8, Math.min(8, (realtimeScore - 2) * 3));
+  return Math.max(0, Math.min(100, Math.round(score + nudge)));
+}

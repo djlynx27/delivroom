@@ -33,6 +33,7 @@ import {
 } from '@/lib/lyftStrategy';
 import { getObservedZoneScore } from '@/lib/observedScore';
 import {
+  applyLyftRealtimeBoost,
   DEMAND_WINDOW_MINUTES,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
@@ -370,7 +371,7 @@ export function useDemandScores(
       const { data, error } = await supabase
         .from('platform_signals')
         .select(
-          'zone_id, demand_level, surge_active, estimated_wait_min, captured_at'
+          'zone_id, demand_level, surge_active, estimated_wait_min, nearby_drivers_count, captured_at'
         )
         .eq('platform', 'lyft')
         .in(
@@ -405,6 +406,10 @@ export function useDemandScores(
               ? null
               : Number(signal.estimated_wait_min),
           surgeActive: signal.surge_active,
+          nearbyDriversCount:
+            signal.nearby_drivers_count == null
+              ? null
+              : Number(signal.nearby_drivers_count),
         },
       ])
     );
@@ -707,7 +712,19 @@ export function useDemandScores(
         surgeActive: lyftSignal?.surgeActive,
       });
 
-      boostedScores.set(zone.id, realityCheckedScore);
+      // Lyft Realtime Factor (ingest-lyft-screenshots): only applies when a
+      // screenshot-sourced signal actually carried wait time + driver count
+      // -- older/manual platform_signals rows may only have demandLevel.
+      const realtimeCheckedScore =
+        lyftSignal?.estimatedWaitMin != null && lyftSignal?.nearbyDriversCount != null
+          ? applyLyftRealtimeBoost(realityCheckedScore, {
+              demandScore: lyftSignal.demandLevel,
+              waitTimeMin: lyftSignal.estimatedWaitMin,
+              nearbyDriversCount: lyftSignal.nearbyDriversCount,
+            })
+          : realityCheckedScore;
+
+      boostedScores.set(zone.id, realtimeCheckedScore);
       boostedFactors.set(zone.id, {
         ...(boostedFactors.get(zone.id) ?? {
           hasWeatherBoost: false,

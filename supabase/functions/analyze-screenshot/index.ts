@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
+import { lenientJsonParse } from '../_shared/jsonParse.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -243,48 +244,6 @@ async function runGemini(
     return { analysis: null, reason: 'gemini_invalid_json' };
   }
   return { analysis: parsed as AnalysisResult, reason: 'gemini_call_failed' };
-}
-
-function lenientJsonParse(raw: string): unknown {
-  // 1. Strict JSON first
-  try {
-    return JSON.parse(raw);
-  } catch { /* fall through */ }
-
-  // 2. Strip markdown fences (```json ... ``` or ``` ... ```)
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced?.[1]) {
-    try {
-      return JSON.parse(fenced[1].trim());
-    } catch { /* fall through */ }
-  }
-
-  // 3. Find first balanced { ... } block via brace counting
-  const start = raw.indexOf('{');
-  if (start === -1) return null;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < raw.length; i++) {
-    const ch = raw[i];
-    if (escaped) { escaped = false; continue; }
-    if (ch === '\\') { escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        const candidate = raw.slice(start, i + 1);
-        try {
-          return JSON.parse(candidate);
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
 }
 
 async function resolveZoneIfNeeded(
