@@ -99,18 +99,19 @@ export async function geocodeSuggestions(
     : '-73.5673,45.5017'; // downtown Montréal fallback
 
   const encoded = encodeURIComponent(trimmed);
-  const url =
-    `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json` +
-    `?access_token=${token}` +
-    `&country=CA` +
+  const params = new URLSearchParams({
+    access_token: token,
+    country: 'ca',
     // poi first so iconic venues (Centre Bell, Place Bell, YUL) rank ahead
-    // of partial address matches; neighborhood/locality let bare district
-    // names ("Griffintown", "Chomedey") resolve too.
-    `&types=poi,address,neighborhood,locality` +
-    `&autocomplete=true` +
-    `&limit=5` +
-    `&bbox=${MONTREAL_AREA_BBOX}` +
-    `&proximity=${proximity}`;
+    // of address matches.
+    types: 'poi,address',
+    autocomplete: 'true',
+    limit: '5',
+    bbox: MONTREAL_AREA_BBOX,
+    proximity,
+  });
+  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encoded}.json?${params}`;
+  console.log('[geocoding] Request URL:', url);
 
   try {
     const res = await fetch(url, { signal: options.signal });

@@ -47,16 +47,17 @@ describe("geocodeSuggestions", () => {
     expect(results[0].longitude).toBeCloseTo(-73.5693);
   });
 
-  it("requests POI + address + neighborhood + locality types with autocomplete", async () => {
+  it("requests exactly one types param (poi,address) with autocomplete", async () => {
     mockFetchOnce({ features: [] });
 
     await geocodeSuggestions("centre bell");
 
     const url = calledUrl();
-    expect(url).toContain("types=poi,address,neighborhood,locality");
-    expect(url).toContain("autocomplete=true");
-    expect(url).toContain("country=CA");
-    expect(url).toContain("bbox=");
+    const params = new URL(url).searchParams;
+    expect(params.getAll("types")).toEqual(["poi,address"]);
+    expect(params.get("autocomplete")).toBe("true");
+    expect(params.get("country")).toBe("ca");
+    expect(params.has("bbox")).toBe(true);
   });
 
   it("uses the driver GPS position as proximity bias when provided", async () => {
@@ -66,7 +67,9 @@ describe("geocodeSuggestions", () => {
       proximity: { latitude: 45.5601, longitude: -73.7215 }, // Laval
     });
 
-    expect(calledUrl()).toContain("proximity=-73.7215,45.5601");
+    expect(new URL(calledUrl()).searchParams.get("proximity")).toBe(
+      "-73.7215,45.5601",
+    );
   });
 
   it("falls back to downtown Montréal proximity without a GPS fix", async () => {
@@ -74,7 +77,9 @@ describe("geocodeSuggestions", () => {
 
     await geocodeSuggestions("centre bell");
 
-    expect(calledUrl()).toContain("proximity=-73.5673,45.5017");
+    expect(new URL(calledUrl()).searchParams.get("proximity")).toBe(
+      "-73.5673,45.5017",
+    );
   });
 
   it("returns [] on empty query, missing token, or HTTP error", async () => {
