@@ -4,7 +4,9 @@ import {
   type AddressSearchResult,
 } from '@/components/drive/AddressSearchBox';
 import { EventBoostBadge } from '@/components/EventBoostBadge';
+import { ReturnCorridorBadge } from '@/components/drive/ReturnCorridorBadge';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
+import type { ReturnCorridorStep } from '@/lib/scoringEngine';
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { Car, X } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -25,6 +27,8 @@ interface DrivingHUDProps {
   nextZone?: DrivingHUDZone | null;
   earningsToday?: number;
   speedKmh?: number | null;
+  /** Active return-corridor toward heroZone (anti-deadhead), if any. */
+  returnCorridor?: { steps: ReturnCorridorStep[] } | null;
   onNavigate: (zone: DrivingHUDZone) => void;
   onExit: () => void;
 }
@@ -74,11 +78,13 @@ function HeroZoneDisplay({
   heroSurge,
   score,
   color,
+  returnCorridor,
 }: {
   heroZone: DrivingHUDZone | null;
   heroSurge?: SurgeResult | null;
   score: number;
   color: string;
+  returnCorridor?: { steps: ReturnCorridorStep[] } | null;
 }) {
   if (!heroZone) {
     return <div className="text-white/30 text-3xl">Calcul…</div>;
@@ -124,6 +130,14 @@ function HeroZoneDisplay({
         <EventBoostBadge
           name={heroZone.eventBadge.name}
           endAt={heroZone.eventBadge.endAt}
+          className="mt-1"
+        />
+      )}
+
+      {returnCorridor?.steps && returnCorridor.steps.length > 0 && (
+        <ReturnCorridorBadge
+          steps={returnCorridor.steps}
+          hubName={heroZone.name}
           className="mt-1"
         />
       )}
@@ -177,6 +191,7 @@ export function DrivingHUD({
   nextZone,
   earningsToday = 0,
   speedKmh,
+  returnCorridor,
   onNavigate,
   onExit,
 }: DrivingHUDProps) {
@@ -258,6 +273,7 @@ export function DrivingHUD({
           heroSurge={heroSurge}
           score={score}
           color={color}
+          returnCorridor={returnCorridor}
         />
       </div>
 

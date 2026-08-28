@@ -7,6 +7,11 @@
 import type { Zone } from '@/hooks/useSupabase';
 import { haversineKm } from '@/hooks/useUserLocation';
 import { applyLearningAgents, type ZoneHistory } from '@/lib/aiAgents';
+import {
+  selectProspectionWaypoints,
+  type RouteCandidateZone,
+  type RoutePoint,
+} from '@/services/routing';
 import { HOTSPOTS } from './hotspots';
 
 export interface ActiveEventBoost {
@@ -805,4 +810,119 @@ export function reweightZonesByDriverMode<T extends { type: string; score: numbe
       score: Math.min(Math.round(z.score * (boostMap[z.type] ?? 1.0)), 100),
     }))
     .sort((a, b) => b.score - a.score);
+}
+
+// ── Return Corridor Routing (Anti-Deadhead) ───────────────────────────────
+// After a drop-off in a dead zone (see useAntiDeadhead's LOW_SCORE_THRESHOLD),
+// a single far-away "hot" zone can cost more in gas/wear than it's worth
+// chasing directly. This breaks a long return trip into 2-3 intermediate
+// step zones instead, prospecting on the way rather than deadheading.
+//
+// Deliberately reuses selectProspectionWaypoints (services/routing) for the
+// corridor-buffer geometry instead of re-deriving it here — same algorithm
+// already powers the Drive nav map's Prospection mode and is unit-tested.
+// This layer only adds the two things that are genuinely new: the $/km cost
+// adjustment before ranking candidates, and the >6km gate that decides
+// whether a corridor is worth building at all.
+
+/** $/km fuel + wear used to discount a candidate zone's score by distance. */
+export const DEADHEAD_COST_PER_KM = 0.35;
+
+/** Below this direct distance, just drive there -- no corridor needed. */
+const RETURN_CORRIDOR_DIRECT_THRESHOLD_KM = 6;
+
+export interface ReturnCorridorZone {
+  id: string;
+  name: string;
+  type: string;
+  latitude: number;
+  longitude: number;
+  score: number;
+}
+
+export interface ReturnCorridorStep extends ReturnCorridorZone {
+  /** Cost-adjusted score used to pick this step (score - distanceKm * costPerKm). */
+  effectiveScore: number;
+}
+
+export interface ReturnCorridorResult {
+  /** True when a multi-step corridor was generated (direct distance > threshold). */
+  active: boolean;
+  directDistanceKm: number;
+  steps: ReturnCorridorStep[];
+}
+
+/**
+ * EffectiveScore = BaseScore - (DistanceToZoneKm * CostPerKmFactor) -- a zone
+ * that scores high but sits far away can net out worse than a closer,
+ * slightly-lower-scored one once the deadhead cost is priced in.
+ */
+export function computeEffectiveScore(
+  baseScore: number,
+  distanceKm: number,
+  costPerKm: number = DEADHEAD_COST_PER_KM
+): number {
+  return baseScore - distanceKm * costPerKm;
+}
+
+/**
+ * Builds a return corridor from `currentCoords` toward `targetHubCoords`:
+ * empty/inactive when the direct distance is short enough to just drive,
+ * otherwise up to 3 intermediate zones along the way, ranked by cost-
+ * adjusted score so a costly detour to a distant "hot" zone loses to a
+ * cheaper nearby one with a comparable raw score.
+ */
+export function getReturnCorridor(
+  currentCoords: RoutePoint,
+  targetHubCoords: RoutePoint,
+  candidateZones: ReturnCorridorZone[],
+  maxDetourKm = 2.5
+): ReturnCorridorResult {
+  const directDistanceKm = haversineKm(
+    currentCoords.lat,
+    currentCoords.lng,
+    targetHubCoords.lat,
+    targetHubCoords.lng
+  );
+
+  if (directDistanceKm <= RETURN_CORRIDOR_DIRECT_THRESHOLD_KM) {
+    return { active: false, directDistanceKm, steps: [] };
+  }
+
+  const costAdjustedCandidates: RouteCandidateZone[] = candidateZones.map(
+    (zone) => ({
+      ...zone,
+      score: computeEffectiveScore(
+        zone.score,
+        haversineKm(
+          currentCoords.lat,
+          currentCoords.lng,
+          zone.latitude,
+          zone.longitude
+        )
+      ),
+    })
+  );
+
+  const waypoints = selectProspectionWaypoints(
+    currentCoords,
+    targetHubCoords,
+    costAdjustedCandidates,
+    { maxWaypoints: 3, corridorBufferKm: maxDetourKm }
+  );
+
+  const steps: ReturnCorridorStep[] = waypoints.map((wp) => {
+    const original = candidateZones.find((z) => z.id === wp.id);
+    return {
+      id: wp.id,
+      name: wp.name,
+      type: original?.type ?? 'zone',
+      latitude: wp.latitude,
+      longitude: wp.longitude,
+      score: original?.score ?? wp.score,
+      effectiveScore: wp.score,
+    };
+  });
+
+  return { active: steps.length > 0, directDistanceKm, steps };
 }

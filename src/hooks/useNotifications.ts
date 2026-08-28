@@ -160,7 +160,7 @@ async function sendNotification(title: string, body: string, url?: string) {
   new Notification(title, { body, icon: '/pwa-icon-192.png' });
 }
 
-function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone | null {
+export function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone | null {
   let best: Zone | null = null;
   let bestDist = Infinity;
   for (const z of zones) {

@@ -4,13 +4,19 @@ import {
   AddressSearchBox,
   type AddressSearchResult,
 } from '@/components/drive/AddressSearchBox';
+import { AntiDeadheadCard } from '@/components/drive/AntiDeadheadCard';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
 import { EventBoostBadge } from '@/components/EventBoostBadge';
 import { WazeIcon } from '@/components/NavIcons';
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
-import { buildOneTapNavigationUrl, type RouteCandidateZone } from '@/services/routing';
+import {
+  buildGoogleMapsProspectingUrl,
+  buildOneTapNavigationUrl,
+  type RouteCandidateZone,
+  type RoutePoint,
+} from '@/services/routing';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
 import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
 import { QuickDecideWidget } from '@/components/QuickDecideWidget';
@@ -22,11 +28,16 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
 import { useI18n } from '@/contexts/I18nContext';
 import { useActivityDetection } from '@/hooks/useActivityDetection';
+import {
+  useAntiDeadhead,
+  type AntiDeadheadSuggestion,
+} from '@/hooks/useAntiDeadhead';
 import { useArrivalCountdown } from '@/hooks/useArrivalCountdown';
 import { nearestCityId, useAutoCity } from '@/hooks/useAutoCity';
 import { useCityId } from '@/hooks/useCityId';
 import { useDemandScores } from '@/hooks/useDemandScores';
 import { useHaptics } from '@/hooks/useHaptics';
+import { findNearestZone } from '@/hooks/useNotifications';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
@@ -39,7 +50,12 @@ import {
   setStoredDriverMode,
 } from '@/lib/driverPreferences';
 import { openWazeNav } from '@/lib/hotspots';
-import { reweightZonesByDriverMode } from '@/lib/scoringEngine';
+import {
+  getReturnCorridor,
+  reweightZonesByDriverMode,
+  type ReturnCorridorResult,
+  type ReturnCorridorStep,
+} from '@/lib/scoringEngine';
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { getMontrealDayStart } from '@/lib/timezone';
 import { summarizeTrips } from '@/lib/tripAnalytics';
@@ -64,6 +80,43 @@ function getHeroCardGlowClass(surge: SurgeResult | null | undefined): string {
   return surge.surgeClass === 'high' || surge.surgeClass === 'peak'
     ? 'animate-pulse-glow'
     : '';
+}
+
+/** True when a return corridor is active toward this exact zone (anti-deadhead target). */
+function corridorTargetsZone(
+  zoneId: string,
+  antiDeadhead: AntiDeadheadSuggestion | null,
+  returnCorridor: ReturnCorridorResult | null
+): boolean {
+  return (
+    !!returnCorridor?.active &&
+    !!antiDeadhead &&
+    zoneId === antiDeadhead.zone.id
+  );
+}
+
+function resolveOneTapUrl(
+  origin: RoutePoint | null,
+  zone: RouteCandidateZone,
+  modeZones: RouteCandidateZone[],
+  antiDeadhead: AntiDeadheadSuggestion | null,
+  returnCorridor: ReturnCorridorResult | null
+): string {
+  if (origin && corridorTargetsZone(zone.id, antiDeadhead, returnCorridor)) {
+    return buildGoogleMapsProspectingUrl(origin, zone, returnCorridor!.steps);
+  }
+  return buildOneTapNavigationUrl(origin, zone, modeZones);
+}
+
+function resolveHudReturnCorridor(
+  heroZoneId: string | undefined,
+  antiDeadhead: AntiDeadheadSuggestion | null,
+  returnCorridor: ReturnCorridorResult | null
+): { steps: ReturnCorridorStep[] } | null {
+  if (!heroZoneId || !corridorTargetsZone(heroZoneId, antiDeadhead, returnCorridor)) {
+    return null;
+  }
+  return { steps: returnCorridor!.steps };
 }
 
 export default function DriveScreen() {
@@ -242,6 +295,32 @@ export default function DriveScreen() {
     .slice(0, 6);
   const heroEventBadge = heroZone ? zoneEventBadge.get(heroZone.id) : undefined;
 
+  // Anti-deadhead: is the driver currently parked in a low-score zone
+  // (e.g. just dropped off out in the sticks)? If so, suggest the best
+  // reachable zone and, when it's far enough away, break the trip into a
+  // return corridor instead of one long deadhead leg (getReturnCorridor).
+  const currentZone = useMemo(
+    () => (location ? findNearestZone(location.latitude, location.longitude, modeZones) : null),
+    [location, modeZones]
+  );
+  const antiDeadhead = useAntiDeadhead({
+    currentLat: location?.latitude ?? null,
+    currentLng: location?.longitude ?? null,
+    currentZoneId: currentZone?.id ?? null,
+    zones: modeZones,
+    scores,
+    driverMode,
+    conservativePresence,
+  });
+  const returnCorridor = useMemo(() => {
+    if (!antiDeadhead || !location) return null;
+    return getReturnCorridor(
+      { lat: location.latitude, lng: location.longitude },
+      { lat: antiDeadhead.zone.latitude, lng: antiDeadhead.zone.longitude },
+      modeZones
+    );
+  }, [antiDeadhead, location, modeZones]);
+
   // Zero-friction 1-tap navigation: no in-app Mapbox view, no confirmation --
   // straight to the Google Maps app with the prospection waypoints baked in.
   // Used by the hero "Naviguer" button, the Driving HUD tiles, and the
@@ -252,9 +331,15 @@ export default function DriveScreen() {
       const origin = location
         ? { lat: location.latitude, lng: location.longitude }
         : null;
-      window.location.href = buildOneTapNavigationUrl(origin, zone, modeZones);
+      window.location.href = resolveOneTapUrl(
+        origin,
+        zone,
+        modeZones,
+        antiDeadhead,
+        returnCorridor
+      );
     },
-    [location, modeZones]
+    [location, modeZones, returnCorridor, antiDeadhead]
   );
 
   // Address search: the picked address/POI becomes the active nav target
@@ -516,6 +601,11 @@ export default function DriveScreen() {
           heroSurge={heroSurge}
           earningsToday={todayEarnings}
           speedKmh={speedKmh}
+          returnCorridor={resolveHudReturnCorridor(
+            heroZone?.id,
+            antiDeadhead,
+            returnCorridor
+          )}
           onNavigate={navigateOneTap}
           onExit={() => {
             setHudDismissedManually(true);
@@ -633,6 +723,18 @@ export default function DriveScreen() {
           )}
         </div>
       </div>
+
+      {/* Anti-deadhead: driver is parked in a low-score zone -- suggest a
+          reposition, broken into a return corridor when the hub is far. */}
+      {!fullScreen && antiDeadhead && (
+        <div className="px-4 mt-3">
+          <AntiDeadheadCard
+            suggestion={antiDeadhead}
+            corridor={returnCorridor}
+            onNavigate={() => navigateOneTap(antiDeadhead.zone)}
+          />
+        </div>
+      )}
 
       {/* Full-screen toggle + GPS row */}
       <div className="px-4 mt-3 space-y-2">
