@@ -74,7 +74,7 @@ export interface GeocodeSuggestion {
 // North Shore towns Delivroom tracks (Terrebonne, Sainte-Thérèse,
 // Blainville, Boisbriand, Rosemère) — keeps autocomplete relevant and fast
 // instead of Mapbox searching all of Quebec.
-const MONTREAL_AREA_BBOX = '-74.3,45.2,-73.0,45.9';
+const MONTREAL_AREA_BBOX = '-74.10,45.20,-73.30,45.75';
 
 /**
  * Live address/POI autocomplete for the Drive search box. Unlike
@@ -121,6 +121,7 @@ export async function geocodeSuggestions(
     const data = (await res.json()) as {
       features?: { id?: string; center?: [number, number]; place_name?: string }[];
     };
+    console.log('[geocoding] Mapbox raw response:', data);
     return (data.features ?? [])
       .filter((f): f is { id?: string; center: [number, number]; place_name: string } =>
         !!f.center && !!f.place_name,
