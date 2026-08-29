@@ -56,7 +56,7 @@ interface AnalysisResult {
   matched_zone_id?: string;
   matched_zone_name?: string;
   is_fallback?: boolean;
-  fallback_reason?: 'missing_image_url' | 'invalid_image_url' | 'missing_api_key' | 'image_fetch_failed' | 'gemini_call_failed' | 'gemini_invalid_json' | 'rate_limited';
+  fallback_reason?: 'missing_image_url' | 'invalid_image_url' | 'missing_api_key' | 'image_fetch_failed' | 'gemini_call_failed' | 'gemini_invalid_json' | 'rate_limited' | 'unexpected_error';
 }
 
 interface RequestBody {
@@ -126,10 +126,15 @@ serve(async (req) => {
       url: req.url,
       method: req.method,
     });
-    return new Response(JSON.stringify({ error: String(err) }), {
-      status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    });
+    // A non-2xx here makes supabase-js's functions.invoke() throw, which a
+    // bulk import loop (300+ screenshots) has to catch per-item anyway — so
+    // every other failure path in this function already degrades to 200 +
+    // a fallback analysis (see fallbackAnalysis below) instead of an HTTP
+    // error. Match that here too: this catch is only truly unexpected bugs
+    // (everything else already has its own handled fallback path), and the
+    // caller shouldn't need a different code path to parse a crash than any
+    // other failure reason.
+    return jsonResponse({ analysis: fallbackAnalysis(undefined, 'unexpected_error') });
   }
 });
 
@@ -204,6 +209,54 @@ interface GeminiResult {
   reason: 'gemini_call_failed' | 'gemini_invalid_json';
 }
 
+const GEMINI_TIMEOUT_MS = 25_000;
+const GEMINI_RETRY_DELAY_MS = 1_500;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Rate-limit (429) and server-side errors (5xx) are typically transient —
+// worth one light retry. A 4xx other than 429 (bad key, bad request) won't
+// fix itself on retry.
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+
+async function callGeminiVision(
+  apiKey: string,
+  image: FetchedImage,
+  prompt: string,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GEMINI_TIMEOUT_MS);
+  try {
+    return await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { inlineData: { mimeType: image.mimeType, data: toBase64(image.bytes) } },
+              { text: prompt },
+            ],
+          }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.2,
+            maxOutputTokens: 2048,
+          },
+        }),
+      },
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 async function runGemini(
   apiKey: string,
   image: FetchedImage,
@@ -211,26 +264,33 @@ async function runGemini(
   zones: ZoneRow[],
 ): Promise<GeminiResult> {
   const prompt = buildPrompt(zoneName, zones);
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [
-            { inlineData: { mimeType: image.mimeType, data: toBase64(image.bytes) } },
-            { text: prompt },
-          ],
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          temperature: 0.2,
-          maxOutputTokens: 2048,
-        },
-      }),
-    },
-  );
+
+  let res: Response;
+  try {
+    res = await callGeminiVision(apiKey, image, prompt);
+  } catch (err) {
+    // Network error or our own timeout abort — one light retry, same as a
+    // transient HTTP status below.
+    console.error('Gemini Vision fetch failed, retrying once:', err);
+    try {
+      res = await callGeminiVision(apiKey, image, prompt);
+    } catch (retryErr) {
+      console.error('Gemini Vision retry also failed:', retryErr);
+      return { analysis: null, reason: 'gemini_call_failed' };
+    }
+  }
+
+  if (!res.ok && isRetryableStatus(res.status)) {
+    console.error(`Gemini Vision transient error (status ${res.status}), retrying once after ${GEMINI_RETRY_DELAY_MS}ms`);
+    await sleep(GEMINI_RETRY_DELAY_MS);
+    try {
+      res = await callGeminiVision(apiKey, image, prompt);
+    } catch (retryErr) {
+      console.error('Gemini Vision retry fetch failed:', retryErr);
+      return { analysis: null, reason: 'gemini_call_failed' };
+    }
+  }
+
   if (!res.ok) {
     const errBody = await res.text();
     console.error(`Gemini Vision error (status ${res.status}):`, errBody);
@@ -661,6 +721,7 @@ const FALLBACK_NOTES: Record<NonNullable<AnalysisResult['fallback_reason']>, str
   image_fetch_failed: 'Le serveur n\'a pas pu télécharger le screenshot (URL expirée).',
   gemini_call_failed: 'L\'API Gemini a refusé la requête (clé invalide, quota, ou modèle indisponible).',
   gemini_invalid_json: 'Gemini a répondu mais dans un format inattendu.',
+  unexpected_error: 'Erreur inattendue côté serveur — réessaie.',
 };
 
 function fallbackAnalysis(

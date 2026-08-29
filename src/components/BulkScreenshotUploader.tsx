@@ -37,6 +37,7 @@ import {
   silentRescan,
 } from '@/lib/scannerService';
 import { drainSharedFiles } from '@/lib/shareInbox';
+import { insertTripsResilient } from '@/lib/tripBulkInsert';
 import {
   AlertCircle,
   CheckCircle2,
@@ -423,6 +424,42 @@ export function BulkScreenshotUploader() {
     }
   }
 
+  // Re-run analysis for a single failed screenshot — reuses processOne as-is
+  // (hash → dedup check → upload → analyze → record) rather than reprocessing
+  // the whole batch to retry the 4 that failed out of 382. Tracked separately
+  // from `running` (the full-batch flag) so retrying one card doesn't disable
+  // every other retry button; `retryingIds` is only used to disable the
+  // clicked button itself against a double-tap, since processOne's own
+  // status transitions (failed -> hashing -> ... ) already reflect progress.
+  const [retryingIds, setRetryingIds] = useState<Set<string>>(new Set());
+
+  async function retryOne(item: FileItem) {
+    setRetryingIds((prev) => new Set(prev).add(item.id));
+    try {
+      await processOne(item);
+      qc.invalidateQueries({ queryKey: ['trips-feed'] });
+      qc.invalidateQueries({ queryKey: ['trip-history'] });
+    } finally {
+      setRetryingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(item.id);
+        return next;
+      });
+    }
+  }
+
+  // A screenshot is only eligible for bulk save once its OWN analysis pass
+  // actually completed successfully — a 'failed' or 'duplicate' item never
+  // gets `analysis` populated by processOne, so `hasTripEarnings` alone
+  // already excludes them today, but that's an implicit invariant of
+  // processOne's control flow, not something this filter defends on its own.
+  // Checking `status === 'done'` explicitly means a future change to
+  // processOne can't silently let a failed/duplicate item slip into the
+  // insert just because it happens to carry a stale `analysis` value.
+  function isSavableAsTrip(it: FileItem): boolean {
+    return it.status === 'done' && !it.tripSaved && hasTripEarnings(it.analysis);
+  }
+
   // Persist every analyzed screenshot that carries a fare as a row in `trips`,
   // so a bulk backlog actually feeds the zone-suggestion learning loop (the
   // per-screenshot analysis alone only archives). Zone comes from the
@@ -430,9 +467,7 @@ export function BulkScreenshotUploader() {
   // historical. Items with no fare or no resolvable zone are skipped and
   // reported. tripSaved guards against double-inserting on a repeat click.
   async function handleSaveAllAsTrips() {
-    const candidates = items.filter(
-      (it) => !it.tripSaved && hasTripEarnings(it.analysis),
-    );
+    const candidates = items.filter(isSavableAsTrip);
     if (!candidates.length) {
       toast.info('Aucune course à sauvegarder (aucun revenu détecté)');
       return;
@@ -472,12 +507,12 @@ export function BulkScreenshotUploader() {
         return;
       }
 
-      const { error } = await supabase
-        .from('trips')
-        .insert(rows.map((r) => r.row));
-      if (error) throw error;
+      const { savedIds, failedCount } = await insertTripsResilient(
+        rows,
+        async (rowsArr) => supabase.from('trips').insert(rowsArr),
+        async (row) => supabase.from('trips').insert(row),
+      );
 
-      const savedIds = new Set(rows.map((r) => r.id));
       setItems((prev) =>
         prev.map((it) =>
           savedIds.has(it.id) ? { ...it, tripSaved: true } : it,
@@ -486,9 +521,14 @@ export function BulkScreenshotUploader() {
       qc.invalidateQueries({ queryKey: ['trips-feed'] });
       qc.invalidateQueries({ queryKey: ['trip-history'] });
 
-      const parts = [`${rows.length} course(s) sauvegardée(s)`];
+      const parts = [`${savedIds.size} course(s) sauvegardée(s)`];
       if (skippedNoZone) parts.push(`${skippedNoZone} sans zone ignorée(s)`);
-      toast.success(`${parts.join(' · ')} — le moteur va apprendre`);
+      if (failedCount) parts.push(`${failedCount} rejetée(s) par la base`);
+      if (failedCount) {
+        toast.warning(`${parts.join(' · ')} — le reste a été sauvegardé quand même`);
+      } else {
+        toast.success(`${parts.join(' · ')} — le moteur va apprendre`);
+      }
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : 'Échec de la sauvegarde des courses',
@@ -499,9 +539,7 @@ export function BulkScreenshotUploader() {
   }
 
   // How many analyzed items are still eligible to be saved as trips.
-  const savableTripCount = items.filter(
-    (it) => !it.tripSaved && hasTripEarnings(it.analysis),
-  ).length;
+  const savableTripCount = items.filter(isSavableAsTrip).length;
 
   function copyFailedSummary() {
     const failed = items.filter((i) => i.status === 'failed');
@@ -762,7 +800,21 @@ export function BulkScreenshotUploader() {
                       <p className="text-[10px] text-muted-foreground truncate">{it.message}</p>
                     )}
                   </div>
-                  <StatusBadge status={it.status} />
+                  <div className="flex items-center gap-1 shrink-0">
+                    {it.status === 'failed' && (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6"
+                        title="Ressayer"
+                        onClick={() => void retryOne(it)}
+                        disabled={retryingIds.has(it.id)}
+                      >
+                        <RefreshCw className={`w-3 h-3 ${retryingIds.has(it.id) ? 'animate-spin' : ''}`} />
+                      </Button>
+                    )}
+                    <StatusBadge status={it.status} />
+                  </div>
                 </li>
               ))}
             </ul>
