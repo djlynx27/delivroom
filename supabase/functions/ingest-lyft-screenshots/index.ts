@@ -36,9 +36,11 @@ import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
 import {
   decodeBase64Image,
+  formatGpsAddress,
   hashImages,
   haversineKm,
   parseLyftSnapshot,
+  shouldFlagEmergingHotspot,
   type LyftSnapshot,
 } from './lyftSnapshot.ts';
 
@@ -205,8 +207,11 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   let zoneId = body.zone_id ?? null;
+  let nearestDistanceKm: number | null = null;
   if (!zoneId && client) {
-    zoneId = await resolveNearestZoneId(client, body.latitude!, body.longitude!);
+    const nearest = await resolveNearestZone(client, body.latitude!, body.longitude!);
+    zoneId = nearest?.id ?? null;
+    nearestDistanceKm = nearest?.distanceKm ?? null;
   }
 
   if (client && zoneId) {
@@ -223,7 +228,16 @@ async function handleRequest(req: Request): Promise<Response> {
     if (error) console.error('ingest-lyft-screenshots: platform_signals insert failed', error);
   }
 
-  return json({ ok: true, zone_id: zoneId, snapshot });
+  // Driver is meaningfully far from every known zone AND demand there reads
+  // high -- worth surfacing as an "emerging hotspot" candidate even though
+  // we don't have a matched zone for it. Best-effort: never blocks the
+  // response the driver actually cares about (the snapshot itself).
+  let emergingHotspot = false;
+  if (client && shouldFlagEmergingHotspot(nearestDistanceKm, snapshot.demand_score)) {
+    emergingHotspot = await logEmergingHotspot(client, body.latitude!, body.longitude!, snapshot);
+  }
+
+  return json({ ok: true, zone_id: zoneId, snapshot, emerging_hotspot: emergingHotspot });
 }
 
 interface FetchedImage {
@@ -318,11 +332,16 @@ Rules:
   return parseLyftSnapshot(parsed);
 }
 
-async function resolveNearestZoneId(
+interface NearestZoneResult {
+  id: string;
+  distanceKm: number;
+}
+
+async function resolveNearestZone(
   client: SupabaseClient,
   lat: number,
   lng: number
-): Promise<string | null> {
+): Promise<NearestZoneResult | null> {
   const { data, error } = await client
     .from('zones')
     .select('id, latitude, longitude');
@@ -337,5 +356,53 @@ async function resolveNearestZoneId(
       best = zone;
     }
   }
-  return best?.id ?? null;
+  return best ? { id: best.id, distanceKm: bestDist } : null;
+}
+
+/** Upserts into zone_discoveries (context='other') -- same table/pattern
+ * analyze-screenshot already uses for unmatched pickup/dropoff addresses,
+ * just keyed by a GPS label instead of a street address, and with lat/lng
+ * kept (columns added specifically for this) so a promoted zone doesn't
+ * need a separate geocoding step. Returns whether the flag succeeded. */
+async function logEmergingHotspot(
+  client: SupabaseClient,
+  lat: number,
+  lng: number,
+  snapshot: LyftSnapshot
+): Promise<boolean> {
+  const address = formatGpsAddress(lat, lng);
+  const notes = `Détecté via ingest-lyft-screenshots — demande ${snapshot.demand_score}/10, attente ~${Math.round(snapshot.wait_time_min)}min`;
+  try {
+    const { data: existing } = await client
+      .from('zone_discoveries')
+      .select('id, count')
+      .eq('context', 'other')
+      .ilike('address', address)
+      .maybeSingle();
+
+    if (existing) {
+      const { error } = await client
+        .from('zone_discoveries')
+        .update({
+          count: (existing.count ?? 0) + 1,
+          last_seen_at: new Date().toISOString(),
+          notes,
+        })
+        .eq('id', existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await client.from('zone_discoveries').insert({
+        address,
+        context: 'other',
+        latitude: lat,
+        longitude: lng,
+        notes,
+      });
+      if (error) throw error;
+    }
+    return true;
+  } catch (err) {
+    console.error('ingest-lyft-screenshots: emerging hotspot log failed', err);
+    return false;
+  }
 }

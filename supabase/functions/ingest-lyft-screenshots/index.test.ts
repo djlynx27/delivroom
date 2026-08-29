@@ -6,7 +6,15 @@
 // Run with: deno test supabase/functions/ingest-lyft-screenshots/
 
 import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
-import { decodeBase64Image, hashImages, parseLyftSnapshot } from './lyftSnapshot.ts';
+import {
+  decodeBase64Image,
+  EMERGING_HOTSPOT_DISTANCE_KM,
+  EMERGING_HOTSPOT_MIN_DEMAND,
+  formatGpsAddress,
+  hashImages,
+  parseLyftSnapshot,
+  shouldFlagEmergingHotspot,
+} from './lyftSnapshot.ts';
 
 Deno.test('parseLyftSnapshot: accepts a well-formed snapshot', () => {
   const result = parseLyftSnapshot({
@@ -113,4 +121,33 @@ Deno.test('hashImages: different byte content produces a different hash', async 
   const a = await hashImages([{ bytes: new Uint8Array([1, 2, 3]), mimeType: 'image/jpeg' }]);
   const b = await hashImages([{ bytes: new Uint8Array([1, 2, 4]), mimeType: 'image/jpeg' }]);
   assertNotEquals(a, b);
+});
+
+Deno.test('shouldFlagEmergingHotspot: flags far + high demand', () => {
+  assertEquals(
+    shouldFlagEmergingHotspot(EMERGING_HOTSPOT_DISTANCE_KM, EMERGING_HOTSPOT_MIN_DEMAND),
+    true
+  );
+});
+
+Deno.test('shouldFlagEmergingHotspot: does not flag when close to a known zone', () => {
+  assertEquals(shouldFlagEmergingHotspot(0.3, 10), false);
+});
+
+Deno.test('shouldFlagEmergingHotspot: does not flag low demand even when far', () => {
+  assertEquals(shouldFlagEmergingHotspot(5, EMERGING_HOTSPOT_MIN_DEMAND - 1), false);
+});
+
+Deno.test('shouldFlagEmergingHotspot: does not flag when distance is unknown (explicit zone_id override)', () => {
+  assertEquals(shouldFlagEmergingHotspot(null, 10), false);
+});
+
+Deno.test('formatGpsAddress: rounds to 4 decimal places', () => {
+  assertEquals(formatGpsAddress(45.50171234, -73.56731234), 'GPS 45.5017,-73.5673');
+});
+
+Deno.test('formatGpsAddress: two nearby detections round to the same label (dedup key)', () => {
+  const a = formatGpsAddress(45.501701, -73.567301);
+  const b = formatGpsAddress(45.501699, -73.567299);
+  assertEquals(a, b);
 });

@@ -11,6 +11,7 @@
  */
 
 import { DemandBadge } from '@/components/DemandBadge';
+import { useEmergingHotspots } from '@/hooks/useEmergingHotspots';
 import { useZones, type Zone } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
 import { useWeather } from '@/hooks/useWeather';
@@ -487,6 +488,27 @@ function ShiftBlocksList({ selectedBlocks }: { selectedBlocks: ShiftBlock[] }) {
   );
 }
 
+function EmergingHotspotsSection({
+  hotspots,
+}: {
+  hotspots: ReturnType<typeof useEmergingHotspots>['data'];
+}) {
+  if (!hotspots || hotspots.length === 0) return null;
+
+  return (
+    <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-1.5">
+      <p className="text-[12px] font-display font-bold text-primary">
+        🆕 Hotspots émergents (hors zones connues)
+      </p>
+      {hotspots.slice(0, 3).map((hotspot) => (
+        <p key={hotspot.id} className="text-[12px] text-muted-foreground font-body">
+          {hotspot.address} · vu {hotspot.occurrenceCount}×
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function LearningCalibrationFooter({
   learningInsights,
 }: {
@@ -522,6 +544,7 @@ export function ShiftOptimizer({
   const { data: zones = [] } = useZones(cityId);
   const { data: weather } = useWeather(cityId);
   const { data: trips = [] } = useTrips(300, undefined, true, true);
+  const { data: emergingHotspots } = useEmergingHotspots();
 
   const weatherCond: WeatherCondition | null = useMemo(
     () => buildWeatherCondition(weather),
@@ -605,6 +628,8 @@ export function ShiftOptimizer({
       />
 
       <ShiftBlocksList selectedBlocks={selectedBlocks} />
+
+      <EmergingHotspotsSection hotspots={emergingHotspots} />
 
       <LearningCalibrationFooter learningInsights={learningInsights} />
     </div>

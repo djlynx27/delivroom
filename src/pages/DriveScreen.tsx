@@ -9,6 +9,7 @@ import { MarketRadarSheet } from '@/components/drive/MarketRadarSheet';
 import { DeadTimeTimer } from '@/components/DeadTimeTimer';
 import { DemandBadge } from '@/components/DemandBadge';
 import { DrivingHUD } from '@/components/DrivingHUD';
+import { EmergingHotspotBadge } from '@/components/EmergingHotspotBadge';
 import { EventBoostBadge } from '@/components/EventBoostBadge';
 import { WazeIcon } from '@/components/NavIcons';
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
@@ -40,6 +41,7 @@ import { useDemandScores } from '@/hooks/useDemandScores';
 import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
 import { findNearestZone, useNotifications } from '@/hooks/useNotifications';
+import { nearestEmergingHotspot, useEmergingHotspots } from '@/hooks/useEmergingHotspots';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
@@ -150,6 +152,10 @@ export default function DriveScreen() {
   const [cityId, setCityId] = useCityId();
   const { data: cities = [] } = useCities();
   const { location, status, error, refresh } = useUserLocation(15000);
+  const { data: emergingHotspots = [] } = useEmergingHotspots();
+  const nearbyHotspot = location
+    ? nearestEmergingHotspot(location.latitude, location.longitude, emergingHotspots)
+    : null;
   const [cityRefreshKey, setCityRefreshKey] = useState(0);
   useAutoCity(
     cityId,
@@ -780,6 +786,12 @@ export default function DriveScreen() {
                   <EventBoostBadge
                     name={heroEventBadge.name}
                     endAt={heroEventBadge.end_at}
+                  />
+                )}
+                {nearbyHotspot && (
+                  <EmergingHotspotBadge
+                    distanceKm={nearbyHotspot.distanceKm}
+                    occurrenceCount={nearbyHotspot.occurrenceCount}
                   />
                 )}
               </div>

@@ -93,3 +93,32 @@ export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: numb
       Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.asin(Math.sqrt(a));
 }
+
+// ── Emerging hotspot detection ────────────────────────────────────────────
+// A screenshot's demand heatmap has no GPS/zoom reference baked in, so we
+// can't geocode individual purple dots. What we DO have is the driver's own
+// GPS at capture time plus the vision-extracted demand score: if the driver
+// is meaningfully far from every known zone AND demand there reads high,
+// that position itself is worth surfacing as a candidate new zone — logged
+// into the existing zone_discoveries table (same one analyze-screenshot
+// already feeds for pickup/dropoff addresses) rather than a new table.
+export const EMERGING_HOTSPOT_DISTANCE_KM = 1.5;
+export const EMERGING_HOTSPOT_MIN_DEMAND = 7;
+
+export function shouldFlagEmergingHotspot(
+  distanceToNearestZoneKm: number | null,
+  demandScore: number
+): boolean {
+  if (distanceToNearestZoneKm === null) return false;
+  return (
+    distanceToNearestZoneKm >= EMERGING_HOTSPOT_DISTANCE_KM &&
+    demandScore >= EMERGING_HOTSPOT_MIN_DEMAND
+  );
+}
+
+/** Stable, dedup-friendly label for a GPS position with no matched address —
+ * 4 decimal places (~11 m) so repeat detections at the same spot collapse
+ * into the same zone_discoveries row via its (lower(address), context) index. */
+export function formatGpsAddress(lat: number, lng: number): string {
+  return `GPS ${lat.toFixed(4)},${lng.toFixed(4)}`;
+}

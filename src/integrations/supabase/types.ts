@@ -1259,6 +1259,8 @@ export type Database = {
           first_seen_at: string;
           id: string;
           last_seen_at: string;
+          latitude: number | null;
+          longitude: number | null;
           notes: string | null;
           promoted_zone_id: string | null;
           status: string;
@@ -1272,6 +1274,8 @@ export type Database = {
           first_seen_at?: string;
           id?: string;
           last_seen_at?: string;
+          latitude?: number | null;
+          longitude?: number | null;
           notes?: string | null;
           promoted_zone_id?: string | null;
           status?: string;
@@ -1285,6 +1289,8 @@ export type Database = {
           first_seen_at?: string;
           id?: string;
           last_seen_at?: string;
+          latitude?: number | null;
+          longitude?: number | null;
           notes?: string | null;
           promoted_zone_id?: string | null;
           status?: string;
