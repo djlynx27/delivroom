@@ -1,6 +1,6 @@
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { GoogleMapsIcon } from '@/components/NavIcons';
-import { useZones } from '@/hooks/useSupabase';
+import { useZones, type Zone } from '@/hooks/useSupabase';
 import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { getDemandLevel } from '@/lib/demandUtils';
@@ -35,13 +35,7 @@ function buildWeatherCondition(
 
 function findNearestHotspot(
   userLocation: { latitude: number; longitude: number } | null,
-  allZones: Array<{
-    id: string;
-    name: string;
-    latitude: number;
-    longitude: number;
-    score?: number | null;
-  }>,
+  allZones: Zone[],
   weatherMtl:
     | {
         weatherId: number;

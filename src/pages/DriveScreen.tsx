@@ -72,7 +72,10 @@ import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-interface WakeLockNavigator extends Navigator {
+// Deliberately NOT `extends Navigator` — the DOM lib's real Navigator.wakeLock
+// is a non-optional WakeLock global type; this ad-hoc optional shape (for
+// feature-detecting browsers without the API) conflicts with it.
+interface WakeLockNavigator {
   wakeLock?: {
     request: (type: 'screen') => Promise<WakeLockSentinel>;
   };
@@ -204,7 +207,7 @@ export default function DriveScreen() {
   const [isRefreshingLocation, setIsRefreshingLocation] = useState(false);
   const { vibrate } = useHaptics();
   const [wakeLockStatus, setWakeLockStatus] = useState<WakeLockStatus>(() => {
-    const nav = navigator as WakeLockNavigator;
+    const nav = navigator as unknown as WakeLockNavigator;
     return nav.wakeLock ? 'inactive' : 'unsupported';
   });
 
@@ -236,7 +239,7 @@ export default function DriveScreen() {
     }
 
     async function requestWakeLock() {
-      const nav = navigator as WakeLockNavigator;
+      const nav = navigator as unknown as WakeLockNavigator;
       if (!nav.wakeLock) {
         setWakeLockStatus('unsupported');
         return;

@@ -83,7 +83,7 @@ export function generateAISimulatedSlots(
 
   for (const zone of zones) {
     for (const startTime of timeLabels) {
-      const [h, m] = startTime.split(':').map(Number);
+      const [h = 0, m = 0] = startTime.split(':').map(Number);
       const endTotalMin = h * 60 + m + 15;
       const eh = Math.floor(endTotalMin / 60) % 24;
       const em = endTotalMin % 60;

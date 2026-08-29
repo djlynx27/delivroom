@@ -19,7 +19,7 @@ export function ReturnCorridorBadge({
   className,
 }: ReturnCorridorBadgeProps) {
   if (steps.length === 0) return null;
-  const nextStep = steps[0];
+  const nextStep = steps[0]!;
 
   return (
     <span

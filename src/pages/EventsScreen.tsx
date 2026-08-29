@@ -79,7 +79,7 @@ function CategoryBadge({ category }: { category: string }) {
     holiday: { label: t('eventCategoryHoliday'), emoji: '🎉' },
     event: { label: t('eventCategoryEvent'), emoji: '📅' },
   };
-  const c = labels[category] ?? labels.event;
+  const c = labels[category] ?? labels.event!;
   return (
     <span className="inline-flex items-center gap-1 bg-accent rounded-full px-2.5 py-0.5 text-[12px] font-display font-medium">
       {c.emoji} {c.label}

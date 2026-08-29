@@ -97,9 +97,9 @@ function buildZoneEarningsPerHour(trips: ZonePerformanceTrip[]) {
       zoneStats[trip.zone_id] = { totalEarnings: 0, totalHours: 0 };
     }
 
-    zoneStats[trip.zone_id].totalEarnings +=
+    zoneStats[trip.zone_id]!.totalEarnings +=
       Number(trip.earnings || 0) + Number(trip.tips || 0);
-    zoneStats[trip.zone_id].totalHours += getTripHours(trip);
+    zoneStats[trip.zone_id]!.totalHours += getTripHours(trip);
   }
 
   const earningsPerHour: Record<string, number> = {};

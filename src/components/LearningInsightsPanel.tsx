@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { useTrips } from '@/hooks/useTrips';
+import { useTrips, type TripWithZone } from '@/hooks/useTrips';
 import { deriveLearningInsights } from '@/lib/learningEngine';
 import {
   findSimilarContextsForTrip,
@@ -118,7 +118,7 @@ function formatSimilarContextDate(createdAt: string) {
 function SimilarContextsMatches({
   similarContexts,
 }: {
-  similarContexts: Extract<SimilarContextsResult, { ok: true }>;
+  similarContexts: SimilarContextsResult;
 }) {
   return (
     <>
@@ -167,9 +167,7 @@ function SimilarContextsSection({
   isLoadingSimilarContexts,
   similarContexts,
 }: {
-  anchorTrip: ReturnType<typeof useTrips>['data'] extends Array<infer Trip>
-    ? Trip | null
-    : null;
+  anchorTrip: TripWithZone | null;
   isLoadingSimilarContexts: boolean;
   similarContexts: SimilarContextsResult | undefined;
 }) {
@@ -194,11 +192,7 @@ function SimilarContextsSection({
           Recherche des situations historiques les plus proches...
         </p>
       ) : hasMatches ? (
-        <SimilarContextsMatches
-          similarContexts={
-            similarContexts as Extract<SimilarContextsResult, { ok: true }>
-          }
-        />
+        <SimilarContextsMatches similarContexts={similarContexts!} />
       ) : (
         <Alert className="mt-3 border-dashed">
           <Sparkles className="h-4 w-4" />
@@ -298,9 +292,7 @@ function LearningInsightsContent({
   similarContexts,
 }: {
   insights: LearningInsights;
-  anchorTrip: ReturnType<typeof useTrips>['data'] extends Array<infer Trip>
-    ? Trip | null
-    : null;
+  anchorTrip: TripWithZone | null;
   isLoadingSimilarContexts: boolean;
   similarContexts: SimilarContextsResult | undefined;
 }) {
@@ -322,7 +314,7 @@ function LearningInsightsContent({
 }
 
 export function LearningInsightsPanel() {
-  const { data: trips = [] } = useTrips(500);
+  const { data: trips = [] } = useTrips(500, undefined, true, true);
   const [isSyncing, setIsSyncing] = useState(false);
   const insights = useMemo(
     () => deriveLearningInsights(trips, DEFAULT_WEIGHTS),

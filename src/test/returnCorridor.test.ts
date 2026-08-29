@@ -106,7 +106,7 @@ describe('getReturnCorridor', () => {
     const result = getReturnCorridor(current, hub, []);
     expect(result.active).toBe(true);
     expect(result.steps).toHaveLength(1);
-    expect(result.steps[0].id).toBe('patrol-sweep');
+    expect(result.steps[0]!.id).toBe('patrol-sweep');
   });
 });
 

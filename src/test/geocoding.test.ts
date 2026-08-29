@@ -20,7 +20,7 @@ function mockFetchOnce(body: unknown, ok = true, status = 200) {
 }
 
 function calledUrl(): string {
-  return vi.mocked(fetch).mock.calls[0][0] as string;
+  return vi.mocked(fetch).mock.calls[0]![0] as string;
 }
 
 describe("geocodeSuggestions", () => {
@@ -41,10 +41,10 @@ describe("geocodeSuggestions", () => {
     // Entire phrase URL-encoded in the request — not just the last word
     expect(calledUrl()).toContain("centre%20bell%20montr%C3%A9al.json");
 
-    expect(results[0].name).toContain("Centre Bell");
-    expect(results[0].name).toContain("1909 Avenue des Canadiens-de-Montréal");
-    expect(results[0].latitude).toBeCloseTo(45.4961);
-    expect(results[0].longitude).toBeCloseTo(-73.5693);
+    expect(results[0]!.name).toContain("Centre Bell");
+    expect(results[0]!.name).toContain("1909 Avenue des Canadiens-de-Montréal");
+    expect(results[0]!.latitude).toBeCloseTo(45.4961);
+    expect(results[0]!.longitude).toBeCloseTo(-73.5693);
   });
 
   it("requests exactly one types param (poi,address) with autocomplete", async () => {
@@ -118,7 +118,7 @@ describe("geocodeSuggestions", () => {
     const results = await geocodeSuggestions("carrefour laval");
 
     expect(results).toHaveLength(1);
-    expect(results[0].id).toBe("hotspot-carrefour-laval");
-    expect(results[0].name).toBe("Carrefour Laval");
+    expect(results[0]!.id).toBe("hotspot-carrefour-laval");
+    expect(results[0]!.name).toBe("Carrefour Laval");
   });
 });

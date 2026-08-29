@@ -112,7 +112,7 @@ function formatWeekMinute(weekMinute: number): string {
 
 /** Une seule période sans heure de fermeture ⇒ 24h/24. */
 function isAlwaysOpen(periods: HoursPeriod[]): boolean {
-  if (periods.length === 1 && !periods[0].close) return true;
+  if (periods.length === 1 && !periods[0]!.close) return true;
   // Certains fournisseurs encodent le 24/7 en 7 plages 00:00 → 00:00.
   return (
     periods.length === 7 &&

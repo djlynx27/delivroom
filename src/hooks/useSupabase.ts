@@ -143,8 +143,8 @@ export function useBulkInsertTimeSlots() {
         return;
       }
 
-      const cityId = slots[0].city_id;
-      const date = slots[0].date;
+      const cityId = slots[0]!.city_id;
+      const date = slots[0]!.date;
       const { data: existingSlots, error: fetchExistingError } = await supabase
         .from('time_slots')
         .select(

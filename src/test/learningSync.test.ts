@@ -72,6 +72,8 @@ const trips: TripWithZone[] = [
     zone_id: 'mtl-cb',
     zone_score: 62,
     platform: 'lyft',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
   },
   {
@@ -87,18 +89,20 @@ const trips: TripWithZone[] = [
     zone_id: 'mtl-bq',
     zone_score: 55,
     platform: 'uber',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Station Berri-UQAM', current_score: 53, type: 'métro' },
   },
 ];
 
 describe('learning sync payloads', () => {
   it('encodes a 16d context vector', () => {
-    const vector = encodeContextVector(trips[0]);
+    const vector = encodeContextVector(trips[0]!);
     expect(vector).toHaveLength(16);
   });
 
   it('builds typed rpc args for similar context lookup', () => {
-    const args = buildSimilarContextRpcArgs(trips[0], 7);
+    const args = buildSimilarContextRpcArgs(trips[0]!, 7);
 
     expect(args).toEqual({
       query_zone_id: 'mtl-cb',
@@ -142,7 +146,7 @@ describe('learning sync payloads', () => {
   it('returns null rpc args for trips without zone id', () => {
     const args = buildSimilarContextRpcArgs(
       {
-        ...trips[0],
+        ...trips[0]!,
         zone_id: null,
       },
       5
@@ -201,7 +205,7 @@ describe('learning sync payloads', () => {
       [
         ...trips,
         {
-          ...trips[0],
+          ...trips[0]!,
           id: '3',
           zone_id: null,
           zones: null,
@@ -223,7 +227,7 @@ describe('learning sync payloads', () => {
       [
         ...trips,
         {
-          ...trips[0],
+          ...trips[0]!,
           id: '3',
           ended_at: null,
           earnings: 80,
@@ -354,6 +358,8 @@ describe('encodeContextVector — platform and zone type branches', () => {
     zone_id: 'mtl-cb',
     zone_score: 60,
     platform: 'lyft',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
     ...overrides,
   });
@@ -433,6 +439,8 @@ describe('buildShiftPersistencePayload — date filtering', () => {
       zone_id: 'mtl-cb',
       zone_score: 62,
       platform: 'lyft',
+      source: 'real',
+      user_id: null,
       zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
     },
     {
@@ -448,6 +456,8 @@ describe('buildShiftPersistencePayload — date filtering', () => {
       zone_id: 'mtl-bq',
       zone_score: 50,
       platform: 'uber',
+      source: 'real',
+      user_id: null,
       zones: { name: 'Berri-UQAM', current_score: 50, type: 'métro' },
     },
   ];
@@ -495,6 +505,8 @@ const sharedTrips: TripWithZone[] = [
     zone_id: 'mtl-cb',
     zone_score: 62,
     platform: 'lyft',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
   },
 ];

@@ -72,6 +72,17 @@ const MAX_EXPECTED_EARNINGS_PER_HOUR = 60;
 const DEFAULT_PRIOR_MEAN = 25;
 const DEFAULT_PRIOR_VARIANCE = 100;
 const OBSERVATION_VARIANCE = 36;
+// Synthetic trips (seedSyntheticTrips.ts) seed a baseline before real data
+// exists. A wider variance = less confidence, so the Bayesian posterior
+// mean naturally swings toward real observations as soon as a few arrive
+// -- no separate "weight" mechanism needed, see CLAUDE.md data-bootstrap plan.
+const SYNTHETIC_OBSERVATION_VARIANCE = 150;
+
+function getObservationVariance(source: TripWithZone['source']) {
+  return source === 'synthetic'
+    ? SYNTHETIC_OBSERVATION_VARIANCE
+    : OBSERVATION_VARIANCE;
+}
 
 function round(value: number, digits = 2) {
   const factor = 10 ** digits;
@@ -156,6 +167,7 @@ function getTripLearningContext(trip: TripWithZone) {
     zoneName: trip.zones?.name ?? 'Zone inconnue',
     dayOfWeek: startedAt.getDay(),
     slotIndex: getSlotIndex(startedAt),
+    source: trip.source ?? 'real',
   };
 }
 
@@ -186,7 +198,8 @@ function buildZoneBelief(
   const nextBelief = updateBayesianBelief(
     previousBelief?.posteriorMean ?? DEFAULT_PRIOR_MEAN,
     previousBelief?.posteriorVariance ?? DEFAULT_PRIOR_VARIANCE,
-    context.earningsPerHour
+    context.earningsPerHour,
+    getObservationVariance(context.source)
   );
 
   return {
@@ -203,7 +216,6 @@ function buildZoneBelief(
 function updateMapsWithTrip(
   emaMap: Map<string, EmaPattern>,
   beliefMap: Map<string, ZoneBelief>,
-  trip: TripWithZone,
   context: ReturnType<typeof getTripLearningContext>
 ) {
   const key = `${context.zoneId}:${context.dayOfWeek}:${context.slotIndex}`;
@@ -221,6 +233,12 @@ function buildPredictionRecord(
   trip: TripWithZone,
   context: ReturnType<typeof getTripLearningContext>
 ): PredictionRecord | null {
+  // Synthetic trips have no real prediction to score against -- the
+  // prediction-accuracy stats (MAE, recentBias) must stay real-data-only.
+  if (context.source === 'synthetic') {
+    return null;
+  }
+
   if (
     context.predictedScoreSource === null ||
     context.predictedScoreSource === undefined
@@ -388,7 +406,7 @@ export function deriveLearningInsights(
       continue;
     }
 
-    updateMapsWithTrip(emaMap, beliefMap, trip, context);
+    updateMapsWithTrip(emaMap, beliefMap, context);
 
     const prediction = buildPredictionRecord(trip, context);
     if (prediction) {

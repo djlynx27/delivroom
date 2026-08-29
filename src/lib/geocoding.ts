@@ -258,6 +258,6 @@ export function suggestZoneName(address: string): string {
   const head = address.split(',')[0]?.trim() ?? address;
   return head
     .split(/\s+/)
-    .map((w) => (w.length > 2 ? w[0].toUpperCase() + w.slice(1).toLowerCase() : w))
+    .map((w) => (w.length > 2 ? w[0]!.toUpperCase() + w.slice(1).toLowerCase() : w))
     .join(' ');
 }

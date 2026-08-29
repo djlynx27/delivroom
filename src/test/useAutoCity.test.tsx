@@ -85,8 +85,8 @@ describe('useAutoCity', () => {
       {
         initialProps: {
           currentCityId: 'mtl',
-          lat: null,
-          lng: null,
+          lat: null as number | null,
+          lng: null as number | null,
         },
       }
     );

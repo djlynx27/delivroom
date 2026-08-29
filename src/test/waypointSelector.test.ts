@@ -81,7 +81,7 @@ describe('selectProspectionWaypoints', () => {
     const candidates = [zone('far-off', 45.3, -73.2, 100)];
     const result = selectProspectionWaypoints(origin, destination, candidates);
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('patrol-sweep');
+    expect(result[0]!.id).toBe('patrol-sweep');
   });
 
   it('returns an empty array when origin equals destination', () => {
@@ -97,14 +97,14 @@ describe('selectProspectionWaypoints', () => {
     const result = selectProspectionWaypoints(origin, destination, []);
 
     expect(result).toHaveLength(1);
-    expect(result[0].id).toBe('patrol-sweep');
+    expect(result[0]!.id).toBe('patrol-sweep');
     // The synthetic point must actually be off the direct line, otherwise
     // Mapbox would just retrace the same route.
     const midLat = (origin.lat + destination.lat) / 2;
     const midLng = (origin.lng + destination.lng) / 2;
     const offLine =
-      Math.abs(result[0].latitude - midLat) > 0.0005 ||
-      Math.abs(result[0].longitude - midLng) > 0.0005;
+      Math.abs(result[0]!.latitude - midLat) > 0.0005 ||
+      Math.abs(result[0]!.longitude - midLng) > 0.0005;
     expect(offLine).toBe(true);
   });
 
@@ -141,14 +141,15 @@ describe('selectProspectionWaypoints', () => {
       (destination.lat - origin.lat) * 110.574,
       (destination.lng - origin.lng) * 78.02
     );
+    const patrolPoint = result[0]!;
     const viaPatrol =
       Math.hypot(
-        (result[0].latitude - origin.lat) * 110.574,
-        (result[0].longitude - origin.lng) * 78.02
+        (patrolPoint.latitude - origin.lat) * 110.574,
+        (patrolPoint.longitude - origin.lng) * 78.02
       ) +
       Math.hypot(
-        (destination.lat - result[0].latitude) * 110.574,
-        (destination.lng - result[0].longitude) * 78.02
+        (destination.lat - patrolPoint.latitude) * 110.574,
+        (destination.lng - patrolPoint.longitude) * 78.02
       );
     expect(viaPatrol).toBeLessThanOrEqual(direct * 1.2 + 0.01);
   });
@@ -232,7 +233,7 @@ describe('selectProspectionWaypoints', () => {
     const legs = [chomedey, ...waypoints.map((w) => ({ lat: w.latitude, lng: w.longitude })), montmorency];
     let totalKm = 0;
     for (let i = 1; i < legs.length; i++) {
-      totalKm += haversineKm(legs[i - 1].lat, legs[i - 1].lng, legs[i].lat, legs[i].lng);
+      totalKm += haversineKm(legs[i - 1]!.lat, legs[i - 1]!.lng, legs[i]!.lat, legs[i]!.lng);
     }
 
     expect(totalKm).toBeLessThanOrEqual(3.5);
@@ -312,7 +313,7 @@ describe('selectProspectionWaypoints', () => {
         onAxisNearDest,
       ]);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('waypoint-b'); // higher score of the two
+      expect(result[0]!.id).toBe('waypoint-b'); // higher score of the two
     });
 
     it('rejects a high-scoring candidate more than 300m off-axis on a short trip', () => {
@@ -338,7 +339,7 @@ describe('selectProspectionWaypoints', () => {
       ];
       let totalKm = 0;
       for (let i = 1; i < legs.length; i++) {
-        totalKm += haversineKm(legs[i - 1].lat, legs[i - 1].lng, legs[i].lat, legs[i].lng);
+        totalKm += haversineKm(legs[i - 1]!.lat, legs[i - 1]!.lng, legs[i]!.lat, legs[i]!.lng);
       }
 
       expect(totalKm).toBeLessThan(3.5);

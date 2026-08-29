@@ -512,7 +512,7 @@ export function generateSimulatedSlots(
       const endM = endMin % 60;
       const endTime = `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
-      const zone = cityZones[slotIndex % cityZones.length];
+      const zone = cityZones[slotIndex % cityZones.length]!;
       const score = generateDemandScore(h, zone.type);
 
       slots.push({

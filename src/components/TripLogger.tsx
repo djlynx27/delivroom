@@ -43,7 +43,7 @@ export function TripLogger() {
   const { data: recentTrips = [] } = useTrips(10);
   const addTrip = useAddTrip();
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toISOString().split('T')[0]!;
   const [form, setForm] = useState({
     zone_id: '',
     date: today,
@@ -264,10 +264,10 @@ export function TripLogger() {
                     {formatTime(trip.started_at)}–
                     {trip.ended_at ? formatTime(trip.ended_at) : '?'}
                   </span>
-                  {trip.distance_km > 0 && (
+                  {(trip.distance_km ?? 0) > 0 && (
                     <span>{Number(trip.distance_km).toFixed(1)} km</span>
                   )}
-                  {trip.tips > 0 && (
+                  {(trip.tips ?? 0) > 0 && (
                     <span>+${Number(trip.tips).toFixed(2)} tips</span>
                   )}
                 </div>

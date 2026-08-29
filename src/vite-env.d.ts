@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 // Injected by vite.config.ts's `define` — short git commit SHA (Vercel's
 // VERCEL_GIT_COMMIT_SHA in production, local `git rev-parse --short HEAD`

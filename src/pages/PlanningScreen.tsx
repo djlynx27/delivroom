@@ -103,7 +103,7 @@ export default function PlanningScreen() {
     const items: SlotItem[] = [];
 
     for (const startTime of timeLabels) {
-      const [hours, minutes] = startTime.split(':').map(Number);
+      const [hours = 0, minutes = 0] = startTime.split(':').map(Number);
       const endDate = new Date(2000, 0, 1, hours, minutes + 15);
       const endTime = formatTime24h(endDate);
 
@@ -127,7 +127,7 @@ export default function PlanningScreen() {
     // Group by HOUR, keep only top 3 zones per hour (best slot per zone)
     const hourGroups = new Map<number, SlotItem[]>();
     for (const item of items) {
-      const [h] = item.start_time.split(':').map(Number);
+      const [h = 0] = item.start_time.split(':').map(Number);
       const arr = hourGroups.get(h) ?? [];
       arr.push(item);
       hourGroups.set(h, arr);

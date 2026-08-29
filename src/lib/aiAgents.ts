@@ -94,7 +94,7 @@ export function applyLearningAgents(
             100,
             Math.max(
               0,
-              adjusted.get(zone.id)! + state.zoneWeightAdjustments[zone.id]
+              adjusted.get(zone.id)! + (state.zoneWeightAdjustments[zone.id] ?? 0)
             )
           )
         );

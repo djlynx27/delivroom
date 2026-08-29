@@ -418,7 +418,7 @@ export function AdminSimulationCard() {
   const { data: cities = [] } = useCities();
   const [simCityId, setSimCityId] = useState('mtl');
   const [simDate, setSimDate] = useState(
-    () => new Date().toISOString().split('T')[0]
+    () => new Date().toISOString().split('T')[0]!
   );
   const { data: zones = [] } = useZones(simCityId);
   const bulkInsert = useBulkInsertTimeSlots();
@@ -459,6 +459,7 @@ export function AdminSimulationCard() {
       let totalSlots = 0;
       for (let index = 0; index < cities.length; index++) {
         const city = cities[index];
+        if (!city) continue;
         setSimProgress({
           current: index,
           total: cities.length,
@@ -700,7 +701,15 @@ export function AdminExternalDataCard() {
                   className="rounded-md border border-border bg-background p-2 text-xs"
                 >
                   <p className="font-semibold">{place.name}</p>
-                  <p>{place.location?.formatted_address || '—'}</p>
+                  <p>
+                    {[
+                      place.location?.address,
+                      place.location?.locality,
+                      place.location?.region,
+                    ]
+                      .filter(Boolean)
+                      .join(', ') || '—'}
+                  </p>
                 </div>
               ))}
             </div>

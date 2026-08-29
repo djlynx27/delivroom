@@ -44,7 +44,7 @@ describe('fetchRoute', () => {
       { lat: 45.55, lng: -73.6 },
     ]);
 
-    const calledUrl = vi.mocked(fetch).mock.calls[0][0] as string;
+    const calledUrl = vi.mocked(fetch).mock.calls[0]![0] as string;
     expect(calledUrl).toContain(
       'https://api.mapbox.com/directions/v5/mapbox/driving-traffic/-73.57,45.51;-73.6,45.55'
     );

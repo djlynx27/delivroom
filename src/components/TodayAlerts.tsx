@@ -359,7 +359,7 @@ function ContextualAlerts({
       )}
       {hasMontrealGame && <CanadiensGameAlert message={t('canadiensGame')} />}
       {hasYulWave && (
-        <YulWaveAlert message={yulStatus.currentWave.rideshareImpact} />
+        <YulWaveAlert message={yulStatus!.currentWave!.rideshareImpact} />
       )}
       {stmStatus?.hasDisruption && (
         <StmStatusAlert alertCount={stmStatus.alertCount} />

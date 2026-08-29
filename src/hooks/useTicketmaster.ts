@@ -98,12 +98,12 @@ export function useTicketmasterEvents(cityId: string) {
       return embedded
         .map((ev) => {
           const venue = ev._embedded?.venues?.[0];
-          if (!venue?.location) return null;
+          if (!venue?.location?.latitude || !venue.location.longitude) return null;
 
           const venueName = venue.name ?? '';
           const lat = parseFloat(venue.location.latitude);
           const lng = parseFloat(venue.location.longitude);
-          if (isNaN(lat) || isNaN(lng)) return null;
+          if (isNaN(lat) || isNaN(lng) || !ev.id) return null;
 
           const startDate =
             ev.dates?.start?.dateTime ?? ev.dates?.start?.localDate ?? '';
@@ -114,7 +114,7 @@ export function useTicketmasterEvents(cityId: string) {
 
           return {
             id: ev.id,
-            name: ev.name,
+            name: ev.name ?? '',
             venueName,
             latitude: lat,
             longitude: lng,

@@ -145,7 +145,7 @@ function normalizeTimeString(value: string): string {
   );
   if (!match) return '';
 
-  let hour = Number.parseInt(match[1], 10);
+  let hour = Number.parseInt(match[1]!, 10);
   const minute = Number.parseInt(match[2] ?? '0', 10);
   const second = Number.parseInt(match[3] ?? '0', 10);
   const meridiem = match[4]?.toLowerCase();
@@ -257,7 +257,7 @@ export function CsvImporter() {
           try {
             if (startTime) {
               const timeParts = startTime.match(/(\d{2}):(\d{2})/);
-              if (timeParts) hour = Number.parseInt(timeParts[1], 10);
+              if (timeParts) hour = Number.parseInt(timeParts[1]!, 10);
             }
             if (dateStr) {
               const d = new Date(dateStr);

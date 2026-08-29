@@ -19,6 +19,7 @@ const sessions = [
     total_rides: 6,
     notes: null,
     weather_snapshot: null,
+    user_id: null,
   },
   {
     id: 2,
@@ -30,6 +31,7 @@ const sessions = [
     total_rides: 5,
     notes: null,
     weather_snapshot: null,
+    user_id: null,
   },
 ];
 
@@ -45,7 +47,10 @@ const trips: TripWithZone[] = [
     started_at: '2026-03-15T08:00:00',
     tips: 5,
     zone_id: 'downtown',
+    zone_score: null,
     platform: 'lyft',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Downtown' },
   },
   {
@@ -59,7 +64,10 @@ const trips: TripWithZone[] = [
     started_at: '2026-03-16T18:00:00',
     tips: 0,
     zone_id: 'plateau',
+    zone_score: null,
     platform: 'uber',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Plateau' },
   },
   {
@@ -73,7 +81,10 @@ const trips: TripWithZone[] = [
     started_at: '2026-03-16T22:00:00',
     tips: 2,
     zone_id: 'plateau',
+    zone_score: null,
     platform: 'uber',
+    source: 'real',
+    user_id: null,
     zones: { name: 'Plateau' },
   },
 ];
@@ -100,7 +111,7 @@ describe('trip analytics', () => {
 
     expect(analytics.bestZone).toBe('Plateau');
     expect(analytics.bestPlatform).toBe('uber');
-    expect(analytics.zoneSeries[0].revenue).toBe(45);
+    expect(analytics.zoneSeries[0]!.revenue).toBe(45);
   });
 
   it('keeps all dayparts in analytics, including those with zero rides', () => {
@@ -139,7 +150,7 @@ describe('trip analytics', () => {
 
   it('does not treat missing ended_at as an hours-long active trip', () => {
     const incompleteTrip: TripWithZone = {
-      ...trips[0],
+      ...trips[0]!,
       id: '4',
       started_at: '2026-03-16T10:00:00',
       ended_at: null,
@@ -174,16 +185,19 @@ describe('trip analytics', () => {
   });
 
   it('skips sessions with missing started_at or ended_at', () => {
+    // started_at is NOT NULL in the real schema — this simulates a corrupt
+    // row defensively, which is exactly what this test exercises.
     const incompleteSession = {
       id: 99,
       created_at: '2026-03-17T10:00:00',
-      started_at: null,
+      started_at: null as unknown as string,
       ended_at: null,
       total_earnings: 50,
       total_hours: 0,
       total_rides: 2,
       notes: null,
       weather_snapshot: null,
+      user_id: null,
     };
 
     const summary = summarizeTrackedSessions(
@@ -209,6 +223,7 @@ describe('trip analytics', () => {
       total_rides: 3,
       notes: null,
       weather_snapshot: null,
+      user_id: null,
     };
 
     const summary = summarizeTrackedSessions(
@@ -224,7 +239,7 @@ describe('trip analytics', () => {
   it('merges zone buckets with inconsistent casing into single bucket', () => {
     const mixedCaseTrips: TripWithZone[] = [
       {
-        ...trips[0],
+        ...trips[0]!,
         id: '10',
         started_at: '2026-03-01T10:00:00',
         ended_at: '2026-03-01T10:30:00',
@@ -233,7 +248,7 @@ describe('trip analytics', () => {
         zones: { name: 'downtown' },
       },
       {
-        ...trips[0],
+        ...trips[0]!,
         id: '11',
         started_at: '2026-03-01T12:00:00',
         ended_at: '2026-03-01T12:30:00',
@@ -242,7 +257,7 @@ describe('trip analytics', () => {
         zones: { name: 'Downtown' },
       },
       {
-        ...trips[0],
+        ...trips[0]!,
         id: '12',
         started_at: '2026-03-01T14:00:00',
         ended_at: '2026-03-01T14:30:00',
@@ -258,7 +273,7 @@ describe('trip analytics', () => {
     );
     // All 3 trips should merge into one zone bucket — revenue = 60
     expect(analytics.zoneSeries).toHaveLength(1);
-    expect(analytics.zoneSeries[0].revenue).toBe(60);
-    expect(analytics.zoneSeries[0].rides).toBe(3);
+    expect(analytics.zoneSeries[0]!.revenue).toBe(60);
+    expect(analytics.zoneSeries[0]!.rides).toBe(3);
   });
 });

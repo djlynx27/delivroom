@@ -66,7 +66,7 @@ function readStoredEarnings(): Earning[] {
         date:
           typeof item.date === 'string'
             ? item.date
-            : new Date().toISOString().split('T')[0],
+            : new Date().toISOString().split('T')[0]!,
         amount: Number(item.amount ?? 0),
         km: Number(item.km ?? 0),
         duration_min: Number(item.duration_min ?? 0),
@@ -92,15 +92,15 @@ function useEarnings(period: 'day' | 'week' | 'month') {
   const now = new Date();
   let from: string;
   if (period === 'day') {
-    from = now.toISOString().split('T')[0];
+    from = now.toISOString().split('T')[0]!;
   } else if (period === 'week') {
     const d = new Date(now);
     d.setDate(d.getDate() - 7);
-    from = d.toISOString().split('T')[0];
+    from = d.toISOString().split('T')[0]!;
   } else {
     const d = new Date(now);
     d.setDate(d.getDate() - 30);
-    from = d.toISOString().split('T')[0];
+    from = d.toISOString().split('T')[0]!;
   }
 
   return useQuery<Earning[]>({
@@ -158,7 +158,7 @@ export function ModeTaxi() {
 
   // Earnings form
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: new Date().toISOString().split('T')[0]!,
     amount: '',
     km: '',
     durationMin: '',
@@ -249,7 +249,7 @@ export function ModeTaxi() {
         note: form.note,
       });
       setForm({
-        date: new Date().toISOString().split('T')[0],
+        date: new Date().toISOString().split('T')[0]!,
         amount: '',
         km: '',
         durationMin: '',
@@ -294,7 +294,7 @@ export function ModeTaxi() {
 
     try {
       await addEarning.mutateAsync({
-        date: new Date().toISOString().split('T')[0],
+        date: new Date().toISOString().split('T')[0]!,
         amount: 0,
         km: Math.round(km * 10) / 10,
         duration_min: durationMin,

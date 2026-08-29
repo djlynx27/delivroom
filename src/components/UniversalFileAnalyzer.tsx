@@ -85,7 +85,7 @@ export function UniversalFileAnalyzer() {
   // Auto-select first zone pour simplifier upload statements sans interaction
   useEffect(() => {
     if (!zoneId && allZones.length > 0) {
-      setZoneId(allZones[0].id);
+      setZoneId(allZones[0]!.id);
     }
   }, [allZones, zoneId]);
   const [urlInput, setUrlInput] = useState('');
@@ -236,7 +236,7 @@ export function UniversalFileAnalyzer() {
       setResult(analysis);
 
       if (analysis.zones_detected?.length) {
-        const found = analysis.zones_detected[0];
+        const found = analysis.zones_detected[0]!;
         const matched = allZones.find((z) =>
           z.name.toLowerCase().includes(found.area.toLowerCase())
         );
@@ -316,7 +316,7 @@ export function UniversalFileAnalyzer() {
         toast.success('Rapport quotidien généré');
       } else if (target === 'profit') {
         const ed = result.extracted_data || {};
-        const today = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0]!;
         const { data: existingReport, error: fetchErr } = await supabase
           .from('daily_reports')
           .select(

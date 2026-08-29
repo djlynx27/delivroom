@@ -50,7 +50,7 @@ function ReportHighlights({ report }: { report: DailyReportRow }) {
           </span>
         )}
       </div>
-      {report.dead_time_pct > 0 && (
+      {(report.dead_time_pct ?? 0) > 0 && (
         <div className="text-[12px] text-yellow-500">
           ⏱️ Temps mort: {Number(report.dead_time_pct).toFixed(0)}%
         </div>

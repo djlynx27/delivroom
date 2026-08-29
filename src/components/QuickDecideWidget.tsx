@@ -58,7 +58,7 @@ export function QuickDecideWidget() {
     if (!decision) return;
     if (decision.verdict !== lastVerdict) {
       setLastVerdict(decision.verdict);
-      vibrate(decision.verdict === 'take' ? 'success' : decision.verdict === 'skip' ? 'error' : 'newOrder');
+      vibrate(decision.verdict === 'take' ? 'completed' : decision.verdict === 'skip' ? 'error' : 'newOrder');
     }
   }, [decision, lastVerdict, vibrate]);
 
@@ -79,7 +79,7 @@ export function QuickDecideWidget() {
     }
     setListening(true);
     rec.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
+      const transcript = event.results[0]![0]!.transcript;
       const parsed = parseVoiceTranscript(transcript);
       if (parsed.fare != null) setFare(parsed.fare.toString());
       if (parsed.rideKm != null) setRideKm(parsed.rideKm.toString());

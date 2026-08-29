@@ -32,7 +32,7 @@ function parseCsvRows(text: string): string[][] {
   let inQuotes = false;
 
   for (let index = 0; index < source.length; index += 1) {
-    const char = source[index];
+    const char = source[index]!;
 
     if (char === '"') {
       if (isEscapedQuote(source, index, inQuotes)) {
@@ -75,7 +75,7 @@ export function parseCsvRecords(text: string): Record<string, string>[] {
   const rows = parseCsvRows(text);
   if (rows.length < 2) return [];
 
-  const headers = rows[0].map(normalizeHeader);
+  const headers = rows[0]!.map(normalizeHeader);
   return rows.slice(1).map((row) => {
     const record: Record<string, string> = {};
     headers.forEach((header, index) => {

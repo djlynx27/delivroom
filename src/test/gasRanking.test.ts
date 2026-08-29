@@ -93,9 +93,9 @@ describe('toRankedStations', () => {
   });
 
   it('calcule distance et score de compromis', () => {
-    const ranked = rank([FLEET[0]]);
-    expect(ranked[0].distance_km).toBeGreaterThan(0);
-    expect(ranked[0].cost_score).toBeGreaterThan(ranked[0].price);
+    const ranked = rank([FLEET[0]!]);
+    expect(ranked[0]!.distance_km).toBeGreaterThan(0);
+    expect(ranked[0]!.cost_score).toBeGreaterThan(ranked[0]!.price);
   });
 });
 
@@ -119,7 +119,7 @@ describe('groupByCity', () => {
       LAVAL_USER.lat,
       LAVAL_USER.lng
     );
-    expect(groups[0].city).toBe('Saint-Lin–Laurentides');
+    expect(groups[0]!.city).toBe('Saint-Lin–Laurentides');
   });
 
   it('trie les villes par proximité', () => {
@@ -159,20 +159,20 @@ describe('buildGasBoard', () => {
     });
 
     expect(board.userCity).toBe('Laval');
-    expect(board.slots[0].kind).toBe('nearest-cheapest');
-    expect(board.slots[0].city).toBe('Laval');
-    expect(board.slots[0].station.brand).toBe('Shell');
+    expect(board.slots[0]!.kind).toBe('nearest-cheapest');
+    expect(board.slots[0]!.city).toBe('Laval');
+    expect(board.slots[0]!.station.brand).toBe('Shell');
 
-    expect(board.slots[1].kind).toBe('city-cheapest');
-    expect(board.slots[1].city).toBe('Laval');
-    expect(board.slots[1].station.brand).toBe('Costco');
+    expect(board.slots[1]!.kind).toBe('city-cheapest');
+    expect(board.slots[1]!.city).toBe('Laval');
+    expect(board.slots[1]!.station.brand).toBe('Costco');
 
     const others = board.slots.slice(2);
     expect(others.every((s) => s.kind === 'other-city-cheapest')).toBe(true);
     expect(others.map((s) => s.city)).toEqual(['Montréal', 'Longueuil', 'Terrebonne']);
     // Dans chaque autre ville, c'est bien le prix le plus bas.
-    expect(others[0].station.brand).toBe('Ultramar');
-    expect(others[1].station.brand).toBe('Crevier');
+    expect(others[0]!.station.brand).toBe('Ultramar');
+    expect(others[1]!.station.brand).toBe('Crevier');
   });
 
   it('inverse l’ordre des villes quand on part de Montréal', () => {
@@ -208,7 +208,7 @@ describe('buildGasBoard', () => {
     ];
     expect(brands).not.toContain('Costco');
     expect(brands).not.toContain('Shell');
-    expect(board.slots[0].station.brand).toBe('Esso');
+    expect(board.slots[0]!.station.brand).toBe('Esso');
   });
 
   it('préfère une station ouverte à une station d’horaire inconnu, même moins chère', () => {
@@ -235,12 +235,12 @@ describe('buildGasBoard', () => {
       statusOf: (s) => (s.cityKey === 'laval' ? UNKNOWN : OPEN),
     });
 
-    expect(board.slots[0].status.state).toBe('unknown');
+    expect(board.slots[0]!.status.state).toBe('unknown');
     expect(board.hasUnknownHours).toBe(true);
   });
 
   it('fusionne les deux premiers slots quand la plus proche est aussi la moins chère', () => {
-    const onlyOne = [station('Shell', 'Laval', 45.5599, -73.7273, 1.629), FLEET[3]];
+    const onlyOne = [station('Shell', 'Laval', 45.5599, -73.7273, 1.629), FLEET[3]!];
     const board = buildGasBoard({
       stations: toRankedStations(onlyOne, LAVAL_USER.lat, LAVAL_USER.lng, 'regular'),
       userLat: LAVAL_USER.lat,
@@ -248,7 +248,7 @@ describe('buildGasBoard', () => {
       statusOf: allOpen,
     });
 
-    expect(board.slots[0].alsoCheapestInCity).toBe(true);
+    expect(board.slots[0]!.alsoCheapestInCity).toBe(true);
     expect(board.slots.filter((s) => s.kind === 'city-cheapest')).toHaveLength(0);
   });
 
@@ -309,10 +309,10 @@ describe('selectOtherCityGroups', () => {
     );
     const groups = groupByCity(ranked, LAVAL_USER.lat, LAVAL_USER.lng);
     // Mont-Royal est plus proche que Montréal…
-    expect(groups.filter((g) => g.cityKey !== 'laval')[0].cityKey).toBe('mont-royal');
+    expect(groups.filter((g) => g.cityKey !== 'laval')[0]!.cityKey).toBe('mont-royal');
     // …mais c'est bien Montréal qui est proposée en destination.
     const selected = selectOtherCityGroups(groups, 'laval');
-    expect(selected[0].cityKey).toBe('montreal');
+    expect(selected[0]!.cityKey).toBe('montreal');
   });
 
   it('retombe sur les villes les plus proches quand aucune n’atteint le seuil', () => {

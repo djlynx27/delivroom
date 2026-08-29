@@ -32,7 +32,7 @@ export function formatTime24h(date: Date): string {
 
 export function getSlotOrderMinutes(time: string): number {
   const normalizedTime = normalize24hTime(time);
-  const [hours, minutes] = normalizedTime.split(':').map(Number);
+  const [hours = 0, minutes = 0] = normalizedTime.split(':').map(Number);
   const totalMinutes = hours * 60 + minutes;
 
   return totalMinutes >= 360 ? totalMinutes - 360 : totalMinutes + 1080;
@@ -102,7 +102,7 @@ export function getCurrentSlotTime(now: Date = new Date()): {
   const end = new Date(start);
   end.setMinutes(end.getMinutes() + 15);
 
-  const date = start.toISOString().split('T')[0];
+  const date = start.toISOString().split('T')[0]!;
   return { start: formatTime24h(start), end: formatTime24h(end), date };
 }
 
@@ -196,7 +196,7 @@ export function createSimulatedSlotForTime(
   zones: Zone;
 } {
   const startTime = normalize24hTime(time);
-  const [hours, minutes] = startTime.split(':').map(Number);
+  const [hours = 0, minutes = 0] = startTime.split(':').map(Number);
   const endDate = new Date(2000, 0, 1, hours, minutes + 15);
 
   return {
@@ -221,7 +221,7 @@ export function generateSimulatedSlots(
   const slots: TablesInsert<'time_slots'>[] = [];
 
   for (const startTime of generate96TimeLabels()) {
-    const [hours, minutes] = startTime.split(':').map(Number);
+    const [hours = 0, minutes = 0] = startTime.split(':').map(Number);
     const endDate = new Date(2000, 0, 1, hours, minutes + 15);
 
     for (const zone of zones) {

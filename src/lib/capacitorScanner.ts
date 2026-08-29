@@ -14,6 +14,15 @@ import { LocalNotifications } from '@capacitor/local-notifications';
 
 const RUNNER_LABEL = 'com.delivroom.app.scanner';
 
+// @capacitor/background-runner dropped `.set()` from its TS definitions
+// (KV-store API), but Capacitor plugin bridges dispatch by method-name
+// string regardless of the declared TS interface, so the native side may
+// still implement it. Narrow, explicit type instead of `any` to keep this
+// call compiling without pretending the whole plugin surface changed.
+type RunnerWithKvStore = typeof BackgroundRunner & {
+  set(options: { label: string; key: string; value: string }): Promise<void>;
+};
+
 /**
  * Mirror a value into the background runner's KV store so the periodic
  * runners/maxymo-scan.js can read it. Safe to call when not running on
@@ -21,12 +30,13 @@ const RUNNER_LABEL = 'com.delivroom.app.scanner';
  */
 async function syncToRunner(key: string, value: string | null): Promise<void> {
   if (!isNative()) return;
+  const runner = BackgroundRunner as RunnerWithKvStore;
   try {
     if (value === null) {
       // No documented delete; setting to empty string is the workaround
-      await BackgroundRunner.set({ label: RUNNER_LABEL, key, value: '' });
+      await runner.set({ label: RUNNER_LABEL, key, value: '' });
     } else {
-      await BackgroundRunner.set({ label: RUNNER_LABEL, key, value });
+      await runner.set({ label: RUNNER_LABEL, key, value });
     }
   } catch (err) {
     console.warn('[capacitorScanner] syncToRunner failed', key, err);

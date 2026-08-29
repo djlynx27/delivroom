@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import type { TablesInsert } from '@/integrations/supabase/types';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { normalizeStartedAt, resolveZoneIdFromAnalysis } from '@/lib/tripSave';
 import { useQueryClient } from '@tanstack/react-query';
@@ -439,7 +440,7 @@ export function BulkScreenshotUploader() {
 
     setSavingTrips(true);
     try {
-      const rows: { id: string; row: Record<string, unknown> }[] = [];
+      const rows: { id: string; row: TablesInsert<'trips'> }[] = [];
       let skippedNoZone = 0;
       for (const it of candidates) {
         const a = it.analysis;

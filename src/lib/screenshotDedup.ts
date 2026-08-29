@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { Json } from '@/integrations/supabase/types';
 
 export interface ExistingUpload {
   id: string;
@@ -78,7 +79,7 @@ export async function recordUpload(
       mime_type: input.mimeType,
       source: input.source,
       analyzed_at: input.analysisResult ? new Date().toISOString() : null,
-      analysis_result: input.analysisResult ?? null,
+      analysis_result: (input.analysisResult ?? null) as Json | null,
       trip_id: input.tripId ?? null,
     })
     .select('id')

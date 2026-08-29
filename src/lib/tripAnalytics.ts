@@ -91,7 +91,7 @@ export function getTripRevenue(trip: Pick<TripWithZone, 'earnings' | 'tips'>) {
 }
 
 export function getTripHours(
-  trip: Pick<TripWithZone, 'started_at' | 'ended_at'>,
+  trip: { started_at: string | null; ended_at: string | null },
   fallbackEnd?: Date
 ) {
   const startedAt = toDate(trip.started_at);

@@ -171,9 +171,10 @@ export function useHourlyForecast(cityId: string, hours = 24) {
       for (let i = startIndex; i < startIndex + hours && i < times.length; i++) {
         const code = codes[i] ?? 0;
         const meta = getWeatherMeta(code);
-        const hh = parseInt(times[i].slice(11, 13), 10);
+        const timeAt = times[i]!;
+        const hh = parseInt(timeAt.slice(11, 13), 10);
         out.push({
-          time: times[i],
+          time: timeAt,
           label: `${hh}h`,
           temp: Math.round(temps[i] ?? 0),
           precipProbability: probs[i] ?? 0,

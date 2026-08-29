@@ -19,6 +19,9 @@ const trips: TripWithZone[] = [
     tips: 6,
     zone_id: 'mtl-cb',
     zone_score: 62,
+    platform: null,
+    source: 'real',
+    user_id: null,
     zones: { name: 'Centre Bell', current_score: 60 },
   },
   {
@@ -33,6 +36,9 @@ const trips: TripWithZone[] = [
     tips: 2,
     zone_id: 'mtl-bq',
     zone_score: 55,
+    platform: null,
+    source: 'real',
+    user_id: null,
     zones: { name: 'Station Berri-UQAM', current_score: 53 },
   },
   {
@@ -47,6 +53,9 @@ const trips: TripWithZone[] = [
     tips: 4,
     zone_id: 'mtl-cb',
     zone_score: 64,
+    platform: null,
+    source: 'real',
+    user_id: null,
     zones: { name: 'Centre Bell', current_score: 60 },
   },
 ];
@@ -95,7 +104,7 @@ describe('learning engine', () => {
       [
         ...trips,
         {
-          ...trips[0],
+          ...trips[0]!,
           id: '4',
           started_at: '2026-03-18T10:00:00.000Z',
           ended_at: null,
@@ -117,9 +126,11 @@ describe('learning engine', () => {
       [
         ...trips,
         {
-          ...trips[0],
+          ...trips[0]!,
           id: '5',
           zone_score: null,
+          source: 'real',
+          user_id: null,
           zones: { name: 'Centre Bell', current_score: null },
         },
       ],
@@ -157,6 +168,9 @@ function makeTrip(
     tips: 0,
     zone_id: 'test-zone',
     zone_score: zoneScore,
+    platform: null,
+    source: 'real',
+    user_id: null,
     zones: { name: 'Test Zone', current_score: zoneScore },
   };
 }

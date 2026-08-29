@@ -75,8 +75,8 @@ describe('getDriveRoute (prospection mode)', () => {
     const route = await getDriveRoute(origin, destination, [], 'prospection');
 
     expect(route.waypointsUsed).toHaveLength(1);
-    expect(route.waypointsUsed[0].id).toBe('patrol-sweep');
-    expect(Number.isFinite(route.waypointsUsed[0].latitude)).toBe(true);
-    expect(Number.isFinite(route.waypointsUsed[0].longitude)).toBe(true);
+    expect(route.waypointsUsed[0]!.id).toBe('patrol-sweep');
+    expect(Number.isFinite(route.waypointsUsed[0]!.latitude)).toBe(true);
+    expect(Number.isFinite(route.waypointsUsed[0]!.longitude)).toBe(true);
   });
 });

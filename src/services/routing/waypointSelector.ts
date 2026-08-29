@@ -290,7 +290,7 @@ export function selectProspectionWaypoints(
     const points = [originVec, ...ordered.map((s) => s.vec), destVec];
     let total = 0;
     for (let i = 1; i < points.length; i++) {
-      total += distanceKm(points[i - 1], points[i]);
+      total += distanceKm(points[i - 1]!, points[i]!);
     }
     return total;
   }

@@ -26,14 +26,17 @@ export function usePullToRefresh(onRefresh: () => void, thresholdPx = 60) {
     let lastY = 0;
 
     function onTouchStart(e: TouchEvent) {
-      if (el.scrollTop === 0 && !pulling.current) {
-        startY.current = e.touches[0].clientY;
+      const touch = e.touches[0];
+      if (touch && el.scrollTop === 0 && !pulling.current) {
+        startY.current = touch.clientY;
         pulling.current = true;
       }
     }
     function onTouchMove(e: TouchEvent) {
       if (!pulling.current || startY.current == null) return;
-      const deltaY = e.touches[0].clientY - startY.current;
+      const touch = e.touches[0];
+      if (!touch) return;
+      const deltaY = touch.clientY - startY.current;
       lastY = deltaY;
       // Optionally: show a visual indicator here
     }

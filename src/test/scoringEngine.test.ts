@@ -1,4 +1,5 @@
 import type { ZoneHistory } from '@/lib/aiAgents';
+import type { Zone } from '@/hooks/useSupabase';
 import {
   calculateDemandFactors,
   calculateWeightedDemandScore,
@@ -107,9 +108,6 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 502,
       temp: 5,
-      precipMm: 15,
-      windKph: 20,
-      condition: 'rain',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.4);
   });
@@ -118,9 +116,6 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 601,
       temp: -5,
-      precipMm: 5,
-      windKph: 10,
-      condition: 'snow',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.4);
   });
@@ -129,9 +124,6 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 210,
       temp: 15,
-      precipMm: 20,
-      windKph: 30,
-      condition: 'storm',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.4);
   });
@@ -140,9 +132,6 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 300,
       temp: 8,
-      precipMm: 3,
-      windKph: 5,
-      condition: 'drizzle',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.15);
   });
@@ -151,9 +140,6 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 800,
       temp: -20,
-      precipMm: 0,
-      windKph: 0,
-      condition: 'clear',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.25);
   });
@@ -162,16 +148,13 @@ describe('getWeatherMultiplier', () => {
     const weather: WeatherCondition = {
       weatherId: 800,
       temp: 15,
-      precipMm: 0,
-      windKph: 5,
-      condition: 'clear',
     };
     expect(getWeatherMultiplier(weather)).toBe(1.0);
   });
 });
 
 describe('scoreAllZones', () => {
-  const zones = [
+  const zones: Zone[] = [
     {
       id: 'z1',
       name: 'Plateau',
@@ -180,10 +163,12 @@ describe('scoreAllZones', () => {
       longitude: -73.58,
       city_id: 'mtl',
       created_at: '',
-      demand_weight: 1,
-      display_order: 1,
-      is_active: true,
-      radius_km: 2,
+      updated_at: '',
+      address: null,
+      base_score: null,
+      category: null,
+      current_score: null,
+      territory: null,
     },
     {
       id: 'z2',
@@ -193,10 +178,12 @@ describe('scoreAllZones', () => {
       longitude: -73.74,
       city_id: 'mtl',
       created_at: '',
-      demand_weight: 1,
-      display_order: 2,
-      is_active: true,
-      radius_km: 5,
+      updated_at: '',
+      address: null,
+      base_score: null,
+      category: null,
+      current_score: null,
+      territory: null,
     },
   ];
 
@@ -237,7 +224,7 @@ describe('scoreAllZones', () => {
 });
 
 describe('scoreAllZonesWithLearning', () => {
-  const fullZones = [
+  const fullZones: Zone[] = [
     {
       id: 'z1',
       name: 'Plateau',
@@ -246,10 +233,12 @@ describe('scoreAllZonesWithLearning', () => {
       longitude: -73.58,
       city_id: 'mtl',
       created_at: '',
-      demand_weight: 1,
-      display_order: 1,
-      is_active: true,
-      radius_km: 2,
+      updated_at: '',
+      address: null,
+      base_score: null,
+      category: null,
+      current_score: null,
+      territory: null,
     },
     {
       id: 'z2',
@@ -259,10 +248,12 @@ describe('scoreAllZonesWithLearning', () => {
       longitude: -73.5694,
       city_id: 'mtl',
       created_at: '',
-      demand_weight: 1,
-      display_order: 2,
-      is_active: true,
-      radius_km: 2,
+      updated_at: '',
+      address: null,
+      base_score: null,
+      category: null,
+      current_score: null,
+      territory: null,
     },
   ];
 
@@ -548,8 +539,6 @@ describe('getWeatherFactor coverage — via computeDemandScore', () => {
     const weather: WeatherCondition = {
       weatherId: 800,
       temp: 5,
-      precipMm: 0,
-      condition: 'clear',
       demandBoostPoints: 25,
     };
     const { score: withBoost } = computeDemandScore(
@@ -569,8 +558,6 @@ describe('getWeatherFactor coverage — via computeDemandScore', () => {
     const snow: WeatherCondition = {
       weatherId: 601,
       temp: -5,
-      precipMm: 5,
-      condition: 'snow',
     };
     const { factors } = computeDemandScore(
       zone,
@@ -584,8 +571,6 @@ describe('getWeatherFactor coverage — via computeDemandScore', () => {
     const thunder: WeatherCondition = {
       weatherId: 210,
       temp: 10,
-      precipMm: 30,
-      condition: 'storm',
     };
     const { factors } = computeDemandScore(
       zone,
@@ -1065,7 +1050,7 @@ describe('reweightZonesByDriverMode', () => {
     const residential = result.find((z) => z.id === 'r')!;
     expect(airport.score).toBeGreaterThan(residential.score);
     // sorted descending by the reweighted score
-    expect(result[0].score).toBeGreaterThanOrEqual(result[1].score);
+    expect(result[0]!.score).toBeGreaterThanOrEqual(result[1]!.score);
   });
 
   it('boosts residential over airport for delivery mode', () => {
@@ -1080,7 +1065,7 @@ describe('reweightZonesByDriverMode', () => {
       [{ id: 'x', type: 'unknown-type', score: 42 }],
       'rideshare'
     );
-    expect(result[0].score).toBe(42);
+    expect(result[0]!.score).toBe(42);
   });
 
   it('caps the reweighted score at 100', () => {
@@ -1088,6 +1073,6 @@ describe('reweightZonesByDriverMode', () => {
       [{ id: 'a', type: 'aéroport', score: 95 }],
       'rideshare'
     );
-    expect(result[0].score).toBeLessThanOrEqual(100);
+    expect(result[0]!.score).toBeLessThanOrEqual(100);
   });
 });

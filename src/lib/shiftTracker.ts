@@ -59,7 +59,7 @@ export function saveShift(tally: ShiftTally): void {
 export function recordRide(ride: Omit<ShiftRide, 'ts'>): ShiftTally {
   const tally = loadShift();
   tally.rides.push({ ts: Date.now(), ...ride });
-  if (!tally.startedAt) tally.startedAt = tally.rides[0].ts;
+  if (!tally.startedAt) tally.startedAt = tally.rides[0]!.ts;
   saveShift(tally);
   return tally;
 }

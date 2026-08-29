@@ -120,7 +120,16 @@ export default function ZonesScreen() {
           longitude: coordinates.longitude,
         });
       } else {
+        // zones.id has no DB default (NOT NULL, no sequence/uuid default) —
+        // matches the "cityprefix-slug" convention used by every seeded zone.
+        const slug = form.name
+          .normalize('NFD')
+          .replace(/[̀-ͯ]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '');
         await addZone.mutateAsync({
+          id: `${cityId}-${slug}`,
           city_id: cityId,
           name: form.name,
           type: form.type as ZoneType,
@@ -146,8 +155,8 @@ export default function ZonesScreen() {
 
   const mapCenter =
     zones.length > 0
-      ? ([zones[0].latitude, zones[0].longitude] as [number, number])
-      : (CITY_CENTERS[cityId] ?? CITY_CENTERS.mtl);
+      ? ([zones[0]!.latitude, zones[0]!.longitude] as [number, number])
+      : (CITY_CENTERS[cityId] ?? CITY_CENTERS.mtl!);
 
   const filteredZones = search.trim()
     ? zones.filter(

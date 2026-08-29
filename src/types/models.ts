@@ -54,6 +54,6 @@ export function getCurrentSlotTime(): { start: string; end: string; date: string
   end.setMinutes(end.getMinutes() + 15);
 
   const fmt = (d: Date) => d.toTimeString().slice(0, 5);
-  const date = start.toISOString().split('T')[0];
+  const date = start.toISOString().split('T')[0]!;
   return { start: fmt(start), end: fmt(end), date };
 }

@@ -357,7 +357,7 @@ export function buildGasBoard(params: {
       });
     } else if (nearest) {
       // Le compromis EST déjà le moins cher de la ville : on fusionne les slots.
-      slots[0].alsoCheapestInCity = true;
+      slots[0]!.alsoCheapestInCity = true;
     }
   }
 

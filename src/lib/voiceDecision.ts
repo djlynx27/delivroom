@@ -42,7 +42,7 @@ export function parseVoiceTranscript(raw: string): VoiceParseResult {
   let inPickup = false;
 
   for (let i = 0; i < tokens.length; i++) {
-    const tok = tokens[i];
+    const tok = tokens[i]!;
     if (tok === 'pickup' || tok === 'pickup' || tok === 'ramassage' || tok === 'recherche') {
       inPickup = true;
       continue;
@@ -84,7 +84,7 @@ function parseNumberToken(tok: string): number | null {
   const num = parseFloat(tok.replace(',', '.'));
   if (Number.isFinite(num)) return num;
   // French number words
-  if (tok in FR_NUMBER_WORDS) return FR_NUMBER_WORDS[tok];
+  if (tok in FR_NUMBER_WORDS) return FR_NUMBER_WORDS[tok] ?? null;
   return null;
 }
 
@@ -108,20 +108,24 @@ interface SpeechRecognitionLike {
 
 type SpeechRecognitionCtor = new () => SpeechRecognitionLike;
 
-interface WindowWithSpeech extends Window {
+// Deliberately NOT `extends Window` — the real DOM lib's global
+// SpeechRecognition constructor type requires an `abort` method our
+// minimal SpeechRecognitionLike doesn't declare (we only use start/stop),
+// so extending Window forces an incompatible redeclaration.
+interface WindowWithSpeech {
   SpeechRecognition?: SpeechRecognitionCtor;
   webkitSpeechRecognition?: SpeechRecognitionCtor;
 }
 
 export function isVoiceSupported(): boolean {
   if (typeof window === 'undefined') return false;
-  const w = window as WindowWithSpeech;
+  const w = window as unknown as WindowWithSpeech;
   return !!(w.SpeechRecognition || w.webkitSpeechRecognition);
 }
 
 export function getRecognition(): SpeechRecognitionLike | null {
   if (typeof window === 'undefined') return null;
-  const w = window as WindowWithSpeech;
+  const w = window as unknown as WindowWithSpeech;
   const Ctor = w.SpeechRecognition ?? w.webkitSpeechRecognition;
   if (!Ctor) return null;
   const rec = new Ctor();

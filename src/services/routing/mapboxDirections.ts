@@ -35,7 +35,7 @@ export function sanitizeRoutePoints(points: RoutePoint[]): RoutePoint[] {
   const [origin, ...rest] = clean;
   const destination = rest.pop();
   const middle = rest.slice(0, MAX_ROUTE_COORDINATES - 2);
-  return destination ? [origin, ...middle, destination] : [origin, ...middle];
+  return destination ? [origin!, ...middle, destination] : [origin!, ...middle];
 }
 
 async function requestDirections(

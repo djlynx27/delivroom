@@ -1,6 +1,6 @@
 import type { TripWithZone } from '@/hooks/useTrips';
 import { supabase } from '@/integrations/supabase/client';
-import type { Database, TablesInsert } from '@/integrations/supabase/types';
+import type { Database, Json, TablesInsert } from '@/integrations/supabase/types';
 import {
   deriveLearningInsights,
   derivePostShiftSummary,
@@ -526,7 +526,7 @@ function buildSessionZoneRows(
       predicted_score: round(
         zone.predictedScore / Math.max(zone.ridesCount, 1)
       ),
-      factors_snapshot: zone.factorsSnapshot,
+      factors_snapshot: zone.factorsSnapshot as unknown as Json,
     })
   );
 }
@@ -581,7 +581,7 @@ export function buildLearningPersistencePayload(
       last_updated: lastUpdated,
     })),
     weightHistory: {
-      weights: insights.suggestedWeights,
+      weights: insights.suggestedWeights as unknown as Json,
       prediction_mae: insights.meanAbsoluteError,
       triggered_by: 'manual_sync',
     } satisfies WeightHistoryInsert,
@@ -746,13 +746,40 @@ async function cleanupFailedShiftSync(sessionId: number) {
   }
 }
 
-async function insertOptionalRows<T>(
+// Each branch calls `.insert()` against a literal table name — Supabase's
+// generated client needs the literal (not a generic union parameter) to
+// resolve the exact per-table Insert overload.
+async function insertOptionalRows(
   tableName: 'session_zones' | 'predictions' | 'demand_patterns',
-  rows: T[]
+  rows:
+    | Database['public']['Tables']['session_zones']['Insert'][]
+    | Database['public']['Tables']['predictions']['Insert'][]
+    | Database['public']['Tables']['demand_patterns']['Insert'][]
 ) {
   if (rows.length === 0) return;
-  const { error } = await supabase.from(tableName).insert(rows);
-  if (error) throw error;
+  switch (tableName) {
+    case 'session_zones': {
+      const { error } = await supabase
+        .from('session_zones')
+        .insert(rows as Database['public']['Tables']['session_zones']['Insert'][]);
+      if (error) throw error;
+      return;
+    }
+    case 'predictions': {
+      const { error } = await supabase
+        .from('predictions')
+        .insert(rows as Database['public']['Tables']['predictions']['Insert'][]);
+      if (error) throw error;
+      return;
+    }
+    case 'demand_patterns': {
+      const { error } = await supabase
+        .from('demand_patterns')
+        .insert(rows as Database['public']['Tables']['demand_patterns']['Insert'][]);
+      if (error) throw error;
+      return;
+    }
+  }
 }
 
 export async function syncLearningAggregates(
@@ -832,9 +859,10 @@ export async function syncShiftLearning(
     if (sessionError) throw sessionError;
 
     sessionId = Number(sessionRow?.id);
+    const resolvedSessionId = sessionId;
     const sessionZones = payload.sessionZones.map((zone) => ({
       ...zone,
-      session_id: sessionId,
+      session_id: resolvedSessionId,
     })) satisfies SessionZoneInsert[];
 
     await insertOptionalRows('session_zones', sessionZones);
@@ -1019,7 +1047,7 @@ export async function recordUserPing(
     platform: 'lyft',
     context_vector: serializeContextVector(encodeUserPingContextVector(input)),
     success_score: round(clamp01(input.successScore ?? 1), 3),
-    metadata: input.metadata ?? null,
+    metadata: (input.metadata ?? null) as unknown as Json,
   };
 
   const { error } = await supabase.from('user_pings').insert(payload);
