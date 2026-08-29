@@ -172,20 +172,15 @@ export default function DriveScreen() {
   const [conservativePresence, setConservativePresence] = useState(() =>
     getConservativePresencePreference()
   );
-  // Mounts the whole client-side alert pipeline (demand spikes, surge peak,
-  // event/weather/drift alerts) AND — via its own effects — requests
-  // Notification permission + registers the Web Push subscription once
-  // granted. Previously this hook existed but was never called anywhere in
-  // the app, so push_subscriptions never accumulated real drivers and the
-  // server-side surge-detector alert pipeline had nobody to deliver to.
-  const { enabled: notifEnabled, requestPermission: requestNotifPermission } =
-    useNotifications(cityId, { conservativePresence });
   const [demandWindow, setDemandWindow] = useState<DemandWindow>('30m');
   const {
     scores,
     factors,
     zones,
     isLoading: scoresLoading,
+    weather,
+    endingSoon,
+    startingSoon,
     surgeMap,
     zoneEventBadge,
     lyftSignalByZone,
@@ -195,6 +190,23 @@ export default function DriveScreen() {
     conservativePresence,
     demandWindow,
   });
+  // Mounts the client-side alert pipeline (demand spikes, surge peak,
+  // event/weather/drift alerts) AND — via its own effects — requests
+  // Notification permission + registers the Web Push subscription once
+  // granted. Previously this hook existed but was never called anywhere in
+  // the app, so push_subscriptions never accumulated real drivers and the
+  // server-side surge-detector alert pipeline had nobody to deliver to. It
+  // takes the demand data DriveScreen already fetched above rather than
+  // calling useDemandScores a second time — two independent instances for
+  // the same cityId each open their own Supabase Realtime subscription on
+  // the same `scores-${cityId}` channel topic, and the second one throws
+  // the moment it tries to attach its own listener to an already-subscribed
+  // channel (crashed the whole screen into the error boundary).
+  const { enabled: notifEnabled, requestPermission: requestNotifPermission } =
+    useNotifications(
+      { userLocation: location, zones, scores, weather, endingSoon, startingSoon, surgeMap },
+      { conservativePresence }
+    );
   const { board: gasBoard } = useGasBoard(
     'regular',
     location ? { latitude: location.latitude, longitude: location.longitude } : null,

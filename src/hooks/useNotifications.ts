@@ -1,6 +1,6 @@
-import { useDemandScores } from '@/hooks/useDemandScores';
+import type { useDemandScores } from '@/hooks/useDemandScores';
 import type { Zone } from '@/hooks/useSupabase';
-import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
+import { haversineKm, type UserLocationResult } from '@/hooks/useUserLocation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const NOTIF_COOLDOWN_MS = 15 * 60_000; // 15 min per notification type
@@ -34,69 +34,84 @@ function bufferToBase64Url(buffer: ArrayBuffer): string {
     .replace(/=+$/g, '');
 }
 
+// Every step here is best-effort: an unsupported browser, a denied
+// permission, a missing VAPID key, or a flaky network must all degrade to
+// "no subscription registered this time" — never an uncaught exception that
+// could bubble up through the caller into a render-time crash. The whole
+// body is one try/catch on top of the individual typeof/`in` guards
+// (Notification itself may not be a declared global on some WebViews —
+// `typeof Notification !== 'undefined'` is the only safe check for that;
+// `Notification?.permission` would NOT help, optional chaining only guards
+// against a null/undefined *value*, not an undeclared identifier).
 async function registerPushSubscription(): Promise<void> {
-  if (typeof window === 'undefined') return;
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
-  if (Notification.permission !== 'granted') return;
+  try {
+    if (typeof window === 'undefined') return;
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
 
-  const env = (
-    import.meta as unknown as { env: Record<string, string | undefined> }
-  ).env;
-  const vapidPublicKey = env.VITE_VAPID_PUBLIC_KEY;
-  const supabaseUrl = env.VITE_SUPABASE_URL;
-  const supabaseAnonKey =
-    env.VITE_SUPABASE_ANON_KEY ?? env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    const env = (
+      import.meta as unknown as { env: Record<string, string | undefined> }
+    ).env;
+    const vapidPublicKey = env?.VITE_VAPID_PUBLIC_KEY;
+    const supabaseUrl = env?.VITE_SUPABASE_URL;
+    const supabaseAnonKey =
+      env?.VITE_SUPABASE_ANON_KEY ?? env?.VITE_SUPABASE_PUBLISHABLE_KEY;
 
-  if (!vapidPublicKey || !supabaseUrl || !supabaseAnonKey) return;
+    if (!vapidPublicKey || !supabaseUrl || !supabaseAnonKey) return;
 
-  const registration = await navigator.serviceWorker.ready;
-  const existingSubscription = await registration.pushManager.getSubscription();
-  const subscription =
-    existingSubscription ??
-    (await registration.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: base64UrlToUint8Array(vapidPublicKey),
-    }));
+    const registration = await navigator.serviceWorker.ready;
+    const existingSubscription = await registration.pushManager.getSubscription();
+    const subscription =
+      existingSubscription ??
+      (await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64UrlToUint8Array(vapidPublicKey),
+      }));
 
-  const json = subscription.toJSON();
-  const endpoint = json.endpoint;
-  const p256dh = subscription.getKey('p256dh');
-  const auth = subscription.getKey('auth');
+    const json = subscription.toJSON();
+    const endpoint = json.endpoint;
+    const p256dh = subscription.getKey('p256dh');
+    const auth = subscription.getKey('auth');
 
-  if (!endpoint || !p256dh || !auth) return;
+    if (!endpoint || !p256dh || !auth) return;
 
-  const registrationFingerprint = `${endpoint}:${bufferToBase64Url(auth)}`;
-  if (localStorage.getItem(PUSH_SUBSCRIPTION_KEY) === registrationFingerprint) {
-    return;
-  }
-
-  const response = await fetch(
-    `${supabaseUrl}/rest/v1/push_subscriptions?on_conflict=endpoint`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: supabaseAnonKey,
-        Authorization: `Bearer ${supabaseAnonKey}`,
-        Prefer: 'resolution=merge-duplicates,return=minimal',
-      },
-      body: JSON.stringify([
-        {
-          endpoint,
-          p256dh: bufferToBase64Url(p256dh),
-          auth: bufferToBase64Url(auth),
-          user_agent:
-            typeof navigator !== 'undefined' ? navigator.userAgent : null,
-        },
-      ]),
+    const registrationFingerprint = `${endpoint}:${bufferToBase64Url(auth)}`;
+    if (localStorage.getItem(PUSH_SUBSCRIPTION_KEY) === registrationFingerprint) {
+      return;
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`push_subscriptions upsert failed: ${response.status}`);
+    const response = await fetch(
+      `${supabaseUrl}/rest/v1/push_subscriptions?on_conflict=endpoint`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseAnonKey,
+          Authorization: `Bearer ${supabaseAnonKey}`,
+          Prefer: 'resolution=merge-duplicates,return=minimal',
+        },
+        body: JSON.stringify([
+          {
+            endpoint,
+            p256dh: bufferToBase64Url(p256dh),
+            auth: bufferToBase64Url(auth),
+            user_agent:
+              typeof navigator !== 'undefined' ? navigator.userAgent : null,
+          },
+        ]),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`push_subscriptions upsert failed: ${response.status}`);
+    }
+
+    localStorage.setItem(PUSH_SUBSCRIPTION_KEY, registrationFingerprint);
+  } catch (err) {
+    if (import.meta.env.DEV) {
+      console.error('[useNotifications] registerPushSubscription failed:', err);
+    }
   }
-
-  localStorage.setItem(PUSH_SUBSCRIPTION_KEY, registrationFingerprint);
 }
 
 function getNotifiedEvents(): Set<string> {
@@ -173,22 +188,38 @@ export function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone |
   return best;
 }
 
+type DemandScoresResult = ReturnType<typeof useDemandScores>;
+
+// Demand-scoring data comes from the caller's OWN useDemandScores/
+// useUserLocation calls rather than this hook fetching its own copy.
+// useDemandScores is a very heavy hook (weather, traffic, events, zone
+// scores, a Supabase Realtime subscription keyed by city...) — DriveScreen
+// already calls it once for its own rendering. A second independent
+// instance here used to create a second Realtime channel subscription for
+// the exact same `scores-${cityId}` topic, which crashed the whole screen
+// (useZoneScores.ts's supabase.channel(...).on(...) throws
+// "cannot add postgres_changes callbacks ... after subscribe()" the moment
+// the second instance's effect ran after the first had already subscribed).
+export interface NotificationsDemandData {
+  userLocation: UserLocationResult['location'];
+  zones: DemandScoresResult['zones'];
+  scores: DemandScoresResult['scores'];
+  weather: DemandScoresResult['weather'];
+  endingSoon: DemandScoresResult['endingSoon'];
+  startingSoon: DemandScoresResult['startingSoon'];
+  surgeMap: DemandScoresResult['surgeMap'];
+}
+
 export function useNotifications(
-  cityId: string,
+  data: NotificationsDemandData,
   options: { conservativePresence?: boolean } = {}
 ) {
+  const { userLocation, zones, scores, weather, endingSoon, startingSoon, surgeMap } = data;
   const [enabled, setEnabled] = useState(
     () =>
       typeof Notification !== 'undefined' &&
       Notification.permission === 'granted'
   );
-  const { location: userLocation } = useUserLocation();
-  const { scores, zones, weather, endingSoon, startingSoon, surgeMap } =
-    useDemandScores(cityId, {
-      currentLat: userLocation?.latitude ?? null,
-      currentLng: userLocation?.longitude ?? null,
-      conservativePresence: options.conservativePresence,
-    });
   const stateRef = useRef<NotifState>({
     lastDemandNotif: 0,
     lastWeatherNotif: 0,
