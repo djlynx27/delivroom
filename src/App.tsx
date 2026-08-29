@@ -230,6 +230,7 @@ function AppContent() {
           <Route path="/zones" element={<ZonesScreen />} />
           <Route path="/gas" element={<GasScreen />} />
           <Route path="/navigate" element={<NavigateScreen />} />
+          <Route path="/app/launch-gps" element={<NavigateScreen />} />
           <Route path="/events" element={<EventsScreen />} />
           <Route path="/admin" element={<AdminScreen />} />
           <Route path="/admin/operations" element={<AdminOperationsScreen />} />

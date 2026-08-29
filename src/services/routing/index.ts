@@ -131,3 +131,26 @@ export function buildOneTapNavigationUrl(
   );
   return buildGoogleMapsProspectingUrl(origin, destination, waypoints);
 }
+
+/**
+ * Single entry point for both navigation modes: `'direct'` is a pure
+ * origin→destination Google Maps link (no corridor waypoints, ever —
+ * `candidateZones` is ignored), `'prospection'` keeps the existing
+ * strategic-detour behavior (buildOneTapNavigationUrl). Deep-link callers
+ * (`/navigate`) pick the mode from an external param; every in-app call site
+ * (zone taps, manual search, auto-routing) must pass `'prospection'`
+ * explicitly — never leave it to a caller-supplied/default value.
+ */
+export function handleNavigationLaunch(
+  origin: RoutePoint | null,
+  destination: RouteCandidateZone,
+  candidateZones: RouteCandidateZone[],
+  mode: NavigationMode
+): string {
+  if (mode === 'direct') {
+    return origin
+      ? buildGoogleMapsProspectingUrl(origin, destination, [])
+      : getGoogleMapsNavUrl(destination.name, destination.latitude, destination.longitude);
+  }
+  return buildOneTapNavigationUrl(origin, destination, candidateZones);
+}

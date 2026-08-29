@@ -14,7 +14,7 @@ import { WazeIcon } from '@/components/NavIcons';
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import {
   buildGoogleMapsProspectingUrl,
-  buildOneTapNavigationUrl,
+  handleNavigationLaunch,
   type RouteCandidateZone,
   type RoutePoint,
 } from '@/services/routing';
@@ -117,7 +117,9 @@ function resolveOneTapUrl(
   if (origin && corridorTargetsZone(zone.id, antiDeadhead, returnCorridor)) {
     return buildGoogleMapsProspectingUrl(origin, zone, returnCorridor!.steps);
   }
-  return buildOneTapNavigationUrl(origin, zone, modeZones);
+  // Recommended-zone taps, manual search, and 15-min auto-routing all route
+  // through here — mode is pinned to 'prospection', never caller-supplied.
+  return handleNavigationLaunch(origin, zone, modeZones, 'prospection');
 }
 
 function resolveHudReturnCorridor(

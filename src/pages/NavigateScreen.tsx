@@ -5,23 +5,28 @@ import { forwardGeocode, guessCityIdFromText } from '@/lib/geocoding';
 import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
 import { useZones } from '@/hooks/useSupabase';
 import {
-  buildOneTapNavigationUrl,
+  handleNavigationLaunch,
+  type NavigationMode,
   type RouteCandidateZone,
   type RoutePoint,
 } from '@/services/routing';
 
 // Deep-link landing page for external address capture (MacroDroid/Tasker
-// reading the Lyft app) — see docs/navigate-deeplink-macrodroid.md.
-// /navigate?address=...&type=pickup|dropoff geocodes the address, resolves
-// a strategic corridor waypoint against the driver's live zones (same logic
-// as the in-app "one-tap navigate" button), then hands off to Google Maps.
-// `type` doesn't change the corridor math (origin is always the driver's
-// current GPS either way) — kept only so the loading label reads correctly.
+// reading the Lyft app / rideshare shortcuts) — see
+// docs/navigate-deeplink-macrodroid.md. Reachable at /navigate and
+// /app/launch-gps (same page, alias for external tools that expect that
+// path). ?address=...&type=pickup|dropoff&mode=direct|prospection geocodes
+// the address then hands off to Google Maps — `mode=direct` skips corridor
+// waypoint injection entirely (pure origin→destination, for a rideshare app
+// address where a detour would be wrong), `mode=prospection` (default, same
+// as before this param existed) keeps the strategic-detour behavior.
+// `type` never changes the routing math — only the loading label.
 
 export default function NavigateScreen() {
   const [searchParams] = useSearchParams();
   const address = searchParams.get('address')?.trim() ?? '';
   const type = searchParams.get('type') === 'pickup' ? 'pickup' : 'dropoff';
+  const mode: NavigationMode = searchParams.get('mode') === 'direct' ? 'direct' : 'prospection';
 
   const [error, setError] = useState<string | null>(null);
   const [cityId, setCityId] = useState('mtl');
@@ -29,7 +34,9 @@ export default function NavigateScreen() {
   const [origin, setOrigin] = useState<RoutePoint | null>(null);
   const [originResolved, setOriginResolved] = useState(false);
 
-  const { data: zones, isLoading: zonesLoading } = useZones(cityId);
+  // Direct mode never looks at candidate zones — skip the fetch entirely
+  // (useZones disables its query on an empty cityId).
+  const { data: zones, isLoading: zonesLoading } = useZones(mode === 'direct' ? '' : cityId);
 
   useEffect(() => {
     if (!address) {
@@ -85,8 +92,8 @@ export default function NavigateScreen() {
       score: z.current_score ?? 0,
       type: z.type,
     }));
-    window.location.href = buildOneTapNavigationUrl(origin, destination, candidates);
-  }, [destination, origin, originResolved, zones, zonesLoading]);
+    window.location.href = handleNavigationLaunch(origin, destination, candidates, mode);
+  }, [destination, origin, originResolved, zones, zonesLoading, mode]);
 
   if (error) {
     return (
