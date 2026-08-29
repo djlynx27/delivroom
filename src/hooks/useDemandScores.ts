@@ -395,6 +395,52 @@ export function useDemandScores(
     staleTime: 60_000,
   });
 
+  // Instant update: ingest-lyft-screenshots writes a platform_signals row the
+  // moment a scrape completes -- without this, the HUD would only pick it up
+  // on the next 60s staleTime refetch. Mirrors useZoneScores' `scores-${cityId}`
+  // channel pattern; scoped per-cityId the same way so a screen change doesn't
+  // leave a stale subscription (or, per that hook's own comment, throw from a
+  // second concurrent subscribe on the same channel name).
+  const [lyftSignalSyncedAt, setLyftSignalSyncedAt] = useState<number | null>(
+    null
+  );
+  useEffect(() => {
+    if (!cityId) return;
+
+    const channel = supabase
+      .channel(`platform-signals-${cityId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'platform_signals',
+          filter: 'platform=eq.lyft',
+        },
+        () => {
+          queryClient.invalidateQueries({
+            queryKey: ['lyft-platform-signals', cityId],
+          });
+          setLyftSignalSyncedAt(Date.now());
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [cityId, queryClient]);
+
+  // "Recently synced" window for the HUD's pulsing status badge -- true for
+  // 10s after each Lyft signal update, then auto-clears.
+  const [isLyftSyncing, setIsLyftSyncing] = useState(false);
+  useEffect(() => {
+    if (lyftSignalSyncedAt === null) return;
+    setIsLyftSyncing(true);
+    const timeout = setTimeout(() => setIsLyftSyncing(false), 10_000);
+    return () => clearTimeout(timeout);
+  }, [lyftSignalSyncedAt]);
+
   const lyftSignalByZone = useMemo(() => {
     return new Map(
       lyftSignals.map((signal) => [
@@ -847,6 +893,8 @@ export function useDemandScores(
     averageTrafficCongestion,
     similarContextSignals,
     lyftSignalByZone,
+    lyftSignalSyncedAt,
+    isLyftSyncing,
     stmStatus,
     surgeMap,
   };

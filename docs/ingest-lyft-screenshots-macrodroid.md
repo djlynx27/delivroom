@@ -155,3 +155,35 @@ absent ou incorrect.
 Le bridge lui-même n'appelle aucune API vision — il se contente de lancer
 `scrape_lyft_metrics.py`, qui POST ensuite vers `ingest-lyft-screenshots`
 (§1-§4 ci-dessus) exactement comme le flux MacroDroid manuel.
+
+## 8. Déclenchement 100% automatique — lancement de l'app Delivroom
+
+Plutôt qu'un raccourci ou un intervalle (§7.3), la macro peut se déclencher
+chaque fois que tu ouvres la PWA Delivroom sur le S23 Ultra — plus aucune
+action manuelle pendant un shift.
+
+### 8.1 Recette MacroDroid
+
+1. **Trigger** : `Application Launched` → sélectionne l'app/PWA Delivroom
+   (`com.delivroom.app` si installée via Capacitor, ou le paquet du
+   navigateur/TWA si lancée comme raccourci d'écran d'accueil).
+2. **Action "HTTP Request"** :
+   - Méthode : `GET`
+   - URL : `http://<IP-du-PC>:5000/run-lyft-scrape?token=<LYFT_BRIDGE_API_KEY>`
+3. **Constraint (limite de fréquence)** : `Application Launched` peut se
+   déclencher très souvent (chaque retour au premier plan). Deux niveaux de
+   protection, à ne pas confondre :
+   - **Contrainte MacroDroid** (recommandé, évite même l'appel HTTP inutile) :
+     ajoute une contrainte `Variable Value` sur une variable locale
+     `%last_lyft_scrape_trigger%` (timestamp), avec condition "il y a plus de
+     5 minutes" — sinon la macro s'arrête avant même de faire la requête.
+   - **Backstop côté serveur** (déjà actif, aucune config requise) :
+     `scripts/server.py` refuse tout nouveau déclenchement survenu moins de
+     5 minutes après le précédent, même si MacroDroid retente quand même —
+     réponse `{"status": "rate_limited", "retry_after_seconds": N}` (toujours
+     `200`, jamais une erreur qui ferait échouer la macro). `already_running`
+     reste un cas distinct : un scrape *en cours* (pas encore terminé), pas
+     lié à ce délai de 5 minutes.
+
+Le bridge, `scrape_lyft_metrics.py` et `ingest-lyft-screenshots` restent
+exactement les mêmes qu'en §7 — seul le trigger MacroDroid change.

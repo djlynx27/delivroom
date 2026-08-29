@@ -32,6 +32,13 @@ from scrape_lyft_metrics import _load_dotenv  # reuse the existing minimal .env 
 
 RUN_LOCK = threading.Lock()
 RUNNING = False
+LAST_TRIGGERED_AT: float | None = None
+
+# Backstop for a MacroDroid "Application Launched" trigger (fires every time
+# the PWA is foregrounded, potentially many times an hour) -- independent of
+# the already_running dedup above, which only protects against overlapping
+# runs, not back-to-back ones. See docs/ingest-lyft-screenshots-macrodroid.md §8.
+MIN_TRIGGER_INTERVAL_S = 300
 
 
 def _script_path() -> Path:
@@ -76,7 +83,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle(self) -> None:
-        global RUNNING
+        global RUNNING, LAST_TRIGGERED_AT
         parsed = urlparse(self.path)
         query = parse_qs(parsed.query)
 
@@ -92,14 +99,31 @@ class BridgeHandler(BaseHTTPRequestHandler):
             self._json(401, {"error": "unauthorized"})
             return
 
+        now_monotonic = time.monotonic()
         with RUN_LOCK:
             already_running = RUNNING
-            if not already_running:
+            since_last = (
+                None if LAST_TRIGGERED_AT is None else now_monotonic - LAST_TRIGGERED_AT
+            )
+            rate_limited = (
+                not already_running
+                and since_last is not None
+                and since_last < MIN_TRIGGER_INTERVAL_S
+            )
+            if not already_running and not rate_limited:
                 RUNNING = True
+                LAST_TRIGGERED_AT = now_monotonic
 
         timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
         if already_running:
             self._json(200, {"status": "already_running", "timestamp": timestamp})
+            return
+        if rate_limited:
+            retry_after = round(MIN_TRIGGER_INTERVAL_S - since_last)  # type: ignore[arg-type]
+            self._json(
+                200,
+                {"status": "rate_limited", "retry_after_seconds": retry_after, "timestamp": timestamp},
+            )
             return
 
         _spawn_scrape()
@@ -122,12 +146,17 @@ def _selftest() -> None:
     import urllib.error
     import urllib.request
 
-    global _spawn_scrape
+    global _spawn_scrape, LAST_TRIGGERED_AT, MIN_TRIGGER_INTERVAL_S
 
     os.environ["LYFT_BRIDGE_API_KEY"] = "test-token"
     calls: list[int] = []
     release = threading.Event()
     original_spawn = _spawn_scrape
+    original_interval = MIN_TRIGGER_INTERVAL_S
+    LAST_TRIGGERED_AT = None
+    # Tiny interval for the already_running/retrigger-after-finish flow below
+    # -- the real 5-minute value is exercised separately, further down.
+    MIN_TRIGGER_INTERVAL_S = 0.05
 
     def stub_spawn() -> None:
         calls.append(1)
@@ -181,10 +210,21 @@ def _selftest() -> None:
         with urllib.request.urlopen(f"{base}/run-lyft-scrape?token=test-token", timeout=2) as resp:
             body = json.loads(resp.read())
             assert body["status"] == "triggered", body
-        assert len(calls) == 2, "should spawn again once the previous run finished"
+        assert len(calls) == 2, "should spawn again once the previous run finished + interval elapsed"
+
+        # Now exercise the real 5-minute backstop: immediately re-triggering
+        # must be rate-limited even though the previous run already finished.
+        MIN_TRIGGER_INTERVAL_S = original_interval
+        with urllib.request.urlopen(f"{base}/run-lyft-scrape?token=test-token", timeout=2) as resp:
+            body = json.loads(resp.read())
+            assert body["status"] == "rate_limited", body
+            assert 0 < body["retry_after_seconds"] <= MIN_TRIGGER_INTERVAL_S, body
+        assert len(calls) == 2, "must not spawn while rate-limited"
     finally:
         server.shutdown()
         _spawn_scrape = original_spawn
+        MIN_TRIGGER_INTERVAL_S = original_interval
+        LAST_TRIGGERED_AT = None
         os.environ.pop("LYFT_BRIDGE_API_KEY", None)
 
     print("selftest OK")

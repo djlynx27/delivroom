@@ -190,6 +190,7 @@ export default function DriveScreen() {
     surgeMap,
     zoneEventBadge,
     lyftSignalByZone,
+    isLyftSyncing,
   } = useDemandScores(cityId, {
     currentLat: location?.latitude ?? null,
     currentLng: location?.longitude ?? null,
@@ -383,6 +384,19 @@ export default function DriveScreen() {
     .filter((z) => !heroZone || z.id !== heroZone.id)
     .slice(0, 6);
   const heroEventBadge = heroZone ? zoneEventBadge.get(heroZone.id) : undefined;
+
+  // Light haptic when a Lyft realtime signal (not e.g. a weather/traffic
+  // recompute) actually flips the top recommendation -- gated on
+  // isLyftSyncing so an unrelated hero-zone change stays silent.
+  const prevHeroZoneIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const currentId = heroZone?.id ?? null;
+    const prevId = prevHeroZoneIdRef.current;
+    if (isLyftSyncing && currentId && prevId && currentId !== prevId) {
+      vibrate('navigation');
+    }
+    prevHeroZoneIdRef.current = currentId;
+  }, [heroZone?.id, isLyftSyncing, vibrate]);
 
   // Anti-deadhead: is the driver currently parked in a low-score zone
   // (e.g. just dropped off out in the sticks)? If so, suggest the best
@@ -793,6 +807,11 @@ export default function DriveScreen() {
                     distanceKm={nearbyHotspot.distanceKm}
                     occurrenceCount={nearbyHotspot.occurrenceCount}
                   />
+                )}
+                {isLyftSyncing && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 text-emerald-400 text-[12px] font-bold px-2.5 py-1 animate-pulse">
+                    🔄 Syncing Lyft Metrics...
+                  </span>
                 )}
               </div>
 
