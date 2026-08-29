@@ -41,6 +41,7 @@ const AdminDriverOpsScreen = lazy(
   () => import('@/pages/AdminDriverOpsScreen')
 );
 const GasScreen = lazy(() => import('@/pages/GasScreen'));
+const NavigateScreen = lazy(() => import('@/pages/NavigateScreen'));
 const NotFound = lazy(() => import('./pages/NotFound.tsx'));
 
 const queryClient = new QueryClient();
@@ -228,6 +229,7 @@ function AppContent() {
           <Route path="/planning" element={<PlanningScreen />} />
           <Route path="/zones" element={<ZonesScreen />} />
           <Route path="/gas" element={<GasScreen />} />
+          <Route path="/navigate" element={<NavigateScreen />} />
           <Route path="/events" element={<EventsScreen />} />
           <Route path="/admin" element={<AdminScreen />} />
           <Route path="/admin/operations" element={<AdminOperationsScreen />} />
