@@ -1,6 +1,13 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import {
+  decidePush,
+  formatSurgeMessage,
+  isRisingIntoPeak,
+  type NewPeakCandidate,
+  type PriorSurgeState,
+} from './surgePush.ts';
 
 /**
  * surge-detector — Edge Function Delivroom
@@ -10,7 +17,9 @@ import { captureEdgeException } from '../_shared/sentry.ts';
  *   1. Récupère le score actuel + baseline 4 semaines
  *   2. Calcule le multiplicateur de surge (formule sigmoid)
  *   3. Stocke le vecteur de contexte 8D dans zone_context_vectors
- *   4. Envoie une notification push si surgeClass === 'peak'
+ *   4. Envoie une notification push ciblée (top 3 zones) uniquement pour les
+ *      zones qui franchissent 'peak' vers le haut ce cycle-ci, avec cooldown
+ *      (~50 min) et dédup — voir la section "Push noise control" plus bas
  *
  * Appelé par pg_cron :
  *   SELECT cron.schedule('surge-detector', every-5-minutes,
@@ -104,6 +113,34 @@ interface Zone {
   city_id: string;
 }
 
+/** Most recent zone_context_vectors row per zone, keyed by zone_id — the
+ * state to diff THIS cycle's class against to detect a rising edge (see
+ * isRisingIntoPeak in surgePush.ts). Queried before this cycle's own rows
+ * are inserted, so it's naturally "prior". */
+// Generic over the client type rather than pinned to ReturnType<typeof
+// createClient> — supabase-js's default generic instantiation isn't
+// self-assignable across separate call sites in this version, which made a
+// pinned param type fail `deno check` even though the value at the one call
+// site is exactly right.
+async function loadPriorSurgeState<
+  T extends { from: (table: string) => { select: (columns: string) => any } },
+>(supabase: T, zoneIds: string[]): Promise<Map<string, PriorSurgeState>> {
+  const { data, error } = await supabase
+    .from('zone_context_vectors')
+    .select('zone_id, surge_class, surge_multiplier, captured_at')
+    .in('zone_id', zoneIds)
+    .order('captured_at', { ascending: false });
+  if (error) throw new Error(`Prior surge state lookup failed: ${error.message}`);
+
+  const byZone = new Map<string, PriorSurgeState>();
+  for (const row of (data ?? []) as Array<PriorSurgeState & { zone_id: string }>) {
+    if (!byZone.has(row.zone_id)) {
+      byZone.set(row.zone_id, { surge_class: row.surge_class, surge_multiplier: row.surge_multiplier });
+    }
+  }
+  return byZone;
+}
+
 // eslint-disable-next-line complexity
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -138,7 +175,11 @@ serve(async (req: Request) => {
       surge_multiplier: number;
     }> = [];
 
-    const peakZones: string[] = [];
+    const priorByZone = await loadPriorSurgeState(
+      supabase,
+      (zones as Zone[]).map((z) => z.id)
+    );
+    const newPeakCandidates: NewPeakCandidate[] = [];
 
     for (const zone of zones as Zone[]) {
       if (zone.current_score == null) continue;
@@ -203,8 +244,14 @@ serve(async (req: Request) => {
         }
       }
 
-      if (surgeClass === 'peak') {
-        peakZones.push(zone.name);
+      const prior = priorByZone.get(zone.id);
+      if (isRisingIntoPeak(surgeClass, prior)) {
+        newPeakCandidates.push({
+          zone_id: zone.id,
+          zone_name: zone.name,
+          surge_multiplier: surgeMultiplier,
+          delta: surgeMultiplier - (prior?.surge_multiplier ?? surgeMultiplier),
+        });
       }
 
       results.push({
@@ -215,51 +262,60 @@ serve(async (req: Request) => {
       });
     }
 
-    // 5. Push notification for peak zones (inserts into notifications table)
-    if (peakZones.length > 0) {
-      const message =
-        peakZones.length === 1
-          ? `🔴 Surge PEAK dans ${peakZones[0]} — demande maximale maintenant!`
-          : `🔴 Surge PEAK dans ${peakZones.length} zones (${peakZones.slice(0, 2).join(', ')}…)`;
+    // 5. Push notification — only for zones that newly crossed into 'peak'
+    // this cycle, gated by cooldown + dedup. All decision logic lives in
+    // surgePush.ts (pure, unit-tested); this is just the I/O around it.
+    const { data: lastPeakNotif, error: lastPeakErr } = await supabase
+      .from('notifications')
+      .select('created_at, metadata')
+      .eq('type', 'surge_peak')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastPeakErr) throw new Error(`Last surge_peak lookup failed: ${lastPeakErr.message}`);
+
+    const { decision: pushDecision, top3, signature } = decidePush({
+      candidates: newPeakCandidates,
+      lastPush: lastPeakNotif
+        ? {
+            createdAtMs: new Date(lastPeakNotif.created_at as string).getTime(),
+            signature: (lastPeakNotif.metadata as { signature?: string } | null)?.signature,
+          }
+        : null,
+      nowMs: now.getTime(),
+    });
+
+    if (pushDecision === 'sent') {
+      const { title, body } = formatSurgeMessage(top3);
 
       const { error: notificationInsertError } = await supabase
         .from('notifications')
         .insert({
           type: 'surge_peak',
-          title: 'Surge Peak Détecté',
-          message,
-          metadata: { zones: peakZones, detected_at: now.toISOString() },
+          title,
+          message: body,
+          metadata: {
+            zones: top3.map((c) => c.zone_id),
+            signature,
+            detected_at: now.toISOString(),
+          },
           created_at: now.toISOString(),
         });
-
       if (notificationInsertError) {
-        throw new Error(
-          `Peak notification insert failed: ${notificationInsertError.message}`
-        );
+        throw new Error(`Peak notification insert failed: ${notificationInsertError.message}`);
       }
 
-      const pushResponse = await fetch(
-        `${supabaseUrl}/functions/v1/push-notifier`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${serviceKey}`,
-            apikey: serviceKey,
-          },
-          body: JSON.stringify({
-            title: 'Surge Peak Détecté',
-            body: message,
-            url: '/',
-            tag: 'surge-peak',
-          }),
-        }
-      );
-
+      const pushResponse = await fetch(`${supabaseUrl}/functions/v1/push-notifier`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${serviceKey}`,
+          apikey: serviceKey,
+        },
+        body: JSON.stringify({ title, body, url: '/', tag: 'surge-peak' }),
+      });
       if (!pushResponse.ok) {
-        throw new Error(
-          `Push notifier failed with status ${pushResponse.status}`
-        );
+        throw new Error(`Push notifier failed with status ${pushResponse.status}`);
       }
     }
 
@@ -267,7 +323,8 @@ serve(async (req: Request) => {
       JSON.stringify({
         ok: true,
         processed: results.length,
-        peak_zones: peakZones,
+        new_peak_candidates: newPeakCandidates.map((c) => c.zone_name),
+        push: pushDecision,
         results,
         timestamp: now.toISOString(),
       }),
