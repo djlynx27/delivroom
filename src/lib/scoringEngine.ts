@@ -276,6 +276,14 @@ function dayMatches(dayOfWeek: number, rule: TimeRule): boolean {
 // Returns a demand curve value 0-10 for named zones at a given hour
 interface ZoneProfile {
   pattern: (hour: number, dayOfWeek: number) => number; // 0-10
+  /** Hard veto for hubs with fixed physical opening hours (malls) — a
+   * closed hub must never be picked as the "best zone" for a slot,
+   * regardless of how high its base/weighted score would otherwise be.
+   * Only set this for zones whose real hours are known and simple (a mall
+   * with posted store hours) — not for mixed-use hubs (cinema/bar/restaurant
+   * complexes like Centropolis) that are legitimately busy well past
+   * standard retail closing. */
+  isClosed?: (hour: number, dayOfWeek: number) => boolean;
 }
 
 const ZONE_PROFILES: Record<string, ZoneProfile> = {
@@ -350,9 +358,14 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
     },
   },
   'CF Carrefour Laval': {
+    // Mall hours: 9h–21h en semaine, 9h–17h le week-end.
     pattern: (h, d) => {
-      if ((d === 0 || d === 6) && h >= 12 && h <= 20) return 6;
+      if ((d === 0 || d === 6) && h >= 12 && h <= 17) return 6;
       return 3;
+    },
+    isClosed: (h, d) => {
+      const closesAt = d === 0 || d === 6 ? 17 : 21;
+      return h < 9 || h >= closesAt;
     },
   },
   Centropolis: {
@@ -733,6 +746,23 @@ export function computeDemandScore(
   eventBoosts?: ActiveEventBoost[],
   context?: ScoringContext
 ): { score: number; factors: ScoreFactors } {
+  // Hard veto, checked before any other factor: a hub whose real doors are
+  // closed (mall hours) must never win a "best zone" comparison — weighted
+  // demand factors, weather, events, and the hotspot bonus all get computed
+  // from the same zone/type/coordinates a permanently-open zone would have,
+  // so none of them would otherwise catch this on their own.
+  if (ZONE_PROFILES[zone.name]?.isClosed?.(now.getHours(), now.getDay())) {
+    return {
+      score: 0,
+      factors: {
+        hasWeatherBoost: false,
+        hasEventBoost: false,
+        weatherBoostPoints: 0,
+        eventBoostPoints: 0,
+      },
+    };
+  }
+
   const legacyBaseScore = computeTimePatternBase(zone, now);
   const { demandFactors, weatherBoostPoints, eventBoostPoints } =
     calculateDemandFactors(zone, now, weather, eventBoosts, context);

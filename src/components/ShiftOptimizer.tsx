@@ -17,6 +17,14 @@ import { useWeather } from '@/hooks/useWeather';
 import { getDemandClass } from '@/lib/demandUtils';
 import { deriveLearningInsights } from '@/lib/learningEngine';
 import { computeDemandScore, type WeatherCondition } from '@/lib/scoringEngine';
+import {
+  blend,
+  getRealAvgEarningsPerHour,
+  REAL_AVG_FULL_TRUST_AT_TRIPS,
+  sanitizeTargetRevenueInput,
+  scoreToEarningsPerH,
+  type RealEarningsAverage,
+} from '@/lib/shiftEarnings';
 import { cn } from '@/lib/utils';
 import { useMemo, useState } from 'react';
 
@@ -39,21 +47,6 @@ interface ShiftOptimizerProps {
   cityId: string;
   targetWeeklyRevenue?: number;
   className?: string;
-}
-
-// ── Score-to-$/h mapping (calibrated Montreal reference) ──────────────────────
-// score 80 → ~$45/h, score 60 → ~$32/h, score 40 → ~$22/h.
-// Piecewise-linear through those exact points — the flat `12 + score*0.42`
-// formula this replaced didn't actually hit them (score 60 gave $37/h, not
-// $32/h), which is why a "demande moyenne" shift was projected at ~$38/h
-// instead of the documented ~$32/h. This is still a theoretical curve, not
-// the driver's real $/h — it only applies when there isn't yet enough
-// observed EMA data for that zone/day/slot (see getLearningAdjustedEarningsPerHour).
-function scoreToEarningsPerH(score: number): number {
-  if (score <= 40) return Math.max(12, (score / 40) * 22);
-  if (score <= 60) return 22 + (score - 40) * 0.5;
-  if (score <= 80) return 32 + (score - 60) * 0.65;
-  return 45 + (score - 80) * 0.65;
 }
 
 // ── High-value time blocks per day-of-week (0=Mon…6=Sun) ─────────────────────
@@ -101,17 +94,30 @@ function getLearningAdjustedEarningsPerHour({
   bestZoneId,
   learningInsights,
   jsDay,
+  realAvg,
 }: {
   bestScore: number;
   block: (typeof PRIME_BLOCKS)[number];
   bestZoneId: string;
   learningInsights: ReturnType<typeof deriveLearningInsights> | null;
   jsDay: number;
+  realAvg: RealEarningsAverage | null;
 }) {
-  const earningsPerH = scoreToEarningsPerH(bestScore);
+  const conservativeDefault = scoreToEarningsPerH(bestScore);
+
+  // Overall real average takes priority over the theoretical default once
+  // there's enough logged history — trust scales with sample size so a
+  // handful of trips doesn't fully override the conservative floor.
+  const baseline = realAvg
+    ? blend(
+        realAvg.perHour,
+        conservativeDefault,
+        Math.min(1, realAvg.tripCount / REAL_AVG_FULL_TRUST_AT_TRIPS)
+      )
+    : conservativeDefault;
 
   if (!learningInsights) {
-    return earningsPerH;
+    return baseline;
   }
 
   const slotIdx = block.startHour * 4;
@@ -123,13 +129,13 @@ function getLearningAdjustedEarningsPerHour({
   );
 
   if (!emaPattern || emaPattern.observationCount < 2) {
-    return earningsPerH;
+    return baseline;
   }
 
+  // Most granular real signal available (this exact zone/day/slot) —
+  // outranks both the overall average and the theoretical default.
   const emaTrust = Math.min(0.85, emaPattern.observationCount * 0.1);
-  return (
-    emaTrust * emaPattern.emaEarningsPerHour + (1 - emaTrust) * earningsPerH
-  );
+  return blend(emaPattern.emaEarningsPerHour, baseline, emaTrust);
 }
 
 function getBlockReason(startHour: number, dayIndex: number) {
@@ -159,6 +165,7 @@ function buildShiftBlock({
   bestZoneId,
   learningInsights,
   jsDay,
+  realAvg,
 }: {
   date: Date;
   dayIndex: number;
@@ -168,6 +175,7 @@ function buildShiftBlock({
   bestZoneId: string;
   learningInsights: ReturnType<typeof deriveLearningInsights> | null;
   jsDay: number;
+  realAvg: RealEarningsAverage | null;
 }): ShiftBlock {
   const earningsPerH = getLearningAdjustedEarningsPerHour({
     bestScore,
@@ -175,6 +183,7 @@ function buildShiftBlock({
     bestZoneId,
     learningInsights,
     jsDay,
+    realAvg,
   });
   const estimatedRevenue = Math.round(earningsPerH * block.hours * 10) / 10;
   const dateLabel = date.toLocaleDateString('fr-CA', {
@@ -226,10 +235,12 @@ function buildRecommendedBlocks({
   zones,
   weatherCond,
   learningInsights,
+  realAvg,
 }: {
   zones: Zone[];
   weatherCond: WeatherCondition | null;
   learningInsights: ReturnType<typeof deriveLearningInsights> | null;
+  realAvg: RealEarningsAverage | null;
 }) {
   if (zones.length === 0) {
     return [];
@@ -268,6 +279,7 @@ function buildRecommendedBlocks({
           bestZoneId,
           learningInsights,
           jsDay,
+          realAvg,
         })
       );
     }
@@ -319,6 +331,17 @@ function TargetRevenueControl({
   targetRevenue: number;
   setTargetRevenue: (value: number) => void;
 }) {
+  // Local text is the source of truth for what's displayed while editing —
+  // it's the only way to represent "field is empty" without it being
+  // immediately overwritten by the numeric value it maps to (0).
+  const [raw, setRaw] = useState(String(targetRevenue));
+
+  function handleChange(value: string) {
+    const next = sanitizeTargetRevenueInput(value);
+    setRaw(next);
+    setTargetRevenue(next === '' ? 0 : Number(next));
+  }
+
   return (
     <div className="flex items-center gap-1">
       <span className="text-[12px] text-muted-foreground font-body">
@@ -327,12 +350,11 @@ function TargetRevenueControl({
       <div className="flex items-center gap-0.5 bg-muted rounded-lg px-2 py-1">
         <span className="text-[13px] text-muted-foreground">$</span>
         <input
-          type="number"
-          value={targetRevenue}
-          min={100}
-          max={3000}
-          step={50}
-          onChange={(e) => setTargetRevenue(Number(e.target.value))}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
+          value={raw}
+          onChange={(e) => handleChange(e.target.value)}
           className="w-16 bg-transparent text-[14px] font-mono font-bold text-foreground outline-none"
         />
         <span className="text-[12px] text-muted-foreground">/sem</span>
@@ -479,7 +501,7 @@ export function ShiftOptimizer({
   const [targetRevenue, setTargetRevenue] = useState(targetWeeklyRevenue);
   const { data: zones = [] } = useZones(cityId);
   const { data: weather } = useWeather(cityId);
-  const { data: trips = [] } = useTrips(300);
+  const { data: trips = [] } = useTrips(300, undefined, true, true);
 
   const weatherCond: WeatherCondition | null = useMemo(
     () => buildWeatherCondition(weather),
@@ -492,10 +514,15 @@ export function ShiftOptimizer({
     return deriveLearningInsights(trips);
   }, [trips]);
 
+  // Overall real $/h average across logged trips — calibrates the fallback
+  // estimate used wherever the per-zone/day/slot EMA has too few (or zero)
+  // observations, instead of always falling through to the theoretical curve.
+  const realAvg = useMemo(() => getRealAvgEarningsPerHour(trips), [trips]);
+
   // Build the next 7-day optimized schedule
   const recommended = useMemo(
-    () => buildRecommendedBlocks({ zones, weatherCond, learningInsights }),
-    [zones, weatherCond, learningInsights]
+    () => buildRecommendedBlocks({ zones, weatherCond, learningInsights, realAvg }),
+    [zones, weatherCond, learningInsights, realAvg]
   );
 
   // Greedy selection: pick blocks until target met, no day-overlap > 8h

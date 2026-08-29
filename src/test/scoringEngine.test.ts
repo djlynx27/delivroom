@@ -1076,3 +1076,72 @@ describe('reweightZonesByDriverMode', () => {
     expect(result[0]!.score).toBeLessThanOrEqual(100);
   });
 });
+
+// Mall closed-hours hard veto — a closed hub must never be recommended as a
+// "best zone", regardless of how high its type/base/weighted score would
+// otherwise be (weather, events, hotspot bonus...). 2026-03-16 = Monday,
+// 2026-03-21 = Saturday.
+describe('computeDemandScore — mall closed-hours veto', () => {
+  const carrefourLaval = {
+    id: 'lvl-cf',
+    name: 'CF Carrefour Laval',
+    type: 'commercial',
+    latitude: 45.5702,
+    longitude: -73.7519,
+    current_score: 90, // deliberately high — must still be vetoed when closed
+  };
+
+  it('forces the score to 0 on a weekday after 21h close', () => {
+    const { score } = computeDemandScore(
+      carrefourLaval,
+      makeLocalDate(2026, 2, 16, 22),
+      null
+    );
+    expect(score).toBe(0);
+  });
+
+  it('forces the score to 0 on a weekend after 17h close', () => {
+    const { score } = computeDemandScore(
+      carrefourLaval,
+      makeLocalDate(2026, 2, 21, 18),
+      null
+    );
+    expect(score).toBe(0);
+  });
+
+  it('scores normally on a weekday within opening hours', () => {
+    const { score } = computeDemandScore(
+      carrefourLaval,
+      makeLocalDate(2026, 2, 16, 12),
+      null
+    );
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('scores normally on a weekend within opening hours', () => {
+    const { score } = computeDemandScore(
+      carrefourLaval,
+      makeLocalDate(2026, 2, 21, 14),
+      null
+    );
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('is never picked as the max-scoring zone in a batch when closed', () => {
+    const otherZone = {
+      id: 'lvl-other',
+      name: 'Some Other Zone',
+      type: 'commercial',
+      latitude: 45.6,
+      longitude: -73.7,
+      current_score: 20,
+    };
+    const { scores } = scoreAllZones(
+      [carrefourLaval, otherZone] as unknown as Zone[],
+      makeLocalDate(2026, 2, 16, 22),
+      null
+    );
+    expect(scores.get('lvl-cf')).toBe(0);
+    expect(scores.get('lvl-other')!).toBeGreaterThan(0);
+  });
+});
