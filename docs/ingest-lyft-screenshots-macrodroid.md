@@ -98,3 +98,60 @@ snapshot valide), `500` (config serveur incomplète).
 Une fois un snapshot inséré, la zone correspondante doit apparaître avec un
 score ajusté par le Lyft Realtime Factor dans l'app (Hero card / HUD) sous
 quelques secondes — `useDemandScores.ts` relit `platform_signals` en continu.
+
+## 7. Alternative : capture automatisée via `scripts/scrape_lyft_metrics.py` + `scripts/server.py`
+
+Plutôt que de faire prendre les 3 captures manuellement par MacroDroid (étape
+2 ci-dessus), `scripts/scrape_lyft_metrics.py` (voir §5 de ce même dossier
+`docs/`, ou directement le fichier) automatise tout via `uiautomator2` :
+ouvre Lyft Driver, navigue jusqu'aux 3 écrans, capture, résout le GPS, et
+POST vers cet endpoint lui-même. `scripts/server.py` est un petit bridge
+HTTP qui tourne sur le PC pour que MacroDroid puisse déclencher ce script à
+distance (le téléphone n'a pas d'accès SSH/ADB direct au PC).
+
+### 7.1 Configuration (une seule fois)
+
+```bash
+# Génère une valeur aléatoire, distincte de INGEST_LYFT_API_KEY
+echo "LYFT_BRIDGE_API_KEY=<génère un token aléatoire>" >> .env
+python scripts/server.py --selftest   # vérifie la logique offline avant de lancer le vrai serveur
+python scripts/server.py              # écoute sur 0.0.0.0:5000
+```
+
+Garde ce process actif pendant tes shifts (ex. lancé au démarrage de
+session Windows, ou manuellement avant de partir). Autorise le port 5000
+dans le pare-feu Windows pour les réseaux privés/Tailscale si demandé.
+
+### 7.2 Endpoint du bridge
+
+```
+GET/POST http://<IP-du-PC>:5000/run-lyft-scrape?token=<LYFT_BRIDGE_API_KEY>
+GET       http://<IP-du-PC>:5000/health   # vérifie juste que le bridge répond, sans déclencher de scrape
+```
+
+`<IP-du-PC>` : l'IP Tailscale du PC (ex. `100.x.x.x`, visible dans l'app
+Tailscale) si tu veux pouvoir déclencher hors du wifi maison, ou son IP
+locale (`192.168.x.x`) sinon. Réponse :
+
+```json
+{ "status": "triggered", "timestamp": "2026-08-29T20:15:00.000Z" }
+```
+
+`"status": "already_running"` si un scrape est déjà en cours (le bridge
+refuse d'en lancer un second en parallèle — `uiautomator2` ne supporte pas
+deux sessions concurrentes sur le même appareil). `401` si `token` est
+absent ou incorrect.
+
+### 7.3 Recette MacroDroid
+
+1. **Trigger** : au choix — raccourci manuel, ou intervalle pendant un shift actif.
+2. **Action "HTTP Request"** :
+   - Méthode : `GET`
+   - URL : `http://<IP-du-PC>:5000/run-lyft-scrape?token=<LYFT_BRIDGE_API_KEY>`
+3. (Optionnel) Teste d'abord `http://<IP-du-PC>:5000/health` dans un
+   navigateur depuis le téléphone pour confirmer que le PC est joignable
+   avant de configurer l'action HTTP Request.
+
+Le bridge lui-même n'appelle aucune API vision — il se contente de lancer
+`scrape_lyft_metrics.py`, qui POST ensuite vers `ingest-lyft-screenshots`
+(§1-§4 ci-dessus) exactement comme le flux MacroDroid manuel.
