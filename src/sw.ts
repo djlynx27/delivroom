@@ -9,6 +9,7 @@ import {
   setSeenKeys,
 } from '@/lib/maxymoScanner';
 import { pushSharedFiles } from '@/lib/shareInbox';
+import { RETRY_UPLOAD_SYNC_TAG } from '@/lib/uploadRetryQueue';
 import { clientsClaim } from 'workbox-core';
 import {
   cleanupOutdatedCaches,
@@ -19,6 +20,13 @@ import { NavigationRoute, registerRoute } from 'workbox-routing';
 
 interface PeriodicSyncEvent extends ExtendableEvent {
   tag: string;
+}
+
+// Background Sync (one-off, Chromium-only) isn't in the standard TS
+// webworker lib yet — same situation as PeriodicSyncEvent above.
+interface SyncEvent extends ExtendableEvent {
+  tag: string;
+  lastChance: boolean;
 }
 
 declare let self: ServiceWorkerGlobalScope & {
@@ -160,5 +168,40 @@ async function runPeriodicMaxymoScan(): Promise<void> {
     });
   } catch (err) {
     console.error('[periodic-scan] failed:', err);
+  }
+}
+
+// Background Sync — fires (with the browser's own retry/backoff) once
+// connectivity is back after a queued screenshot upload failed. The SW
+// itself has no access to localStorage, so it can't hold the Supabase
+// session needed to actually re-upload/re-analyze/re-record a file — it can
+// only wake an open page to drain the retry queue with that page's own
+// authenticated context (see uploadRetryQueue.ts), or, if nothing is open,
+// tell the driver to reopen the app.
+self.addEventListener('sync', (event: Event) => {
+  const syncEvent = event as SyncEvent;
+  if (syncEvent.tag !== RETRY_UPLOAD_SYNC_TAG) return;
+  syncEvent.waitUntil(notifyClientsToRetryUploads());
+});
+
+async function notifyClientsToRetryUploads(): Promise<void> {
+  const clients = await self.clients.matchAll({
+    type: 'window',
+    includeUncontrolled: true,
+  });
+
+  if (clients.length === 0) {
+    await self.registration.showNotification('Delivroom', {
+      body: "Des imports en attente n'ont pas pu être envoyés — rouvre l'app pour terminer.",
+      icon: '/pwa-icon-192.png',
+      badge: '/pwa-icon-192.png',
+      tag: 'delivroom-retry-pending',
+      data: { url: '/admin/imports' },
+    });
+    return;
+  }
+
+  for (const client of clients) {
+    client.postMessage({ type: 'delivroom:retry-failed-uploads' });
   }
 }

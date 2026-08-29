@@ -39,7 +39,7 @@ import { useCityId } from '@/hooks/useCityId';
 import { useDemandScores } from '@/hooks/useDemandScores';
 import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
-import { findNearestZone } from '@/hooks/useNotifications';
+import { findNearestZone, useNotifications } from '@/hooks/useNotifications';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
@@ -68,7 +68,7 @@ import {
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { getMontrealDayStart } from '@/lib/timezone';
 import { summarizeTrips } from '@/lib/tripAnalytics';
-import { Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
+import { Bell, Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -172,6 +172,14 @@ export default function DriveScreen() {
   const [conservativePresence, setConservativePresence] = useState(() =>
     getConservativePresencePreference()
   );
+  // Mounts the whole client-side alert pipeline (demand spikes, surge peak,
+  // event/weather/drift alerts) AND — via its own effects — requests
+  // Notification permission + registers the Web Push subscription once
+  // granted. Previously this hook existed but was never called anywhere in
+  // the app, so push_subscriptions never accumulated real drivers and the
+  // server-side surge-detector alert pipeline had nobody to deliver to.
+  const { enabled: notifEnabled, requestPermission: requestNotifPermission } =
+    useNotifications(cityId, { conservativePresence });
   const [demandWindow, setDemandWindow] = useState<DemandWindow>('30m');
   const {
     scores,
@@ -704,6 +712,19 @@ export default function DriveScreen() {
           <div className="max-w-[130px] flex-shrink-0">
             <CitySelect cities={cities} value={cityId} onChange={setCityId} />
           </div>
+        </div>
+      )}
+
+      {/* Notification opt-in — discreet, self-dismisses once granted */}
+      {!fullScreen && !notifEnabled && (
+        <div className="px-4 mb-2">
+          <button
+            onClick={() => void requestNotifPermission()}
+            className="w-full flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-[13px] font-body text-primary hover:bg-primary/10 transition-colors"
+          >
+            <Bell className="w-4 h-4 flex-shrink-0" />
+            {t('enableNotifications')}
+          </button>
         </div>
       )}
 

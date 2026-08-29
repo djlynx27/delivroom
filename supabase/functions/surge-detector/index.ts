@@ -104,10 +104,6 @@ interface Zone {
   city_id: string;
 }
 
-interface BaselineRow {
-  baseline_score: number;
-}
-
 // eslint-disable-next-line complexity
 serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -151,11 +147,14 @@ serve(async (req: Request) => {
       const hour = now.getHours();
       const dow = now.getDay();
 
+      // get_surge_baseline(p_zone_id, p_hour_slot, p_dow) returns a bare
+      // numeric (see 20260320000001_pgvector_context.sql) — not a row set,
+      // so `data` here is already the scalar, never an array to index into.
       const { data: baselineData, error: baselineError } = await supabase.rpc(
         'get_surge_baseline',
         {
           p_zone_id: zone.id,
-          p_hour: hour,
+          p_hour_slot: hour,
           p_dow: dow,
         }
       );
@@ -167,7 +166,7 @@ serve(async (req: Request) => {
       }
 
       const baselineScore: number =
-        (baselineData as BaselineRow[] | null)?.[0]?.baseline_score ??
+        (baselineData as number | null) ??
         zone.base_score ??
         zone.current_score * 0.85;
 

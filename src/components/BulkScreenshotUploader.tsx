@@ -39,6 +39,11 @@ import {
 import { drainSharedFiles } from '@/lib/shareInbox';
 import { insertTripsResilient } from '@/lib/tripBulkInsert';
 import {
+  drainUploadQueue,
+  enqueueFailedUpload,
+  registerRetrySync,
+} from '@/lib/uploadRetryQueue';
+import {
   AlertCircle,
   CheckCircle2,
   Copy,
@@ -405,6 +410,13 @@ export function BulkScreenshotUploader() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       updateItem(item.id, { status: 'failed', message: msg });
+      // Queue for automatic retry via Background Sync — content-hash dedup
+      // at the top of this function makes a redundant retry harmless (it
+      // just resolves as 'duplicate') if the driver also hits the manual
+      // "Ressayer" button before the queued retry runs.
+      void enqueueFailedUpload(item.file)
+        .then(() => registerRetrySync())
+        .catch((queueErr) => console.error('[uploadRetryQueue] enqueue failed:', queueErr));
     }
   }
 
@@ -447,6 +459,44 @@ export function BulkScreenshotUploader() {
       });
     }
   }
+
+  // Drains uploadRetryQueue's IndexedDB queue and retries every item —
+  // called on mount (covers "the app becomes active again" after a failure)
+  // and whenever the Service Worker's Background Sync `sync` handler wakes
+  // this page (covers "the network comes back" while the tab is merely
+  // backgrounded, not fully closed — see sw.ts's notifyClientsToRetryUploads).
+  async function drainAndRetryQueue(): Promise<void> {
+    const queued = await drainUploadQueue();
+    if (!queued.length) return;
+
+    const newItems: FileItem[] = queued.map((q, i) => ({
+      id: `retry-${Date.now()}-${i}-${sanitizeFilename(q.file.name)}`,
+      file: q.file,
+      status: 'pending',
+    }));
+    setItems((prev) => [...prev, ...newItems]);
+    toast.info(
+      `${newItems.length} import(s) en attente repris automatiquement`,
+    );
+
+    for (const item of newItems) {
+      await processOne(item);
+    }
+    qc.invalidateQueries({ queryKey: ['trips-feed'] });
+    qc.invalidateQueries({ queryKey: ['trip-history'] });
+  }
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      if (event.data?.type === 'delivroom:retry-failed-uploads') {
+        void drainAndRetryQueue();
+      }
+    }
+    navigator.serviceWorker?.addEventListener('message', onMessage);
+    void drainAndRetryQueue();
+    return () => navigator.serviceWorker?.removeEventListener('message', onMessage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // A screenshot is only eligible for bulk save once its OWN analysis pass
   // actually completed successfully — a 'failed' or 'duplicate' item never
