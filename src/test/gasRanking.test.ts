@@ -6,6 +6,7 @@ import {
   cityFromAddress,
   cityKeyOf,
   detectUserCityKey,
+  formatGasPriceFreshness,
   groupByCity,
   MIN_CITY_STATIONS,
   OTHER_CITIES_COUNT,
@@ -338,5 +339,33 @@ describe('candidatesNeedingHours', () => {
     expect(cities).toContain('longueuil');
     expect(candidates.length).toBeLessThanOrEqual(40);
     expect(new Set(candidates.map((c) => c.key)).size).toBe(candidates.length);
+  });
+});
+
+describe('formatGasPriceFreshness', () => {
+  const now = new Date('2026-08-29T18:00:00Z');
+
+  it('reports under a minute as "à l’instant"', () => {
+    expect(formatGasPriceFreshness(new Date('2026-08-29T17:59:40Z').toISOString(), now)).toBe(
+      'à l’instant'
+    );
+  });
+
+  it('reports minutes under an hour', () => {
+    expect(formatGasPriceFreshness(new Date('2026-08-29T17:45:00Z').toISOString(), now)).toBe(
+      'il y a 15 min'
+    );
+  });
+
+  it('reports hours and remaining minutes past an hour', () => {
+    expect(formatGasPriceFreshness(new Date('2026-08-29T15:52:00Z').toISOString(), now)).toBe(
+      'il y a 2 h 8 min'
+    );
+  });
+
+  it('drops the minutes when exactly on the hour', () => {
+    expect(formatGasPriceFreshness(new Date('2026-08-29T16:00:00Z').toISOString(), now)).toBe(
+      'il y a 2 h'
+    );
   });
 });

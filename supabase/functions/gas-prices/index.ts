@@ -72,7 +72,7 @@ interface CacheEntry {
   expires: number;
 }
 
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min — EQC publishes hourly
+const CACHE_TTL_MS = 15 * 60 * 1000; // matches the client's staleTime/refetchInterval and the cache-control header below
 let cache: CacheEntry | null = null;
 
 async function fetchToken(): Promise<{ token: string; cookie: string }> {

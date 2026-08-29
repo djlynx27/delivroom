@@ -6,7 +6,13 @@ import {
   describeOpenStatus,
   type OpenStatus,
 } from '@/lib/gasHours';
-import { NEARBY_RADIUS_KM, type FuelKind, type GasSlot, type RankedStation } from '@/lib/gasRanking';
+import {
+  formatGasPriceFreshness,
+  NEARBY_RADIUS_KM,
+  type FuelKind,
+  type GasSlot,
+  type RankedStation,
+} from '@/lib/gasRanking';
 import { Clock, Fuel, HelpCircle, MapPin, Navigation, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -66,12 +72,16 @@ function StationCard({
   locale,
   highlight,
   eyebrow,
+  updatedAt,
+  now,
 }: {
   station: RankedStation;
   status: OpenStatus;
   locale: string;
   highlight?: boolean;
   eyebrow?: string;
+  updatedAt: string | null;
+  now: Date;
 }) {
   return (
     <a
@@ -101,6 +111,11 @@ function StationCard({
               {station.distance_km.toFixed(1)} km
             </span>
             <OpenBadge status={status} />
+            {updatedAt && (
+              <span className="text-[10px] text-muted-foreground/70">
+                Prix {formatGasPriceFreshness(updatedAt, now)}
+              </span>
+            )}
           </div>
         </div>
         <div className="text-right shrink-0">
@@ -228,6 +243,8 @@ export default function GasScreen() {
               locale={locale}
               highlight={index === 0}
               eyebrow={slotEyebrow(slot)}
+              updatedAt={updatedAt}
+              now={now}
             />
           ))}
         </section>
@@ -246,6 +263,8 @@ export default function GasScreen() {
                 station={station}
                 status={status}
                 locale={locale}
+                updatedAt={updatedAt}
+                now={now}
               />
             ))}
           </div>

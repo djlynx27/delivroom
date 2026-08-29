@@ -392,3 +392,17 @@ export function buildGasBoard(params: {
     hasUnknownHours: slots.some((s) => s.status.state === 'unknown'),
   };
 }
+
+// EQC publishes one snapshot for every station, not a per-station
+// timestamp — every card shares this one freshness value.
+export function formatGasPriceFreshness(updatedAtIso: string, now: Date): string {
+  const minutes = Math.max(
+    0,
+    Math.round((now.getTime() - new Date(updatedAtIso).getTime()) / 60_000)
+  );
+  if (minutes < 1) return 'à l’instant';
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return `il y a ${hours} h${rest > 0 ? ` ${rest} min` : ''}`;
+}

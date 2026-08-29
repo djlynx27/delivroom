@@ -65,6 +65,11 @@ export function useGasBoard(
       return data;
     },
     staleTime: PRICES_STALE_MS,
+    // A shift can keep this tab open for hours — staleTime alone only marks
+    // the query stale for the *next* mount/refetch, it never refetches in
+    // the background on its own. Without this, prices silently go stale for
+    // the entire shift instead of the intended 15 min ceiling.
+    refetchInterval: PRICES_STALE_MS,
     refetchOnWindowFocus: false,
   });
 
