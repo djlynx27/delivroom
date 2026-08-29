@@ -111,6 +111,9 @@ jobs:
           supabase functions deploy platform-signal-collector --no-verify-jwt
           supabase functions deploy weight-calibrator --no-verify-jwt
           supabase functions deploy promote-discovery
+          supabase functions deploy gas-prices
+          supabase functions deploy gas-hours
+          supabase functions deploy ingest-lyft-screenshots --no-verify-jwt
 
       - name: Log migration status
         run: echo "✅ Supabase migrations applied successfully"
