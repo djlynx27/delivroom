@@ -4,6 +4,7 @@ import {
   CONSERVATIVE_MAX_PER_H,
   CONSERVATIVE_MIN_PER_H,
   getRealAvgEarningsPerHour,
+  MAX_EARNINGS_PER_HOUR,
   sanitizeTargetRevenueInput,
   scoreToEarningsPerH,
 } from '@/lib/shiftEarnings';
@@ -70,6 +71,23 @@ describe('getRealAvgEarningsPerHour', () => {
     expect(result).not.toBeNull();
     expect(result?.perHour).toBe(35);
     expect(result?.tripCount).toBe(5);
+  });
+
+  it('a short, high-fare trip cannot blow past a realistic $/h once capped by MAX_EARNINGS_PER_HOUR', () => {
+    // 5 trips of 6 minutes at $30 = $300/h raw average — unrealistic for MTL/Laval.
+    const trips = Array.from({ length: 5 }, (_, i) =>
+      trip(
+        String(i),
+        `2026-03-1${i}T08:00:00`,
+        `2026-03-1${i}T08:06:00`,
+        30
+      )
+    );
+    const result = getRealAvgEarningsPerHour(trips);
+    expect(result?.perHour).toBeGreaterThan(MAX_EARNINGS_PER_HOUR);
+    expect(Math.min(result?.perHour ?? 0, MAX_EARNINGS_PER_HOUR)).toBe(
+      MAX_EARNINGS_PER_HOUR
+    );
   });
 });
 

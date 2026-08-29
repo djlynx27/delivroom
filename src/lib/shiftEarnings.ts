@@ -17,6 +17,12 @@ import { getTripHours, getTripRevenue } from '@/lib/tripAnalytics';
 export const CONSERVATIVE_MIN_PER_H = 22;
 export const CONSERVATIVE_MAX_PER_H = 25;
 
+// Hard ceiling on any projected $/h for the MTL/Laval market — applied after
+// blending real history/EMA/conservative default, so a noisy sample (e.g. one
+// short high-fare trip skewing revenue/hours) can never inflate a shift
+// projection past what's realistically achievable in this market.
+export const MAX_EARNINGS_PER_HOUR = 40;
+
 export function scoreToEarningsPerH(score: number): number {
   const clamped = Math.max(0, Math.min(100, score));
   return (

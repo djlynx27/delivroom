@@ -20,6 +20,7 @@ import { computeDemandScore, type WeatherCondition } from '@/lib/scoringEngine';
 import {
   blend,
   getRealAvgEarningsPerHour,
+  MAX_EARNINGS_PER_HOUR,
   REAL_AVG_FULL_TRUST_AT_TRIPS,
   sanitizeTargetRevenueInput,
   scoreToEarningsPerH,
@@ -49,17 +50,29 @@ interface ShiftOptimizerProps {
   className?: string;
 }
 
-// ── High-value time blocks per day-of-week (0=Mon…6=Sun) ─────────────────────
+// ── High-value time windows per day-of-week (0=Mon…6=Sun) ────────────────────
+const PRIME_WINDOWS: Array<{ startHour: number; endHour: number }> = [
+  { startHour: 6, endHour: 9 }, // Morning rush
+  { startHour: 11, endHour: 14 }, // Midday
+  { startHour: 16, endHour: 20 }, // Evening rush
+  { startHour: 20, endHour: 24 }, // Nightlife
+];
+
+// Each window is offered as two variable-length shifts (1.5h/2h) instead of
+// one rigid 3–4h block, so the optimizer can recommend a partial window when
+// that's already enough to hit the target, and demand is sampled separately
+// for each half so a later/earlier start can score differently.
 const PRIME_BLOCKS: Array<{
   startHour: number;
   endHour: number;
   hours: number;
-}> = [
-  { startHour: 6, endHour: 9, hours: 3 }, // Morning rush
-  { startHour: 11, endHour: 14, hours: 3 }, // Midday
-  { startHour: 16, endHour: 20, hours: 4 }, // Evening rush
-  { startHour: 20, endHour: 24, hours: 4 }, // Nightlife
-];
+}> = PRIME_WINDOWS.flatMap(({ startHour, endHour }) => {
+  const mid = startHour + (endHour - startHour) / 2;
+  return [
+    { startHour, endHour: mid, hours: mid - startHour },
+    { startHour: mid, endHour, hours: endHour - mid },
+  ];
+});
 
 const DAY_LABELS_FR = [
   'Lundi',
@@ -73,7 +86,9 @@ const DAY_LABELS_FR = [
 const DOW_JS_TO_MON0 = [6, 0, 1, 2, 3, 4, 5]; // JS sun=0 → mon=0
 
 function fmt(h: number): string {
-  return `${h}h`;
+  const hours = Math.floor(h);
+  const minutes = Math.round((h - hours) * 60);
+  return minutes === 0 ? `${hours}h` : `${hours}h${String(minutes).padStart(2, '0')}`;
 }
 
 function buildWeatherCondition(weather: ReturnType<typeof useWeather>['data']) {
@@ -177,14 +192,17 @@ function buildShiftBlock({
   jsDay: number;
   realAvg: RealEarningsAverage | null;
 }): ShiftBlock {
-  const earningsPerH = getLearningAdjustedEarningsPerHour({
-    bestScore,
-    block,
-    bestZoneId,
-    learningInsights,
-    jsDay,
-    realAvg,
-  });
+  const earningsPerH = Math.min(
+    MAX_EARNINGS_PER_HOUR,
+    getLearningAdjustedEarningsPerHour({
+      bestScore,
+      block,
+      bestZoneId,
+      learningInsights,
+      jsDay,
+      realAvg,
+    })
+  );
   const estimatedRevenue = Math.round(earningsPerH * block.hours * 10) / 10;
   const dateLabel = date.toLocaleDateString('fr-CA', {
     day: 'numeric',
@@ -257,7 +275,9 @@ function buildRecommendedBlocks({
 
     for (const block of PRIME_BLOCKS) {
       const slotDate = new Date(date);
-      slotDate.setHours(block.startHour, 0, 0, 0);
+      const startH = Math.floor(block.startHour);
+      const startM = Math.round((block.startHour - startH) * 60);
+      slotDate.setHours(startH, startM, 0, 0);
 
       const { bestScore, bestZoneName, bestZoneId } = findTopZoneForBlock({
         zones,
@@ -287,7 +307,7 @@ function buildRecommendedBlocks({
 
   return blocks
     .sort((first, second) => second.estimatedRevenue - first.estimatedRevenue)
-    .slice(0, 14);
+    .slice(0, 28); // blocks are now half as long on average — keep the same hour coverage as before
 }
 
 function selectBlocksForTarget({
@@ -456,7 +476,7 @@ function ShiftBlocksList({ selectedBlocks }: { selectedBlocks: ShiftBlock[] }) {
                   ~${block.estimatedRevenue}
                 </span>
                 <span className="text-[11px] text-muted-foreground font-body block">
-                  ({block.endHour - block.startHour}h)
+                  ({fmt(block.endHour - block.startHour)})
                 </span>
               </div>
             </div>
@@ -540,6 +560,10 @@ export function ShiftOptimizer({
     0
   );
   const gapToTarget = Math.max(0, targetRevenue - projectedRevenue);
+  // Reverse calculation: hours realistically needed at the market cap, rather
+  // than dividing the target evenly across rigid blocks.
+  const requiredHours =
+    targetRevenue > 0 ? Math.ceil(targetRevenue / MAX_EARNINGS_PER_HOUR) : 0;
 
   if (zones.length === 0) {
     return (
@@ -565,7 +589,7 @@ export function ShiftOptimizer({
             Planning IA — Semaine
           </h2>
           <p className="text-[12px] text-muted-foreground font-body">
-            Shifts optimisés pour atteindre votre objectif
+            ≈{fmt(requiredHours)} nécessaires (max ${MAX_EARNINGS_PER_HOUR}/h)
           </p>
         </div>
         <TargetRevenueControl
