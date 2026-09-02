@@ -310,6 +310,11 @@ export function BulkScreenshotUploader() {
   function reset() {
     setItems([]);
     setFolderStats(null);
+    // La plateforme n'est pas détectée par screenshot — un seul sélecteur
+    // s'applique à tout le lot. Sans ce reset, un lot Hypra suivi d'un lot
+    // Lyft hérite silencieusement du choix précédent (bug rapporté : courses
+    // Lyft loggées "Hypra"). Revenir au défaut force une re-confirmation.
+    setPlatform('lyft');
     if (fileInputRef.current) fileInputRef.current.value = '';
     if (folderInputRef.current) folderInputRef.current.value = '';
   }
