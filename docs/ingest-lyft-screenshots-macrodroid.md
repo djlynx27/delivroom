@@ -6,6 +6,50 @@ Vision, et l'enregistre dans `platform_signals` (lu par `useDemandScores.ts`
 pour le Lyft Realtime Factor). Voir `supabase/functions/ingest-lyft-screenshots/index.ts`
 pour le code.
 
+> **§3B (2026-09-02) — décision produit** : Wait Times / Recent Demand ne
+> sont plus capturés (métriques Lyft gamifiées/retardées, biais négatif pour
+> le scoring). Seul **Nearby Drivers** est capturé — voir `runGeminiVision`
+> en mode `nearbyOnly` dans l'edge function, et le nouveau mode "raw image
+> body" (`Content-Type: image/jpeg` + `latitude`/`longitude` en query params)
+> qui évite le base64 — MacroDroid n'a aucune fonction d'encodage base64
+> native, `Content Body → File` poste directement les octets bruts.
+
+## État de la macro "Lyft 3 Functions" (2026-09-02) — NON FONCTIONNELLE, à reprendre
+
+**Ce qui est solide et déployé :**
+- Edge function (mode raw-image, nearby-only) — testée via `curl` directement, fonctionne.
+- `INGEST_LYFT_API_KEY` généré et configuré (`supabase secrets set`), sauvegardé dans `.env`.
+- Client-side `applyNearbyDriversCompetitionNudge` (scoringEngine.ts / useDemandScores.ts) — le
+  nudge de score dédié à un signal nearby-only (la formule fusionnée existante ne marche pas
+  sans demand/wait).
+- Séquence macro construite dans MacroDroid : `Kill Background Process (Lyft Driver)` →
+  `Launch Lyft Driver` → `Wait 4s` (cold-start) → `Click (75,1038)` [Map Layers] → `Wait 1s` →
+  `Click on text "Nearby drivers"` → `Wait 1.5s` → `Take Screenshot` (chemin fixe
+  `/storage/emulated/0/Pictures/Delivroom/nearby_drivers.jpg`) → `Force Location Update`
+  (variable dict `locdict`) → `HTTP Request POST` (raw image body, headers Authorization +
+  Content-Type, URL avec `{lv=locdict[Latitude]}`/`{lv=locdict[Longitude]}`).
+
+**Ce qui bloque :** `Test actions from here` ne produit AUCUNE ligne dans `platform_signals`,
+peu importe si le 2e clic cible des coordonnées fixes ou le texte "Nearby drivers". L'écran
+final après un run retombe sur l'accueil Lyft ("You're offline") — signe que même le **premier**
+clic (Map Layers, `Click (75,1038)`) échoue probablement en exécution automatisée par
+MacroDroid, alors qu'il fonctionne quand déclenché manuellement (via `uiautomator2`/ADB direct,
+utilisé pour calibrer les coordonnées dans cette même session).
+
+**Diagnostic à faire la prochaine session :**
+1. Vérifier que le Service d'Accessibilité de MacroDroid est bien actif et non révoqué
+   (`Paramètres → Accessibilité → MacroDroid` — Android révoque parfois automatiquement ce
+   genre de permission après une mise à jour d'app tierce ou du système).
+2. Android 14+ restreint les clics synthétiques via AccessibilityService sur certains flows
+   ("Restricted setting" — nécessite parfois une ré-activation manuelle après chaque install/update
+   de l'app cible, ici Lyft Driver).
+3. Si possible, observer un run en direct (écran allumé, macro déclenchée manuellement via son
+   trigger réel — ouverture de Delivroom — plutôt que "Test actions from here") pour voir où le
+   flow s'arrête exactement.
+4. Notifications Lyft Driver ont été réactivées en fin de session (désactivées temporairement
+   pour éliminer une bulle de chat qui bloquait la configuration MacroDroid — vérifier qu'elles
+   sont bien restées actives).
+
 ## 1. Configuration (une seule fois)
 
 ```bash
