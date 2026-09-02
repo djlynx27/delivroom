@@ -1084,3 +1084,27 @@ export function applyLyftRealtimeBoost(
   const nudge = Math.max(-8, Math.min(8, (realtimeScore - 2) * 3));
   return Math.max(0, Math.min(100, Math.round(score + nudge)));
 }
+
+const COMPETITION_NEUTRAL_DRIVERS = 2; // baseline: 2 rival drivers nearby is unremarkable
+const COMPETITION_MAX_NUDGE = 6; // smaller cap than the full realtime boost (8) -- weaker signal alone
+
+/**
+ * Nearby-drivers-only nudge, used when a screenshot only captured the
+ * "Nearby drivers" screen (no demand/wait signal to fuse into
+ * applyLyftRealtimeBoost). Zero rival drivers -> small boost; a cluster of
+ * competitors -> small penalty. Deliberately weaker than the full realtime
+ * boost since it's one weaker signal, not three combined.
+ */
+export function applyNearbyDriversCompetitionNudge(
+  score: number,
+  nearbyDriversCount: number
+): number {
+  const nudge = Math.max(
+    -COMPETITION_MAX_NUDGE,
+    Math.min(
+      COMPETITION_MAX_NUDGE,
+      (COMPETITION_NEUTRAL_DRIVERS - nearbyDriversCount) * 2
+    )
+  );
+  return Math.max(0, Math.min(100, Math.round(score + nudge)));
+}

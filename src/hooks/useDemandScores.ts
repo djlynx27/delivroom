@@ -35,6 +35,7 @@ import {
 import { getObservedZoneScore } from '@/lib/observedScore';
 import {
   applyLyftRealtimeBoost,
+  applyNearbyDriversCompetitionNudge,
   DEMAND_WINDOW_MINUTES,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
@@ -774,16 +775,25 @@ export function useDemandScores(
         surgeActive: lyftSignal?.surgeActive,
       });
 
-      // Lyft Realtime Factor (ingest-lyft-screenshots): only applies when a
-      // screenshot-sourced signal actually carried wait time + driver count
-      // -- older/manual platform_signals rows may only have demandLevel.
-      const realtimeCheckedScore =
-        lyftSignal?.estimatedWaitMin != null && lyftSignal?.nearbyDriversCount != null
-          ? applyLyftRealtimeBoost(realityCheckedScore, {
-              demandScore: lyftSignal.demandLevel,
-              waitTimeMin: lyftSignal.estimatedWaitMin,
-              nearbyDriversCount: lyftSignal.nearbyDriversCount,
-            })
+      // Lyft Realtime Factor (ingest-lyft-screenshots): the full fused boost
+      // needs demand+wait+nearby together; a Nearby-Drivers-only capture
+      // (the only screen this app now scrapes -- Wait Times/Recent Demand
+      // are deliberately not captured, see docs/ingest-lyft-screenshots-macrodroid.md)
+      // falls back to a lighter competition-only nudge.
+      const hasFullRealtimeSignal =
+        lyftSignal?.estimatedWaitMin != null &&
+        lyftSignal?.nearbyDriversCount != null;
+      const realtimeCheckedScore = hasFullRealtimeSignal
+        ? applyLyftRealtimeBoost(realityCheckedScore, {
+            demandScore: lyftSignal.demandLevel,
+            waitTimeMin: lyftSignal.estimatedWaitMin,
+            nearbyDriversCount: lyftSignal.nearbyDriversCount,
+          })
+        : lyftSignal?.nearbyDriversCount != null
+          ? applyNearbyDriversCompetitionNudge(
+              realityCheckedScore,
+              lyftSignal.nearbyDriversCount
+            )
           : realityCheckedScore;
 
       boostedScores.set(zone.id, realtimeCheckedScore);
