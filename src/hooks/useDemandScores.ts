@@ -1,3 +1,4 @@
+import { nearbyCityIds } from '@/hooks/useAutoCity';
 import {
   getActiveEvents,
   getEndingSoonEvents,
@@ -181,11 +182,26 @@ export function useDemandScores(
 ) {
   const demandWindow: DemandWindow = options.demandWindow ?? '30m';
   const queryClient = useQueryClient();
-  const { data: zones = [], isLoading: zonesLoading } = useZones(cityId);
+  // Cross-city zone reach: a driver near a border (e.g. Laval) should still see
+  // a high-score zone just across it (e.g. Vieux-Port MTL) instead of being
+  // hard-cut at the nearest city. Weather/events below stay keyed to the
+  // driver's primary city — cross-border zones inherit that city's weather
+  // and won't pick up neighbor-city-specific event boosts (known gap; scores
+  // themselves are still fetched per-city so this doesn't affect ranking).
+  const cityIds = useMemo(() => {
+    const nearby =
+      options.currentLat != null && options.currentLng != null
+        ? nearbyCityIds(options.currentLat, options.currentLng, 35)
+        : [cityId];
+    // cityId must stay first: the score-calculator refresh effect below
+    // invalidates by ['zones'|'zone-scores', cityId] as a query-key prefix.
+    return [cityId, ...nearby.filter((id) => id !== cityId)];
+  }, [options.currentLat, options.currentLng, cityId]);
+  const { data: zones = [], isLoading: zonesLoading } = useZones(cityIds);
   const { data: weather } = useWeather(cityId);
   const { data: events = [] } = useEvents(cityId);
   const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
-  const { data: dbScores = [], isLoading: scoresLoading } = useZoneScores(cityId);
+  const { data: dbScores = [], isLoading: scoresLoading } = useZoneScores(cityIds);
   const { data: trafficSnapshots = [] } = useTomTomTraffic(cityId, zones);
   const { data: stmStatus } = useStmTransit();
   const { data: tripLogs = [] } = useTrips(200, cityId, Boolean(cityId));

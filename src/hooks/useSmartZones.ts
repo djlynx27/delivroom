@@ -5,7 +5,7 @@
  * Computes "smart zones": zones scored at ARRIVAL time, considering
  * travel time from driver's current position + Lyft demand signals.
  *
- * Returns the top-5 reachable zones with score ≥ 45 and distance ≤ 20 km.
+ * Returns the top-5 reachable zones with score ≥ 45 and distance ≤ 35 km.
  */
 import { haversineKm } from '@/hooks/useUserLocation';
 import { formatTime24h } from '@/lib/demandUtils';
@@ -17,7 +17,9 @@ import { computeDemandScore, type WeatherCondition } from '@/lib/scoringEngine';
 import { useEffect, useMemo, useRef } from 'react';
 
 const AVG_SPEED_KMH = 30;
-const MAX_DISTANCE_KM = 20;
+// 35 km covers Laval <-> downtown MTL / Vieux-Port -- score should arbitrate profitability,
+// distance is just a reachability sanity cap, not a city-boundary filter.
+const MAX_DISTANCE_KM = 35;
 const MIN_ARRIVAL_SCORE = 45;
 const MAX_RESULTS = 5;
 

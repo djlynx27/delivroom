@@ -72,6 +72,24 @@ export function nearestCityId(lat: number, lng: number): string {
 }
 
 /**
+ * All city ids whose reference points fall within `maxKm` of the driver —
+ * lets zone queries cross city boundaries (e.g. Laval -> Vieux-Port MTL)
+ * instead of hard-cutting at the nearest city, so a high-score zone just
+ * across the border isn't invisible.
+ */
+export function nearbyCityIds(
+  lat: number,
+  lng: number,
+  maxKm: number
+): string[] {
+  const ids = CITY_REFERENCE_POINTS.filter((city) =>
+    city.points.some((point) => haversineKm(lat, lng, point.lat, point.lng) <= maxKm)
+  ).map((city) => city.id);
+
+  return ids.length > 0 ? ids : [nearestCityId(lat, lng)];
+}
+
+/**
  * Keeps cityId aligned with the detected city, while avoiding repeated writes for
  * the same detection so a manual override can still stick until GPS resolves to
  * a different city.

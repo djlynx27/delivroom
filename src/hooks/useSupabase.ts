@@ -39,19 +39,20 @@ export function useAddCity() {
 }
 
 // Zones
-export function useZones(cityId: string) {
+export function useZones(cityIds: string | string[]) {
+  const ids = Array.isArray(cityIds) ? cityIds : [cityIds];
   return useQuery({
-    queryKey: ['zones', cityId],
+    queryKey: ['zones', ...ids],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('zones')
         .select('*')
-        .eq('city_id', cityId)
+        .in('city_id', ids)
         .order('name');
       if (error) throw error;
       return data as Zone[];
     },
-    enabled: !!cityId,
+    enabled: ids.length > 0 && ids.every(Boolean),
     staleTime: 5 * 60 * 1000, // consider fresh for 5 min
     refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
     refetchOnWindowFocus: true, // re-fetch when user returns to tab
