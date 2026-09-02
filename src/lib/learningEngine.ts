@@ -1,4 +1,5 @@
 import type { TripWithZone } from '@/hooks/useTrips';
+import { MAX_EARNINGS_PER_HOUR } from '@/lib/shiftEarnings';
 import { DEFAULT_WEIGHTS, type WeightConfig } from '@/lib/scoringEngine';
 import { getTripHours, getTripRevenue } from '@/lib/tripAnalytics';
 
@@ -152,7 +153,17 @@ function getSortedTrips(trips: TripWithZone[]) {
 function getTripLearningContext(trip: TripWithZone) {
   const startedAt = new Date(trip.started_at);
   const hours = getTripHours(trip);
-  const earningsPerHour = getTripRevenue(trip) / hours;
+  // Zero-duration trips (quick-log-trip sets started_at === ended_at; bulk
+  // screenshot import never sets ended_at at all) must not divide by zero —
+  // and a single short real ride (e.g. a 3-min airport drop) shouldn't be
+  // able to skew the zone EMA to an unrealistic instantaneous rate either.
+  // Same MAX_EARNINGS_PER_HOUR ceiling already used for shift projections
+  // (see shiftEarnings.ts) — "Top zones apprises" showing 229$/h was this
+  // same class of bug.
+  const earningsPerHour =
+    hours > 0
+      ? Math.min(getTripRevenue(trip) / hours, MAX_EARNINGS_PER_HOUR)
+      : 0;
   const predictedScoreSource =
     (trip as { zone_score?: number | null }).zone_score ??
     trip.zones?.current_score;
