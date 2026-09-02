@@ -173,17 +173,19 @@ async function handleRequest(req: Request): Promise<Response> {
   const images = fetched as FetchedImage[];
 
   // Idempotency: a MacroDroid retry on a flaky connection re-POSTs the same
-  // 3 screenshots byte-for-byte. Skip the Gemini call entirely and replay
-  // the signal already recorded for this exact content within the last 5
-  // minutes, instead of re-billing Gemini for identical input.
+  // 3 screenshots byte-for-byte, AND a driver re-scanning the whole /Lyft
+  // folder by hand (no working background auto-scan yet) re-uploads
+  // screenshots already ingested days ago. Both cases must skip the Gemini
+  // call and replay the signal already recorded for this exact content —
+  // unconditionally, not just within a short retry window, otherwise a
+  // manual re-scan re-bills Gemini and inserts duplicate platform_signals
+  // rows for every already-processed file.
   const contentHash = await hashImages(images);
   if (client) {
-    const cutoff = new Date(Date.now() - 5 * 60_000).toISOString();
     const { data: recent } = await client
       .from('platform_signals')
       .select('zone_id, demand_level, estimated_wait_min, nearby_drivers_count')
       .eq('content_hash', contentHash)
-      .gte('captured_at', cutoff)
       .order('captured_at', { ascending: false })
       .limit(1)
       .maybeSingle();
