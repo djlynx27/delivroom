@@ -82,8 +82,11 @@ describe('learning engine', () => {
   it('uses threshold-based prediction accuracy', () => {
     const insights = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
 
-    expect(insights.meanAbsoluteError).toBe(28);
-    expect(insights.accuracyPercent).toBe(33.33);
+    // Pre-MAX_EARNINGS_PER_HOUR-cap fixture expected 28/33.33 -- the fixture
+    // trips' raw $/h (64, 39, 73.7) get capped at 40 (see 35e4e46), which
+    // moves the observed rate much closer to each trip's predicted score.
+    expect(insights.meanAbsoluteError).toBe(6);
+    expect(insights.accuracyPercent).toBe(100);
   });
 
   it('builds a post-shift summary for a time window', () => {

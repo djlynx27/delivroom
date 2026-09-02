@@ -3,8 +3,10 @@
 // module-level serve() call, which binds a listener on import.
 
 export interface LyftSnapshot {
-  demand_score: number;
-  wait_time_min: number;
+  // Optional: absent in nearby-only captures (Wait Times / Recent Demand
+  // are deliberately no longer scraped -- see index.ts's optionalSlots).
+  demand_score?: number;
+  wait_time_min?: number;
   nearby_drivers_count: number;
 }
 
@@ -34,6 +36,17 @@ export function parseLyftSnapshot(raw: unknown): LyftSnapshot | null {
   return {
     demand_score: clampNumber(obj.demand_score, 1, 10, 5),
     wait_time_min: clampNumber(obj.wait_time_min, 0, 120, 5),
+    nearby_drivers_count: Math.round(clampNumber(obj.nearby_drivers_count, 0, 200, 0)),
+  };
+}
+
+/** Same validation as parseLyftSnapshot, minus the demand/wait fields --
+ * used when only the Nearby Drivers screenshot was captured. */
+export function parseNearbyOnlySnapshot(raw: unknown): LyftSnapshot | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+  if (obj.nearby_drivers_count === undefined) return null;
+  return {
     nearby_drivers_count: Math.round(clampNumber(obj.nearby_drivers_count, 0, 200, 0)),
   };
 }

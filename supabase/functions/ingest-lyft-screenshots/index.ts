@@ -40,6 +40,7 @@ import {
   hashImages,
   haversineKm,
   parseLyftSnapshot,
+  parseNearbyOnlySnapshot,
   shouldFlagEmergingHotspot,
   type LyftSnapshot,
 } from './lyftSnapshot.ts';
@@ -132,17 +133,24 @@ async function handleRequest(req: Request): Promise<Response> {
 
   const body: RequestBody = await req.json().catch(() => ({}) as RequestBody);
 
-  const slots: ImageSlot[] = [
+  // Wait Times / Recent Demand are deliberately no longer captured (Lyft's
+  // own gamified/delayed metrics -- see docs/ingest-lyft-screenshots-macrodroid.md
+  // §3B): both slots are optional now, Nearby Drivers is the only one required.
+  const optionalSlots: ImageSlot[] = [
     { url: body.wait_times_image_url, base64: body.wait_times_image_base64 },
     { url: body.recent_demand_image_url, base64: body.recent_demand_image_base64 },
-    { url: body.nearby_drivers_image_url, base64: body.nearby_drivers_image_base64 },
-  ];
-  if (slots.some((s) => !s.url && !s.base64)) {
+  ].filter((s) => s.url || s.base64);
+  const nearbySlot: ImageSlot = {
+    url: body.nearby_drivers_image_url,
+    base64: body.nearby_drivers_image_base64,
+  };
+  if (!nearbySlot.url && !nearbySlot.base64) {
     return json(
-      { error: 'Les 3 images (wait_times, recent_demand, nearby_drivers) sont requises, chacune en _url ou _base64' },
+      { error: 'nearby_drivers_image (_url ou _base64) est requise' },
       400
     );
   }
+  const slots: ImageSlot[] = [...optionalSlots, nearbySlot];
   if (!Number.isFinite(body.latitude) || !Number.isFinite(body.longitude)) {
     return json({ error: 'Coordonnées GPS requises' }, 400);
   }
@@ -203,7 +211,8 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
-  const snapshot = await runGeminiVision(env.geminiKey, images);
+  const nearbyOnly = optionalSlots.length === 0;
+  const snapshot = await runGeminiVision(env.geminiKey, images, nearbyOnly);
   if (!snapshot) {
     return json({ error: 'Gemini n\'a pas pu extraire un snapshot valide de ces captures' }, 502);
   }
@@ -220,8 +229,11 @@ async function handleRequest(req: Request): Promise<Response> {
     const { error } = await client.from('platform_signals').insert({
       zone_id: zoneId,
       platform: 'lyft',
-      demand_level: snapshot.demand_score,
-      estimated_wait_min: Math.round(snapshot.wait_time_min),
+      // demand_level defaults to 0 / estimated_wait_min stays null when a
+      // nearby-only capture has no demand/wait signal to report.
+      ...(snapshot.demand_score != null && { demand_level: snapshot.demand_score }),
+      estimated_wait_min:
+        snapshot.wait_time_min != null ? Math.round(snapshot.wait_time_min) : null,
       nearby_drivers_count: snapshot.nearby_drivers_count,
       source: 'screenshot',
       captured_at: new Date().toISOString(),
@@ -234,8 +246,13 @@ async function handleRequest(req: Request): Promise<Response> {
   // high -- worth surfacing as an "emerging hotspot" candidate even though
   // we don't have a matched zone for it. Best-effort: never blocks the
   // response the driver actually cares about (the snapshot itself).
+  // Needs a demand_score to judge "high" -- skipped for nearby-only captures.
   let emergingHotspot = false;
-  if (client && shouldFlagEmergingHotspot(nearestDistanceKm, snapshot.demand_score)) {
+  if (
+    client &&
+    snapshot.demand_score != null &&
+    shouldFlagEmergingHotspot(nearestDistanceKm, snapshot.demand_score)
+  ) {
     emergingHotspot = await logEmergingHotspot(client, body.latitude!, body.longitude!, snapshot);
   }
 
@@ -275,9 +292,21 @@ function toBase64(bytes: Uint8Array): string {
 
 async function runGeminiVision(
   apiKey: string,
-  images: FetchedImage[]
+  images: FetchedImage[],
+  nearbyOnly: boolean
 ): Promise<LyftSnapshot | null> {
-  const prompt = `You are analyzing 3 screenshots from the Lyft Driver app, in this exact order:
+  const prompt = nearbyOnly
+    ? `You are analyzing 1 screenshot from the Lyft Driver app: the "Nearby drivers" screen (map showing rival driver car icons near the current position).
+
+Extract and return ONLY a raw JSON object (no markdown fences) matching:
+{
+  "nearby_drivers_count": number // count of visually distinct rival driver car icons on the map
+}
+
+Rules:
+- If the count isn't clearly visible, make your best visual estimate rather than returning null.
+- Return ONLY the JSON, no other text.`
+    : `You are analyzing 3 screenshots from the Lyft Driver app, in this exact order:
 1. Wait times screen
 2. Recent demand screen (heatmap/graph of ride requests)
 3. Nearby drivers screen (map showing rival driver car icons near the current position)
@@ -331,7 +360,7 @@ Rules:
     console.error('Gemini returned unparseable response. Raw text:\n', raw);
     return null;
   }
-  return parseLyftSnapshot(parsed);
+  return nearbyOnly ? parseNearbyOnlySnapshot(parsed) : parseLyftSnapshot(parsed);
 }
 
 interface NearestZoneResult {
@@ -373,7 +402,9 @@ async function logEmergingHotspot(
   snapshot: LyftSnapshot
 ): Promise<boolean> {
   const address = formatGpsAddress(lat, lng);
-  const notes = `Détecté via ingest-lyft-screenshots — demande ${snapshot.demand_score}/10, attente ~${Math.round(snapshot.wait_time_min)}min`;
+  const waitLabel =
+    snapshot.wait_time_min != null ? `~${Math.round(snapshot.wait_time_min)}min` : 'inconnue';
+  const notes = `Détecté via ingest-lyft-screenshots — demande ${snapshot.demand_score}/10, attente ${waitLabel}`;
   try {
     const { data: existing } = await client
       .from('zone_discoveries')
