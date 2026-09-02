@@ -97,6 +97,16 @@ export const HOTSPOTS: Hotspot[] = [
     platforms: ['Uber', 'Lyft', 'Eva'],
     egressVelocity: 10,
   },
+  {
+    id: 'station-montmorency',
+    name: 'Station Montmorency',
+    address: '1 Place Montmorency, Laval',
+    lat: 45.5605,
+    lng: -73.7433,
+    category: 'Transport',
+    platforms: ['Uber', 'Lyft', 'Eva'],
+    egressVelocity: 9,
+  },
   // Commerce
   {
     id: 'centropolis',
