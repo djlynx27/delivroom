@@ -366,10 +366,13 @@ function buildPatrolWaypoint(
   const maxOffsetKm = Math.sqrt(
     Math.max(0, (maxRoundTripKm / 2) ** 2 - halfRouteKm ** 2)
   );
-  // ponytail: straight-line geometry underestimates road distance — the 1.0 km
-  // hard cap (down from 1.5) absorbs that amplification; a road-network-aware
-  // budget would need a Directions round-trip this sync path can't afford.
-  const offsetKm = Math.min(maxOffsetKm, 1.0, routeLenKm * 0.25);
+  // ponytail: straight-line geometry underestimates road distance — the 0.5 km
+  // hard cap (down from 1.0, itself down from 1.5) absorbs that amplification;
+  // a 2026-09-02 audit against 21 real patrol-sweep trips measured the 1.0 km
+  // cap producing 49-84% real-road detours vs the intended +20%, ~3-4x worse
+  // than the geometry assumed. A road-network-aware budget would need a
+  // Directions round-trip this sync path can't afford.
+  const offsetKm = Math.min(maxOffsetKm, 0.5, routeLenKm * 0.25);
   if (offsetKm < 0.15) return null;
 
   const sweepVec: Vec2 = {
