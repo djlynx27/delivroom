@@ -251,8 +251,14 @@ function RevenueQuickRead({ analytics }: { analytics: RevenueAnalytics }) {
         </div>
         <div className="rounded-lg border border-border p-3">
           <p className="text-muted-foreground text-xs">Créneau dominant</p>
+          {/* daypartSeries always has 4 fixed buckets (Nuit/Matin/Après-midi/Soir),
+              so [0] is never undefined — even with zero trips in the window it
+              would otherwise silently show "Nuit" with $0 as if it were a real
+              signal. Gate on revenue instead of presence. */}
           <p className="font-medium mt-1">
-            {analytics.daypartSeries[0]?.label ?? 'Pas encore de signal fort'}
+            {(analytics.daypartSeries[0]?.revenue ?? 0) > 0
+              ? analytics.daypartSeries[0]?.label
+              : 'Pas encore de signal fort'}
           </p>
           <p className="text-xs text-muted-foreground mt-1">
             {formatMoney(analytics.daypartSeries[0]?.revenue ?? 0)} cumulés sur

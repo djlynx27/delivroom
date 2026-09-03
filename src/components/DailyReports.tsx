@@ -147,9 +147,18 @@ function useReports() {
   return useQuery<DailyReportRow[]>({
     queryKey: ['daily-reports'],
     queryFn: async () => {
+      // Without a lower bound, `order + limit` happily returns the 14 most
+      // recent rows even if the newest is months old (e.g. the
+      // generate-daily-report cron was never scheduled) — the UI would then
+      // show stale data with no indication it isn't current. Bound the query
+      // so a coverage gap surfaces as the honest "no report yet" empty state.
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 13);
+      cutoff.setHours(0, 0, 0, 0);
       const { data, error } = await supabase
         .from('daily_reports')
         .select('*')
+        .gte('report_date', cutoff.toISOString().split('T')[0])
         .order('report_date', { ascending: false })
         .limit(14);
       if (error) throw error;

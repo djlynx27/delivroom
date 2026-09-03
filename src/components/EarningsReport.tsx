@@ -210,15 +210,11 @@ export function EarningsReport({ className }: EarningsReportProps) {
     analytics;
 
   const maxPlatformRPH = Math.max(
-    ...platformSeries.map((p) =>
-      p.revenue > 0 && p.hours > 0 ? p.revenue / p.hours : 0
-    ),
+    ...platformSeries.map((p) => p.revenuePerHour ?? 0),
     1
   );
   const maxZoneRPH = Math.max(
-    ...zoneSeries.map((z) =>
-      z.revenue > 0 && z.hours > 0 ? z.revenue / z.hours : 0
-    ),
+    ...zoneSeries.map((z) => z.revenuePerHour ?? 0),
     1
   );
   const maxDailyRev = Math.max(...dailySeries.map((d) => d.revenue), 1);
@@ -345,9 +341,9 @@ export function EarningsReport({ className }: EarningsReportProps) {
           </h4>
           <div className="bg-card rounded-xl border border-border p-3 space-y-3">
             {platformSeries
-              .filter((p) => p.hours > 0)
+              .filter((p) => p.revenuePerHour !== null)
               .map((p) => {
-                const rph = p.revenue / p.hours;
+                const rph = p.revenuePerHour as number;
                 const meta =
                   (
                     PLATFORM_META as Record<
@@ -380,13 +376,13 @@ export function EarningsReport({ className }: EarningsReportProps) {
           </h4>
           <div className="bg-card rounded-xl border border-border p-3 space-y-3">
             {zoneSeries
-              .filter((z) => z.hours > 0)
+              .filter((z) => z.revenuePerHour !== null)
               .slice(0, 8)
               .map((z) => (
                 <HorizontalBar
                   key={z.label}
                   label={`📍 ${z.label}`}
-                  value={z.revenue / z.hours}
+                  value={z.revenuePerHour as number}
                   max={maxZoneRPH}
                   color="bg-emerald-500"
                   sub={`$${r(z.revenue)} · ${r(z.hours)}h · ${z.rides} courses`}

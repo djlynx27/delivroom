@@ -24,6 +24,11 @@ export interface RankedBucket {
   revenue: number;
   rides: number;
   hours: number;
+  /** revenue/hours, but only once the sample clears MIN_RATE_TRIPS trips and
+   * MIN_RATE_HOURS cumulative duration — below that, a single short trip can
+   * swing $/h wildly (division by a near-zero denominator), so null tells
+   * callers to show "not enough data" instead of a misleading number. */
+  revenuePerHour: number | null;
 }
 
 export interface ShiftSnapshot {
@@ -172,6 +177,14 @@ export function summarizeTrackedSessions(
   };
 }
 
+// Below this sample size, a per-zone/platform $/h is noise, not signal — a
+// zone with 1-2 short trips (or synthetic seed data averaging ~9 min/trip)
+// can show $100+/h purely from dividing by a near-zero duration. Matches the
+// 2026-09-02 admin-reports audit finding (Cégep de Terrebonne showing
+// $278/h off a handful of micro-duration trips).
+const MIN_RATE_TRIPS = 3;
+const MIN_RATE_HOURS = 0.5;
+
 function getDaypartLabel(date: Date) {
   const hour = date.getHours();
   if (hour < 6) return DAYPART_LABELS[0];
@@ -188,7 +201,7 @@ function buildRankedSeries(
   // Normalize key by trimming + lower-casing to prevent duplicate buckets
   // when DB entries have inconsistent casing (e.g. "Downtown" vs "downtown").
   // The original label is preserved for display via the first occurrence.
-  const map = new Map<string, RankedBucket>();
+  const map = new Map<string, Omit<RankedBucket, 'revenuePerHour'>>();
 
   for (const trip of trips) {
     const rawLabel = bucket(trip);
@@ -210,6 +223,10 @@ function buildRankedSeries(
       ...entry,
       revenue: round(entry.revenue, 2),
       hours: round(entry.hours, 1),
+      revenuePerHour:
+        entry.rides >= MIN_RATE_TRIPS && entry.hours >= MIN_RATE_HOURS
+          ? round(entry.revenue / entry.hours, 2)
+          : null,
     }))
     .sort((left, right) => right.revenue - left.revenue)
     .slice(0, limit);
