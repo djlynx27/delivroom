@@ -205,7 +205,7 @@ export function useDemandScores(
   const { data: dbScores = [], isLoading: scoresLoading } = useZoneScores(cityIds);
   const { data: trafficSnapshots = [] } = useTomTomTraffic(cityId, zones);
   const { data: stmStatus } = useStmTransit();
-  const { data: tripLogs = [] } = useTrips(200, cityId, Boolean(cityId));
+  const { data: tripLogs = [] } = useTrips({ limit: 200, cityId, enabled: Boolean(cityId) });
   const [now, setNow] = useState(new Date());
 
   // Tick every 15 s so the "best zone right now" recomputes promptly while

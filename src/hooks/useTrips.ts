@@ -26,9 +26,24 @@ export type TripWithZone = TripRow & {
 // cityId filters to trips whose zone belongs to that city (used by the
 // demand-scoring ML feedback loop); omit it for the unfiltered global feed.
 // enabled lets a city-scoped caller skip fetching until cityId is known.
-export function useTrips(limit = 500, cityId?: string, enabled = true) {
+// includeSynthetic pulls in the seedSyntheticTrips.ts data-bootstrap prior
+// (see learningEngine.ts) -- only the learning-insights views want it mixed
+// in; every revenue/history display must stay real-only.
+export function useTrips({
+  limit = 500,
+  cityId,
+  enabled = true,
+  includeSynthetic = false,
+}: {
+  limit?: number;
+  cityId?: string;
+  enabled?: boolean;
+  includeSynthetic?: boolean;
+} = {}) {
   return useQuery<TripWithZone[]>({
-    queryKey: cityId ? ['trips-feed', limit, cityId] : ['trips-feed', limit],
+    queryKey: cityId
+      ? ['trips-feed', limit, cityId, includeSynthetic]
+      : ['trips-feed', limit, includeSynthetic],
     enabled,
     queryFn: async () => {
       let query = supabase
@@ -40,6 +55,9 @@ export function useTrips(limit = 500, cityId?: string, enabled = true) {
         )
         .order('started_at', { ascending: false })
         .limit(limit);
+      if (!includeSynthetic) {
+        query = query.eq('source', 'real');
+      }
       if (cityId) {
         query = query.eq('zones.city_id', cityId);
       }
@@ -74,9 +92,19 @@ export function useAddTrip() {
       };
       feedback: FeedbackContext;
     }) => {
+      // trips_user_isolation (RLS) requires auth.uid() = user_id on INSERT --
+      // without this the WITH CHECK silently rejects every save.
+      const { data: userData, error: userError } =
+        await supabase.auth.getUser();
+      if (userError || !userData.user) {
+        throw new Error(
+          'Session introuvable — reconnecte-toi avant d’enregistrer la course.'
+        );
+      }
+
       const { data, error } = await supabase
         .from('trips')
-        .insert(trip)
+        .insert({ ...trip, user_id: userData.user.id })
         .select('*, zones(name, type, current_score)')
         .single();
       if (error) throw error;

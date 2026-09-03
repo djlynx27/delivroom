@@ -245,7 +245,7 @@ export function AdminAiAnalysisCard() {
 export function AdminLearningAgentsCard() {
   const { t } = useI18n();
   const agents = useMemo<LearningAgent[]>(() => getDefaultLearningAgents(), []);
-  const { data: recentTrips = [] } = useTrips(100);
+  const { data: recentTrips = [] } = useTrips({ limit: 100 });
   const [agentStates, setAgentStates] = useState<
     Record<string, LearningAgentState>
   >(() => {

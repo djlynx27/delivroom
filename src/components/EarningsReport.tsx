@@ -146,7 +146,7 @@ interface EarningsReportProps {
 }
 
 export function EarningsReport({ className }: EarningsReportProps) {
-  const { data: trips = [] } = useTrips(400);
+  const { data: trips = [] } = useTrips({ limit: 400 });
   const sessionsSince = useMemo(() => {
     const start = new Date();
     start.setDate(start.getDate() - 29);

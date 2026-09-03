@@ -314,7 +314,7 @@ function LearningInsightsContent({
 }
 
 export function LearningInsightsPanel() {
-  const { data: trips = [] } = useTrips(500, undefined, true, true);
+  const { data: trips = [] } = useTrips({ limit: 500, includeSynthetic: true });
   const [isSyncing, setIsSyncing] = useState(false);
   const insights = useMemo(
     () => deriveLearningInsights(trips, DEFAULT_WEIGHTS),

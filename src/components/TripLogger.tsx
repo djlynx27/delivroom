@@ -40,7 +40,7 @@ export function TripLogger() {
   const { data: longueuilZones = [] } = useZones('longueuil');
   const allZones = [...zones, ...lavalZones, ...longueuilZones];
 
-  const { data: recentTrips = [] } = useTrips(10);
+  const { data: recentTrips = [] } = useTrips({ limit: 10 });
   const addTrip = useAddTrip();
 
   const today = new Date().toISOString().split('T')[0]!;

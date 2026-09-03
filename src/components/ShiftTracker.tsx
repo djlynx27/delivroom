@@ -217,7 +217,7 @@ function EmptyShiftContent({ onStartShift }: { onStartShift: () => void }) {
 }
 
 export function ShiftTracker() {
-  const { data: trips = [] } = useTrips(500);
+  const { data: trips = [] } = useTrips({ limit: 500 });
   const [activeShift, setActiveShift] = useState<ActiveShift | null>(() =>
     loadActiveShift()
   );

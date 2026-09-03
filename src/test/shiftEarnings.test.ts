@@ -15,7 +15,8 @@ function trip(
   startedAt: string,
   endedAt: string,
   earnings: number,
-  tips = 0
+  tips = 0,
+  source: 'real' | 'synthetic' = 'real'
 ): TripWithZone {
   return {
     id,
@@ -30,7 +31,7 @@ function trip(
     zone_id: 'downtown',
     zone_score: null,
     platform: 'lyft',
-    source: 'real',
+    source,
     user_id: null,
     zones: { name: 'Downtown' },
   } as TripWithZone;
@@ -71,6 +72,29 @@ describe('getRealAvgEarningsPerHour', () => {
     expect(result).not.toBeNull();
     expect(result?.perHour).toBe(35);
     expect(result?.tripCount).toBe(5);
+  });
+
+  it('ignores synthetic seed trips even when they are mixed into the input list', () => {
+    // ultrareview bug_010: ShiftOptimizer/LearningInsightsPanel fetch with
+    // includeSynthetic: true, so this helper must not trust `source` !== 'real'
+    // rows even if they dominate the list.
+    const realTrips = Array.from({ length: 5 }, (_, i) =>
+      trip(`real-${i}`, `2026-03-1${i}T08:00:00`, `2026-03-1${i}T09:00:00`, 20)
+    );
+    const syntheticTrips = Array.from({ length: 50 }, (_, i) =>
+      trip(
+        `synthetic-${i}`,
+        `2026-06-${String((i % 28) + 1).padStart(2, '0')}T08:00:00`,
+        `2026-06-${String((i % 28) + 1).padStart(2, '0')}T09:00:00`,
+        60,
+        0,
+        'synthetic'
+      )
+    );
+    const mixed = getRealAvgEarningsPerHour([...syntheticTrips, ...realTrips]);
+    const realOnly = getRealAvgEarningsPerHour(realTrips);
+    expect(mixed?.perHour).toBe(realOnly?.perHour);
+    expect(mixed?.tripCount).toBe(5);
   });
 
   it('a short, high-fare trip cannot blow past a realistic $/h once capped by MAX_EARNINGS_PER_HOUR', () => {

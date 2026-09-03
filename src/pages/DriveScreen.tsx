@@ -483,7 +483,7 @@ export default function DriveScreen() {
 
   // Real earnings so far today for the HUD's "Gains" tile — falls back to 0
   // while trips are still loading or there simply are none yet, never NaN.
-  const { data: todayTrips, isLoading: tripsLoading } = useTrips(200);
+  const { data: todayTrips, isLoading: tripsLoading } = useTrips({ limit: 200 });
   const todayEarnings = useMemo(() => {
     if (tripsLoading || !todayTrips) return 0;
     return summarizeTrips(todayTrips, getMontrealDayStart()).revenue;

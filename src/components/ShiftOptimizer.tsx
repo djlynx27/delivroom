@@ -543,7 +543,7 @@ export function ShiftOptimizer({
   const [targetRevenue, setTargetRevenue] = useState(targetWeeklyRevenue);
   const { data: zones = [] } = useZones(cityId);
   const { data: weather } = useWeather(cityId);
-  const { data: trips = [] } = useTrips(300, undefined, true, true);
+  const { data: trips = [] } = useTrips({ limit: 300, includeSynthetic: true });
   const { data: emergingHotspots } = useEmergingHotspots();
 
   const weatherCond: WeatherCondition | null = useMemo(

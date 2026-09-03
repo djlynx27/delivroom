@@ -104,7 +104,7 @@ function TripsSection({
  * or missing data renders "0"/"--:--" instead of crashing the tab.
  */
 export default function TodayScreen() {
-  const { data: trips, isLoading, isError, refetch, isRefetching } = useTrips(200);
+  const { data: trips, isLoading, isError, refetch, isRefetching } = useTrips({ limit: 200 });
 
   const todayTrips = useMemo(() => {
     const todayStart = getMontrealDayStart();

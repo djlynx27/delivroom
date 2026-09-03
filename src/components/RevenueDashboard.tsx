@@ -271,7 +271,7 @@ function RevenueQuickRead({ analytics }: { analytics: RevenueAnalytics }) {
 }
 
 export function RevenueDashboard() {
-  const { data: trips = [] } = useTrips(500);
+  const { data: trips = [] } = useTrips({ limit: 500 });
   const sessionsSince = useMemo(() => {
     const start = new Date();
     start.setDate(start.getDate() - 29);

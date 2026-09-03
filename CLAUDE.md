@@ -32,32 +32,17 @@ Lyft, Hypra (Taxi Express Plan F), Imoove
 | Android appId | `com.delivroom.app` |
 | TWA packageId | `app.delivroom.driver` |
 
-### Tables Supabase (25 — toutes avec RLS activé)
+### Tables Supabase
 
-**Core scoring :** zones, scores, cities, events, demand_patterns, ema_patterns, zone_beliefs, predictions, weight_history
-**Trips & sessions :** sessions, session_zones, trips, trips_raw, time_slots, trip_predictions, zone_performance
-**ML/AI :** zone_context_vectors (pgvector ivfflat), platform_signals
-**Driver state :** daily_reports, notifications, push_subscriptions, user_pings, user_profiles
-**Payments :** stripe_events
-**Content :** content_pipeline
+Toutes avec RLS activé (non-négociable). Liste à jour : `list_tables` MCP ou `supabase/migrations/`.
 
-### Edge Functions (9 déployées — toutes alignées avec le repo local)
+### Edge Functions
 
-| Function | Rôle |
-|---|---|
-| score-calculator | Scoring zone via Gemini 2.5 Flash |
-| ai-score-analysis | Analyse explicative scores |
-| analyze-screenshot | OCR/vision screenshots plateformes |
-| generate-daily-report | Rapport quotidien revenus |
-| context-embeddings | pgvector embeddings 8D zones |
-| surge-detector | Détection multiplicateurs surge |
-| platform-signal-collector | Collecte signaux Lyft/Hypra |
-| weight-calibrator | Calibration poids facteurs scoring |
-| push-notifier | Web Push VAPID |
+Voir `supabase/functions/` pour la liste à jour (une fonction = un sous-dossier).
 
 ### Migrations
 
-19 migrations dans `supabase/migrations/` — toutes appliquées sur prod (vérifié 2026-05-21).
+Versionnées dans `supabase/migrations/` — voir le dossier pour la liste et le statut à jour.
 
 ---
 

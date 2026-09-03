@@ -48,14 +48,19 @@ export interface RealEarningsAverage {
 export function getRealAvgEarningsPerHour(
   trips: TripWithZone[]
 ): RealEarningsAverage | null {
+  // A caller may pass a list fetched with includeSynthetic: true (e.g. for
+  // learning-insights derivation) — this helper's name and contract promise
+  // the driver's own real history, so it must not trust seedSyntheticTrips.ts
+  // rows even if they slip through.
+  const realTrips = trips.filter((trip) => trip.source === 'real');
   let revenue = 0;
   let hours = 0;
-  for (const trip of trips) {
+  for (const trip of realTrips) {
     revenue += getTripRevenue(trip);
     hours += getTripHours(trip);
   }
-  if (trips.length < MIN_TRIPS_FOR_REAL_AVG || hours <= 0) return null;
-  return { perHour: revenue / hours, tripCount: trips.length };
+  if (realTrips.length < MIN_TRIPS_FOR_REAL_AVG || hours <= 0) return null;
+  return { perHour: revenue / hours, tripCount: realTrips.length };
 }
 
 /** Weighted average of two $/h estimates — `trust` is the weight on `preferred`. */

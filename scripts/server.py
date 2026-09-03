@@ -20,6 +20,7 @@ import argparse
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -136,7 +137,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
         self._handle()
 
     def log_message(self, format: str, *args) -> None:  # noqa: A002 - stdlib signature
-        pass  # quiet by default; MacroDroid may poll this repeatedly
+        # Every request logged to stdout (captured into scripts/bridge.log by
+        # start-bridge.bat) -- this is the only visibility into whether
+        # MacroDroid's request ever actually arrived. The docs push drivers
+        # toward `?token=<LYFT_BRIDGE_API_KEY>` (MacroDroid's HTTP Request
+        # action doesn't do custom headers as easily as query strings), and
+        # args[0] here is self.requestline -- the raw request line including
+        # that query string -- so the shared secret must be redacted before
+        # it reaches a persistent on-disk log.
+        line = re.sub(r"token=[^&\s\"]+", "token=REDACTED", format % args)
+        print(f"{self.address_string()} - {line}", flush=True)
 
 
 # ── Self-check (no device/network required beyond localhost) ────────────────

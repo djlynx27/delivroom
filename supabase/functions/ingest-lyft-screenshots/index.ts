@@ -131,20 +131,53 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({ error: 'Non autorisé' }, 401);
   }
 
-  const body: RequestBody = await req.json().catch(() => ({}) as RequestBody);
+  // Raw-body mode: MacroDroid's HTTP Request action has no base64-encode
+  // function, but its Content Body has a native "File" mode that posts the
+  // screenshot's raw bytes directly -- simpler than base64 anyway. Detected
+  // by Content-Type; lat/lng/zone_id ride in the URL query string since the
+  // body is the image itself. Always nearby-only (one raw image = one slot).
+  const contentType = req.headers.get('content-type') ?? '';
+  const isRawImage = contentType.startsWith('image/');
+
+  let body: RequestBody;
+  let rawImage: FetchedImage | null = null;
+  if (isRawImage) {
+    const url = new URL(req.url);
+    // URLSearchParams.get() returns '' (not null) for a present-but-empty
+    // key -- e.g. a MacroDroid GPS variable that hasn't resolved yet sends
+    // `?latitude=&longitude=`. `!lat` catches both missing and empty so
+    // Number('') === 0 never slips past the Number.isFinite guard below as
+    // a fake valid coordinate.
+    const lat = url.searchParams.get('latitude');
+    const lng = url.searchParams.get('longitude');
+    body = {
+      latitude: lat ? Number(lat) : undefined,
+      longitude: lng ? Number(lng) : undefined,
+      zone_id: url.searchParams.get('zone_id') ?? undefined,
+    };
+    // Mirror fetchImage's normalization below -- Gemini's inlineData.mimeType
+    // only accepts a bare media type, not a Content-Type with parameters
+    // (e.g. "image/jpeg; charset=binary").
+    const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg';
+    rawImage = { bytes: new Uint8Array(await req.arrayBuffer()), mimeType };
+  } else {
+    body = await req.json().catch(() => ({}) as RequestBody);
+  }
 
   // Wait Times / Recent Demand are deliberately no longer captured (Lyft's
   // own gamified/delayed metrics -- see docs/ingest-lyft-screenshots-macrodroid.md
   // §3B): both slots are optional now, Nearby Drivers is the only one required.
-  const optionalSlots: ImageSlot[] = [
-    { url: body.wait_times_image_url, base64: body.wait_times_image_base64 },
-    { url: body.recent_demand_image_url, base64: body.recent_demand_image_base64 },
-  ].filter((s) => s.url || s.base64);
+  const optionalSlots: ImageSlot[] = isRawImage
+    ? []
+    : [
+        { url: body.wait_times_image_url, base64: body.wait_times_image_base64 },
+        { url: body.recent_demand_image_url, base64: body.recent_demand_image_base64 },
+      ].filter((s) => s.url || s.base64);
   const nearbySlot: ImageSlot = {
     url: body.nearby_drivers_image_url,
     base64: body.nearby_drivers_image_base64,
   };
-  if (!nearbySlot.url && !nearbySlot.base64) {
+  if (!isRawImage && !nearbySlot.url && !nearbySlot.base64) {
     return json(
       { error: 'nearby_drivers_image (_url ou _base64) est requise' },
       400
@@ -174,7 +207,9 @@ async function handleRequest(req: Request): Promise<Response> {
     return json({ error: 'Trop de requêtes, réessaie dans une minute' }, 429);
   }
 
-  const fetched = await Promise.all(slots.map(resolveImage));
+  const fetched = isRawImage
+    ? [rawImage]
+    : await Promise.all(slots.map(resolveImage));
   if (fetched.some((f) => f === null)) {
     return json({ error: 'Impossible de lire une des captures (URL expirée ou base64 invalide?)' }, 400);
   }
