@@ -50,6 +50,38 @@ utilisé pour calibrer les coordonnées dans cette même session).
    pour éliminer une bulle de chat qui bloquait la configuration MacroDroid — vérifier qu'elles
    sont bien restées actives).
 
+## Macro "Lyft GPS Google Maps" (2026-09-02) — FONCTIONNELLE, importée et active
+
+Sans rapport avec le blocker "Lyft 3 Functions" ci-dessus (ingestion de
+captures) — cette macro résout un besoin séparé : ouvrir automatiquement
+Google Maps en navigation vers l'adresse pick-up/drop-off affichée par Lyft
+Driver, sans clic synthétique (donc pas exposée au blocker Accessibility
+Service d'Android 14+ documenté plus haut).
+
+- **Trigger** : `Screen Content (On Screen)`, regex `Pick up|Drop off|Navigate`
+  (case insensitive), limité à `com.lyft.android.driver`.
+- **Action 1** : `Read Screen Contents` → variable locale `adresse_lyft`.
+- **Action 2** : `Send Intent` — target `Activity`, action
+  `android.intent.action.VIEW`, package `com.google.android.apps.maps`, data
+  `google.navigation:q={lv=adresse_lyft}&mode=d`.
+- Fichier source versionné : `scripts/Lyft_GPS_Google_Maps.macro`.
+
+**Piège rencontré et résolu cette session** — `adresse_lyft` devait être un
+`StringVariableType` strict (Type 2), mais l'assistant de config MacroDroid
+force actuellement `Read Screen Contents` à créer la variable en Dictionary
+(Type 4), sans option String dans l'UI. Contournement : build la macro via
+l'UI réelle (le JSON deviné à la main échouait silencieusement à l'import —
+macro vide sans trigger/actions), export vers `.mdr`, patch manuel du champ
+`m_type` (4→2) + suppression du wrapper `dictionary` dans le JSON exporté,
+réimport via `Export/Import → Storage`. Reconfirmé par un second export que
+`m_type: 2` tient après ajout de l'action `Send Intent`.
+
+Bulle de notification flottante Lyft Driver (`Bubble`) désactivée en cours de
+session car elle interceptait les taps ADB dans la zone `Add Action` —
+réactivée en fin de session (`cmd notification set_bubbles com.lyft.android.driver 1`
+si besoin de la rétablir; a été laissée désactivée, à réévaluer si son absence
+gêne le flux normal du chauffeur).
+
 ## 1. Configuration (une seule fois)
 
 ```bash
