@@ -14,41 +14,62 @@ pour le code.
 > qui évite le base64 — MacroDroid n'a aucune fonction d'encodage base64
 > native, `Content Body → File` poste directement les octets bruts.
 
-## État de la macro "Lyft 3 Functions" (2026-09-02) — NON FONCTIONNELLE, à reprendre
+## État de la macro "Lyft 3 Functions" (2026-09-04) — chaîne MacroDroid→HTTP validée, bloquée uniquement par crédits Gemini
 
-**Ce qui est solide et déployé :**
-- Edge function (mode raw-image, nearby-only) — testée via `curl` directement, fonctionne.
-- `INGEST_LYFT_API_KEY` généré et configuré (`supabase secrets set`), sauvegardé dans `.env`.
-- Client-side `applyNearbyDriversCompetitionNudge` (scoringEngine.ts / useDemandScores.ts) — le
-  nudge de score dédié à un signal nearby-only (la formule fusionnée existante ne marche pas
-  sans demand/wait).
-- Séquence macro construite dans MacroDroid : `Kill Background Process (Lyft Driver)` →
-  `Launch Lyft Driver` → `Wait 4s` (cold-start) → `Click (75,1038)` [Map Layers] → `Wait 1s` →
-  `Click on text "Nearby drivers"` → `Wait 1.5s` → `Take Screenshot` (chemin fixe
-  `/storage/emulated/0/Pictures/Delivroom/nearby_drivers.jpg`) → `Force Location Update`
-  (variable dict `locdict`) → `HTTP Request POST` (raw image body, headers Authorization +
-  Content-Type, URL avec `{lv=locdict[Latitude]}`/`{lv=locdict[Longitude]}`).
+**Root cause du blocage du 2026-09-02, confirmée le 2026-09-04 :** le Service d'Accessibilité
+MacroDroid (`MacroDroidAccessibilityServiceJellyBean` + `UIInteractionAccessibilityService`)
+était listé comme "enabled" par `settings get secure enabled_accessibility_services` et par
+`dumpsys accessibility` (`Enabled services`), mais **absent des `Bound services` réels** —
+Android l'avait silencieusement révoqué (mécanisme "Restricted Settings" pour apps installées
+hors Play Store, réactivé après une mise à jour système/app tierce). L'écran réel
+`Paramètres → Accessibilité → Installed apps → MacroDroid` montrait bien le toggle sur **Off**
+pour les deux services, alors que les settings/dumpsys au niveau framework laissaient croire
+le contraire — **ne jamais se fier à `dumpsys`/`settings get` seuls pour ce diagnostic, toujours
+vérifier l'écran Accessibilité réel.**
 
-**Ce qui bloque :** `Test actions from here` ne produit AUCUNE ligne dans `platform_signals`,
-peu importe si le 2e clic cible des coordonnées fixes ou le texte "Nearby drivers". L'écran
-final après un run retombe sur l'accueil Lyft ("You're offline") — signe que même le **premier**
-clic (Map Layers, `Click (75,1038)`) échoue probablement en exécution automatisée par
-MacroDroid, alors qu'il fonctionne quand déclenché manuellement (via `uiautomator2`/ADB direct,
-utilisé pour calibrer les coordonnées dans cette même session).
+**Fix appliqué :** ré-activation manuelle des deux toggles (`MacroDroid` et
+`MacroDroid UI Interaction`) via l'écran Accessibilité — Android bloque les taps ADB/synthétiques
+sur ce dialogue de consentement précis (anti-tapjacking), un vrai doigt est requis. **Piège
+découvert :** `adb shell am force-stop com.arlosoft.macrodroid` tue le processus hébergeant les
+services d'accessibilité et Android les redésactive automatiquement — ne jamais force-stop
+MacroDroid une fois l'accessibilité réactivée, relancer l'app normalement (`monkey -c
+android.intent.category.LAUNCHER`) suffit.
 
-**Diagnostic à faire la prochaine session :**
-1. Vérifier que le Service d'Accessibilité de MacroDroid est bien actif et non révoqué
-   (`Paramètres → Accessibilité → MacroDroid` — Android révoque parfois automatiquement ce
-   genre de permission après une mise à jour d'app tierce ou du système).
-2. Android 14+ restreint les clics synthétiques via AccessibilityService sur certains flows
-   ("Restricted setting" — nécessite parfois une ré-activation manuelle après chaque install/update
-   de l'app cible, ici Lyft Driver).
-3. Si possible, observer un run en direct (écran allumé, macro déclenchée manuellement via son
-   trigger réel — ouverture de Delivroom — plutôt que "Test actions from here") pour voir où le
-   flow s'arrête exactement.
-4. Notifications Lyft Driver ont été réactivées en fin de session (désactivées temporairement
-   pour éliminer une bulle de chat qui bloquait la configuration MacroDroid — vérifier qu'elles
-   sont bien restées actives).
+**Deuxième bug corrigé :** l'URL du `HttpRequestAction` référençait `{lv=locdict[Latitude]}`/
+`{lv=locdict[Longitude]}` alors que les clés réelles du dictionnaire `locdict` (rempli par
+`ForceLocationUpdateAction`) sont en minuscules : `lat`/`lon`. Corrigé directement dans
+l'éditeur MacroDroid en édition live (l'import d'un `.macro` réexporté avec le fix n'a PAS
+écrasé la macro existante — MacroDroid semble matcher par `m_GUID` et rouvrir l'originale au
+lieu de remplacer son contenu ; retenir cette limite pour la prochaine fois qu'un fix doit être
+poussé via fichier plutôt qu'en édition live).
+
+**Troisième bug corrigé :** le screenshot de "Nearby drivers" était pris seulement 1.5s après le
+clic — insuffisant pour que les marqueurs voitures se rendent sur la carte (capture vide,
+502 côté Gemini car rien à extraire). Le délai a été monté à 3.5s ; capture confirmée avec ~20
+voitures visibles.
+
+**Coordonnées de clic (75,1038) pour "Map Layers"** : confirmées TOUJOURS correctes en test
+manuel (`adb shell input tap`) pour l'état hors-ligne — pas de recalibrage nécessaire. Une
+hypothèse initiale de coordonnées différentes selon online/offline (loupe vs icône couches) a
+été proposée mais pas requise dans les faits : le point (75,1038) ouvre le sheet "Maximise your
+earnings" (Wait times / Recent ride demand / Nearby drivers) dans les deux captures de test.
+Si un blocage similaire réapparaît après une mise à jour de l'app Lyft Driver, refaire un dump
+`uiautomator` — l'écran principal Lyft est en Jetpack Compose et n'expose aucun texte/description
+dans l'arbre d'accessibilité (juste des conteneurs opaques), donc le calibrage doit se faire par
+capture d'écran + coordonnées, pas par sélecteur de texte.
+
+**Bloqueur restant (2026-09-04, hors du contrôle MacroDroid/app) :** `HTTP response code: 502`
+sur chaque test malgré une capture valide. Logs `function_logs` de l'edge function
+`ingest-lyft-screenshots` :
+```
+Gemini Vision error (status 429): { "error": { "code": 429, "message":
+"Your prepayment credits are depleted. Please go to AI Studio at
+https://ai.studio/projects to manage your project and billing...",
+"status": "RESOURCE_EXHAUSTED" } }
+```
+→ **Action requise : recharger les crédits prépayés Gemini sur https://ai.studio/projects.**
+Toute la chaîne MacroDroid (clic → screenshot → GPS → POST) est validée fonctionnelle ; dès la
+facturation Gemini réglée, aucune autre modif ne devrait être nécessaire.
 
 ## Macro "Lyft GPS Google Maps" (2026-09-02) — FONCTIONNELLE, importée et active
 
