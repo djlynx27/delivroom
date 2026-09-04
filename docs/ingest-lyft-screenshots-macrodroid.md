@@ -82,6 +82,65 @@ réactivée en fin de session (`cmd notification set_bubbles com.lyft.android.dr
 si besoin de la rétablir; a été laissée désactivée, à réévaluer si son absence
 gêne le flux normal du chauffeur).
 
+### Fix boucle infinie (2026-09-04) — à appliquer en UI, 2 ajouts, ~1 min
+
+**Bug** : `ScreenContentTrigger` refire tant que "Pick up|Drop off|Navigate"
+reste visible (donc en continu pendant tout le trajet, et instantanément au
+retour sur Lyft) — et `ReadScreenContentsAction` n'a aucun champ de ciblage
+d'élément dans son schéma exporté (confirmé : seulement des booléens
+`includeOverlays/includeScreenLocation/includeWithoutText`), donc `adresse_lyft`
+capture tout l'écran, pas juste l'adresse → Maps s'ouvre sans destination
+utilisable.
+
+`scripts/Lyft_GPS_Google_Maps.macro` a déjà la variable locale
+`adresse_lyft_last_sent` (String, `m_type: 2` — patché à la main pour éviter
+le même piège Dictionary que `adresse_lyft`). Il reste 2 ajouts **non
+patchables à l'aveugle** : aucune trace de `SetVariableAction` ni d'un
+`m_classType` de Constraint "Local Variable" dans un export vérifié de ce
+repo — même risque d'import silencieusement vide que pour `adresse_lyft` à
+l'origine. À faire dans l'UI réelle :
+
+1. Ouvrir la macro → sur l'action **Send Intent** (2e action) → **Add Constraint**
+   → catégorie **Local Variables** → comparer `adresse_lyft`
+   **n'est pas égal à** `adresse_lyft_last_sent` **ET n'est pas vide**.
+   (catégorie confirmée réelle via forum MacroDroid — libellé exact du
+   comparateur à vérifier dans le picker de l'appareil.)
+2. Après **Send Intent**, ajouter une action **Set Variable** (catégorie
+   *MacroDroid Specific*) → variable `adresse_lyft_last_sent` → nouvelle
+   valeur = `{lv=adresse_lyft}`.
+3. Exporter (Export/Import → Storage), vérifier que `adresse_lyft_last_sent`
+   est resté `m_type: 2`, commit le fichier mis à jour.
+
+Le dédup se réarme tout seul : une nouvelle course a une adresse différente,
+donc la contrainte repasse vraie sans trigger de reset séparé.
+
+## Macros "Lyft Overlay" (2026-09-04) — À CRÉER, non buildées encore
+
+Bulle flottante Delivroom au-dessus de Lyft Driver. Confirmé via
+`git log`/`ls scripts/*.macro` : aucun `.macro` overlay n'existe encore.
+Aucun schéma JSON vérifié disponible pour le trigger `Floating Button`
+(jamais exporté depuis ce repo) → build en UI obligatoire, pas de fichier
+poussable à l'aveugle. Pattern confirmé par la communauté MacroDroid (le
+trigger Floating Button n'a pas d'option "restrict to app" intégrée) : 2
+macros, une contrôle l'activation de l'autre.
+
+| Macro | Trigger(s) | Action |
+|---|---|---|
+| **Lyft Overlay Controller** | 1. Application Launched → `com.lyft.android.driver`<br>2. Application Closed → `com.lyft.android.driver`<br>3. Intent Received → `com.delivroom.SHOW_OVERLAY` | 1 & 3 → **Enable Macro** "Lyft Overlay Button"<br>2 → **Disable Macro** "Lyft Overlay Button" |
+| **Lyft Overlay Button** (désactivée par défaut) | Floating Button (icône/position au choix) | Launch App → `app.delivroom.driver` (TWA package, voir `app/src/main/AndroidManifest.xml`) |
+
+Trigger 3 = l'action broadcast que `scripts/server.py` (heartbeat) envoie déjà
+via `MACRODROID_OVERLAY_RECOVERY_ACTION` (voir `.env.example`) quand Lyft est
+au premier plan mais qu'aucune fenêtre MacroDroid n'est détectée dans
+`dumpsys window` — tant que ce trigger n'existe pas, ce broadcast est un
+no-op silencieux (confirmé : `am broadcast -a com.delivroom.SHOW_OVERLAY`
+retourne sans erreur même sans receiver enregistré).
+
+Une fois buildé : exporter, versionner dans `scripts/Lyft_Overlay_Controller.macro`
+et `scripts/Lyft_Overlay_Button.macro`, et signaler la session pour que le
+schéma JSON du trigger Floating Button soit enfin vérifié (permettra de
+patcher ce genre de macro directement au lieu du build manuel la prochaine fois).
+
 ## 1. Configuration (une seule fois)
 
 ```bash

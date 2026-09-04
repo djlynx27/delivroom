@@ -27,6 +27,25 @@
       "m_type": 2,
       "supportsInput": false,
       "supportsOutput": true
+    },
+    {
+      "dictionary": {
+        "entries": [],
+        "isArray": false,
+        "variableType": 4,
+        "type": "Dictionary"
+      },
+      "isActionBlockWorkingVar": true,
+      "isLocalVar": true,
+      "isSecure": false,
+      "m_booleanValue": false,
+      "m_decimalValue": 0.0,
+      "m_intValue": 0,
+      "m_name": "adresse_lyft_last_sent",
+      "m_stringValue": "",
+      "m_type": 2,
+      "supportsInput": false,
+      "supportsOutput": true
     }
   ],
   "localVarsAlphabetical": true,
