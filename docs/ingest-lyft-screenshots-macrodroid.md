@@ -82,7 +82,7 @@ réactivée en fin de session (`cmd notification set_bubbles com.lyft.android.dr
 si besoin de la rétablir; a été laissée désactivée, à réévaluer si son absence
 gêne le flux normal du chauffeur).
 
-### Fix boucle infinie (2026-09-04) — à appliquer en UI, 2 ajouts, ~1 min
+### Fix boucle infinie (2026-09-04) — FAIT, buildé en direct sur l'appareil via ADB/uiautomator
 
 **Bug** : `ScreenContentTrigger` refire tant que "Pick up|Drop off|Navigate"
 reste visible (donc en continu pendant tout le trajet, et instantanément au
@@ -92,27 +92,49 @@ d'élément dans son schéma exporté (confirmé : seulement des booléens
 capture tout l'écran, pas juste l'adresse → Maps s'ouvre sans destination
 utilisable.
 
-`scripts/Lyft_GPS_Google_Maps.macro` a déjà la variable locale
-`adresse_lyft_last_sent` (String, `m_type: 2` — patché à la main pour éviter
-le même piège Dictionary que `adresse_lyft`). Il reste 2 ajouts **non
-patchables à l'aveugle** : aucune trace de `SetVariableAction` ni d'un
-`m_classType` de Constraint "Local Variable" dans un export vérifié de ce
-repo — même risque d'import silencieusement vide que pour `adresse_lyft` à
-l'origine. À faire dans l'UI réelle :
+Construit directement dans l'UI réelle via `adb shell input tap` + dumps
+`uiautomator` entre chaque tap (jamais de JSON deviné à l'aveugle — la
+contrainte et le Set Variable n'avaient aucun schéma vérifié avant cette
+session). Le vrai mécanisme MacroDroid : les contraintes sont ajoutées
+**directement sur une action** via son menu contextuel (swipe/long-press sur
+la ligne → **Add constraint**), pas via un bloc "If clause" séparé (tenté
+puis abandonné — un bloc If ajouté par le "+" général s'insère à la fin de
+la liste, pas autour de l'action existante).
 
-1. Ouvrir la macro → sur l'action **Send Intent** (2e action) → **Add Constraint**
-   → catégorie **Local Variables** → comparer `adresse_lyft`
-   **n'est pas égal à** `adresse_lyft_last_sent` **ET n'est pas vide**.
-   (catégorie confirmée réelle via forum MacroDroid — libellé exact du
-   comparateur à vérifier dans le picker de l'appareil.)
-2. Après **Send Intent**, ajouter une action **Set Variable** (catégorie
-   *MacroDroid Specific*) → variable `adresse_lyft_last_sent` → nouvelle
-   valeur = `{lv=adresse_lyft}`.
-3. Exporter (Export/Import → Storage), vérifier que `adresse_lyft_last_sent`
-   est resté `m_type: 2`, commit le fichier mis à jour.
+- **`adresse_lyft_last_sent`** : 2e variable locale String (`m_type: 2`),
+  créée depuis l'action Set Variable elle-même (`[New Variable]` → radio
+  **String** — même piège Dictionary-par-défaut que `adresse_lyft` à
+  l'origine, évité en sélectionnant explicitement String).
+- **2 contraintes sur l'action Send Intent** (`m_classType: CompareValueConstraint`,
+  schéma maintenant vérifié) :
+  - `{lv=adresse_lyft} != {lv=adresse_lyft_last_sent}` (dédup)
+  - `{lv=adresse_lyft} != ""` (kill-switch : pas d'adresse extraite → pas de Maps)
+  - Combinées en AND automatiquement (MacroDroid AND-combine par défaut
+    plusieurs conditions dans le même "Add constraint").
+- **Action `SetVariableAction`** ajoutée après Send Intent : `adresse_lyft_last_sent
+  = {lv=adresse_lyft}`.
 
 Le dédup se réarme tout seul : une nouvelle course a une adresse différente,
 donc la contrainte repasse vraie sans trigger de reset séparé.
+
+**Piège rencontré cette session** : à un moment de la manipulation (menu
+contextuel swipe sur l'action, probablement un tap mal placé), l'action
+`SendIntentAction` s'est retrouvée avec `m_isDisabled: true` — détecté
+uniquement en inspectant le JSON réexporté (invisible dans le résumé de la
+carte macro, visible seulement par la couleur grisée du texte sur l'écran
+d'édition). Recorrigé via le même menu contextuel (option **Enable**),
+reconfirmé par un 2e export. **Leçon** : après toute session de manipulation
+UI via ADB sur une macro live, toujours ré-exporter et vérifier `m_isDisabled`
+sur chaque action/trigger avant de considérer le fix terminé — un export visuel
+(screenshot) seul peut suffire mais le JSON est la seule vérité fiable.
+
+Toggle macro-level `m_enabled` laissé à `false` (état déjà présent avant
+cette session, pas modifié — à réactiver manuellement quand prêt pour usage
+réel).
+
+Schéma JSON réel maintenant versionné dans `scripts/Lyft_GPS_Google_Maps.macro`
+(exporté du device, valeurs runtime capturées lors d'une vraie course
+— nom de passager, adresse — nettoyées avant commit).
 
 ## Macros "Lyft Overlay" (2026-09-04) — À CRÉER, non buildées encore
 
