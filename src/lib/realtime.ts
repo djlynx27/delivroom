@@ -6,7 +6,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import { haversineKm } from '@/hooks/useUserLocation';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 
 const PRIVACY_GRID_METERS = 500;
@@ -144,23 +144,23 @@ export function useNearbyDrivers(
   driverKey: string
 ): UseNearbyDriversResult {
   const [positions, setPositions] = useState<NearbyDriverPosition[]>([]);
-  const channelRef = useRef<RealtimeChannel | null>(null);
+  const [channel, setChannel] = useState<RealtimeChannel | null>(null);
 
   useEffect(() => {
     if (!cityId) return;
-    const channel = joinNearbyDriversChannel(cityId, driverKey, setPositions);
-    channelRef.current = channel;
+    const newChannel = joinNearbyDriversChannel(cityId, driverKey, setPositions);
+    setChannel(newChannel);
     return () => {
-      supabase.removeChannel(channel);
-      channelRef.current = null;
+      supabase.removeChannel(newChannel);
+      setChannel(null);
       setPositions([]);
     };
   }, [cityId, driverKey]);
 
   useEffect(() => {
-    if (!channelRef.current || !location) return;
-    trackNearbyDriverPosition(channelRef.current, location.latitude, location.longitude);
-  }, [location?.latitude, location?.longitude]);
+    if (!channel || !location) return;
+    trackNearbyDriverPosition(channel, location.latitude, location.longitude);
+  }, [channel, location?.latitude, location?.longitude]);
 
   const driversByZone = countDriversPerZone(positions, zones);
   const saturatedZoneIds = new Set(

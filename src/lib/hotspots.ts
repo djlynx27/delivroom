@@ -107,6 +107,16 @@ export const HOTSPOTS: Hotspot[] = [
     platforms: ['Uber', 'Lyft', 'Eva'],
     egressVelocity: 9,
   },
+  {
+    id: 'terminus-longueuil',
+    name: 'Terminus Longueuil',
+    address: '100 Place Charles-Le Moyne, Longueuil',
+    lat: 45.5252,
+    lng: -73.5205,
+    category: 'Transport',
+    platforms: ['Hypra Pro S', 'Uber'],
+    egressVelocity: 9,
+  },
   // Commerce
   {
     id: 'centropolis',
@@ -199,6 +209,16 @@ export const HOTSPOTS: Hotspot[] = [
     category: 'Events',
     platforms: ['Uber', 'Lyft'],
     egressVelocity: 9,
+  },
+  {
+    id: 'vieux-port',
+    name: 'Vieux-Port de Montréal',
+    address: '333 Rue de la Commune Ouest',
+    lat: 45.5075,
+    lng: -73.554,
+    category: 'Events',
+    platforms: ['Uber', 'Lyft'],
+    egressVelocity: 8,
   },
   // Transport
   {
