@@ -143,25 +143,48 @@ Bulle flottante Delivroom au-dessus de Lyft Driver. Confirmé via
 Aucun schéma JSON vérifié disponible pour le trigger `Floating Button`
 (jamais exporté depuis ce repo) → build en UI obligatoire, pas de fichier
 poussable à l'aveugle. Pattern confirmé par la communauté MacroDroid (le
-trigger Floating Button n'a pas d'option "restrict to app" intégrée) : 2
-macros, une contrôle l'activation de l'autre.
+trigger Floating Button n'a pas d'option "restrict to app" intégrée) : 3
+macros au lieu de 2 (une seule macro ne peut pas exécuter une action
+différente selon quel trigger l'a déclenchée — donc "enable on trigger A,
+disable on trigger B" doit être scindé en deux macros séparées, chacune
+avec sa propre action unique).
+
+**FAIT (2026-09-04)** — buildé en direct via ADB/uiautomator, exporté et
+vérifié champ par champ (jamais deviné) :
 
 | Macro | Trigger(s) | Action |
 |---|---|---|
-| **Lyft Overlay Controller** | 1. Application Launched → `com.lyft.android.driver`<br>2. Application Closed → `com.lyft.android.driver`<br>3. Intent Received → `com.delivroom.SHOW_OVERLAY` | 1 & 3 → **Enable Macro** "Lyft Overlay Button"<br>2 → **Disable Macro** "Lyft Overlay Button" |
-| **Lyft Overlay Button** (désactivée par défaut) | Floating Button (icône/position au choix) | Launch App → `app.delivroom.driver` (TWA package, voir `app/src/main/AndroidManifest.xml`) |
+| **Lyft Overlay Show** | Application Launched → `com.lyft.android.driver` + Intent Received → `com.delivroom.SHOW_OVERLAY` | **Enable macro** "Lyft Overlay Button" |
+| **Lyft Overlay Hide** | Application Closed → `com.lyft.android.driver` | **Disable macro** "Lyft Overlay Button" |
+| **Lyft Overlay Button** (désactivée par défaut, `m_enabled: false`) | Floating Button (icône/position par défaut) | Launch App → `app.delivroom.driver` (TWA package) |
 
-Trigger 3 = l'action broadcast que `scripts/server.py` (heartbeat) envoie déjà
-via `MACRODROID_OVERLAY_RECOVERY_ACTION` (voir `.env.example`) quand Lyft est
+Schéma JSON maintenant vérifié pour de bon (utile pour la prochaine fois) :
+- `ApplicationLaunchedTrigger` sert aussi pour "Application Closed" —
+  discriminé par le booléen `m_launched` (`true`=Launched, `false`=Closed),
+  pas par un classType séparé.
+- `DisableMacroAction` sert aussi pour "Enable macro" — discriminé par
+  `m_state` (`0`=Enable, `1`=Disable), pas par le nom de la classe. Le champ
+  `m_enable` est présent mais toujours `true` dans les deux cas — piège à
+  ne pas confondre avec `m_state`.
+- Le trigger Floating Button vit sous la catégorie **User Input**, pas
+  *MacroDroid Specific* (confirmé après recherche exhaustive dans les deux
+  catégories via le picker — la recherche texte intégrée du picker MacroDroid
+  est bien plus fiable que la navigation par catégorie pour le trouver).
+
+Trigger "Intent Received" de Lyft Overlay Show = l'action broadcast que
+`scripts/server.py` (heartbeat) envoie déjà via
+`MACRODROID_OVERLAY_RECOVERY_ACTION` (voir `.env.example`) quand Lyft est
 au premier plan mais qu'aucune fenêtre MacroDroid n'est détectée dans
-`dumpsys window` — tant que ce trigger n'existe pas, ce broadcast est un
-no-op silencieux (confirmé : `am broadcast -a com.delivroom.SHOW_OVERLAY`
-retourne sans erreur même sans receiver enregistré).
+`dumpsys window` — maintenant un vrai trigger enregistré, plus un no-op.
 
-Une fois buildé : exporter, versionner dans `scripts/Lyft_Overlay_Controller.macro`
-et `scripts/Lyft_Overlay_Button.macro`, et signaler la session pour que le
-schéma JSON du trigger Floating Button soit enfin vérifié (permettra de
-patcher ce genre de macro directement au lieu du build manuel la prochaine fois).
+**Piège rencontré cette session** (distinct de celui documenté plus haut sur
+le fix boucle infinie) : construire une macro via un bloc "If clause"
+générique (`Add Action` → `Conditions/Loops` → `If clause`) l'insère à la
+FIN de la liste d'actions, pas autour de l'action existante qu'on visait à
+wrapper — inutile pour gater une action déjà en place. Le vrai mécanisme
+pour ajouter une contrainte à une action précise : swipe/long-press sur la
+ligne de l'action dans l'éditeur de macro → menu contextuel → **Add
+constraint** (documenté aussi dans la section fix boucle infinie ci-dessus).
 
 ## 1. Configuration (une seule fois)
 

@@ -1,0 +1,73 @@
+{
+  "aiGenerated": 0,
+  "breakpoints": [],
+  "disabledTimestamp": 0,
+  "exportedActionBlocks": [],
+  "forceEvenIfNotEnabledTimestamp": 0,
+  "isActionBlock": false,
+  "isExtra": false,
+  "isFavourite": false,
+  "lastEditedTimestamp": 1788556215092,
+  "localVariables": [],
+  "localVarsAlphabetical": true,
+  "loggingLevel": 0,
+  "m_GUID": -7241677331869549133,
+  "m_actionList": [
+    {
+      "getByName": false,
+      "m_GUID": -9081823097104377460,
+      "m_enable": true,
+      "m_macroName": "Lyft Overlay Button",
+      "m_state": 0,
+      "m_userPromptTitle": "Enable/Disable Macro",
+      "disableLogging": false,
+      "m_SIGUID": -4754888757562510050,
+      "m_classType": "DisableMacroAction",
+      "m_constraintList": [],
+      "m_isDisabled": false,
+      "m_isOrCondition": false
+    }
+  ],
+  "m_category": "Uncategorized",
+  "m_completed": true,
+  "m_constraintList": [],
+  "m_description": "",
+  "m_descriptionOpen": false,
+  "m_enabled": true,
+  "m_excludeLog": false,
+  "m_headingColor": 0,
+  "m_isOrCondition": false,
+  "m_name": "Lyft Overlay Show",
+  "m_triggerList": [
+    {
+      "customPackageName": "com.lyft.android.driver",
+      "excludeMode": false,
+      "isAllApps": false,
+      "m_applicationNameList": [],
+      "m_launched": true,
+      "m_packageNameList": [],
+      "usePackageNameOption": 1,
+      "disableLogging": false,
+      "m_SIGUID": -8989093705465637281,
+      "m_classType": "ApplicationLaunchedTrigger",
+      "m_constraintList": [],
+      "m_isDisabled": false,
+      "m_isOrCondition": false
+    },
+    {
+      "action": "com.delivroom.SHOW_OVERLAY",
+      "enableRegex": false,
+      "extraDictionaryKeys": [],
+      "extraParams": [],
+      "extraValuePatterns": [],
+      "extraVariables": [],
+      "saveExtrasToDict": false,
+      "disableLogging": false,
+      "m_SIGUID": -6336885405694773033,
+      "m_classType": "IntentReceivedTrigger",
+      "m_constraintList": [],
+      "m_isDisabled": false,
+      "m_isOrCondition": false
+    }
+  ]
+}

@@ -1,0 +1,58 @@
+{
+  "aiGenerated": 0,
+  "breakpoints": [],
+  "disabledTimestamp": 0,
+  "exportedActionBlocks": [],
+  "forceEvenIfNotEnabledTimestamp": 0,
+  "isActionBlock": false,
+  "isExtra": false,
+  "isFavourite": false,
+  "lastEditedTimestamp": 1788556470087,
+  "localVariables": [],
+  "localVarsAlphabetical": true,
+  "loggingLevel": 0,
+  "m_GUID": -7541997765099413112,
+  "m_actionList": [
+    {
+      "getByName": false,
+      "m_GUID": -9081823097104377460,
+      "m_enable": true,
+      "m_macroName": "Lyft Overlay Button",
+      "m_state": 1,
+      "m_userPromptTitle": "Enable/Disable Macro",
+      "disableLogging": false,
+      "m_SIGUID": -7026126855145756271,
+      "m_classType": "DisableMacroAction",
+      "m_constraintList": [],
+      "m_isDisabled": false,
+      "m_isOrCondition": false
+    }
+  ],
+  "m_category": "Uncategorized",
+  "m_completed": true,
+  "m_constraintList": [],
+  "m_description": "",
+  "m_descriptionOpen": false,
+  "m_enabled": true,
+  "m_excludeLog": false,
+  "m_headingColor": 0,
+  "m_isOrCondition": false,
+  "m_name": "Lyft Overlay Hide",
+  "m_triggerList": [
+    {
+      "customPackageName": "com.lyft.android.driver",
+      "excludeMode": false,
+      "isAllApps": false,
+      "m_applicationNameList": [],
+      "m_launched": false,
+      "m_packageNameList": [],
+      "usePackageNameOption": 1,
+      "disableLogging": false,
+      "m_SIGUID": -8673803203331407973,
+      "m_classType": "ApplicationLaunchedTrigger",
+      "m_constraintList": [],
+      "m_isDisabled": false,
+      "m_isOrCondition": false
+    }
+  ]
+}
