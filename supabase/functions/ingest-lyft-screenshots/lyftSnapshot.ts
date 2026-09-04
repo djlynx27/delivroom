@@ -87,13 +87,27 @@ export function decodeBase64Image(input: string): DecodedImage | null {
 export const GEMINI_MAX_DIMENSION = 1024;
 const GEMINI_JPEG_QUALITY = 80;
 
+// Bound placed BEFORE the expensive operation (image decode), not after --
+// imagescript's decoder allocates a full pixel buffer for whatever
+// width x height the file's header claims, so a small, malformed/crafted
+// file can still demand an enormous allocation (decompression-bomb style)
+// before resize() ever gets a chance to shrink it back down. Checking the
+// *compressed* byte size first is a cheap, if imperfect, guard: it can't
+// catch a small file with a huge declared resolution, but it stops the
+// common case (an oversized/corrupt upload) from reaching the decoder at
+// all. A real screenshot is a few hundred KB; this leaves generous room
+// above that without inviting worst-case decode cost on every request.
+const MAX_INPUT_BYTES = 15 * 1024 * 1024; // 15 MB
+
 /**
  * Downscales an image so its longer side is at most GEMINI_MAX_DIMENSION,
  * re-encoded as JPEG to shrink bytes further. No-ops (returns the original)
- * if the image is already small enough or fails to decode — a corrupt/odd
- * screenshot should still reach Gemini at full size rather than be dropped.
+ * if the image is already small enough, oversized, or fails to decode — a
+ * corrupt/odd screenshot should still reach Gemini at full size rather than
+ * be dropped.
  */
 export async function resizeForGemini(image: DecodedImage): Promise<DecodedImage> {
+  if (image.bytes.length > MAX_INPUT_BYTES) return image;
   try {
     const decoded = await decodeImage(image.bytes);
     // decodeImage can return a GIF's FrameCollection; screenshots are never

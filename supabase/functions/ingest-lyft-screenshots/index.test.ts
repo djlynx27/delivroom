@@ -149,6 +149,15 @@ Deno.test('resizeForGemini: falls back to the original image when decoding fails
   assertEquals(result, original);
 });
 
+Deno.test('resizeForGemini: rejects an oversized payload before attempting to decode it', async () => {
+  // 16 MB of garbage bytes -- if this touched the decoder it would also fail
+  // the "not a real image" way, but the point of this test is that it must
+  // never reach the decoder at all for a payload this large.
+  const oversized = { bytes: new Uint8Array(16 * 1024 * 1024), mimeType: 'image/jpeg' };
+  const result = await resizeForGemini(oversized);
+  assertEquals(result, oversized);
+});
+
 Deno.test('formatGpsAddress: rounds to 4 decimal places', () => {
   assertEquals(formatGpsAddress(45.50171234, -73.56731234), 'GPS 45.5017,-73.5673');
 });
