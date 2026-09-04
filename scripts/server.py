@@ -35,6 +35,93 @@ RUN_LOCK = threading.Lock()
 RUNNING = False
 LAST_TRIGGERED_AT: float | None = None
 
+# ── Overlay heartbeat ─────────────────────────────────────────────────────
+# MacroDroid's floating overlay over Lyft Driver intermittently fails to
+# render (service stays alive, it just doesn't draw). MacroDroid exposes no
+# generic "run macro X" broadcast -- only a per-macro "Intent Received"
+# trigger the user must configure in-app with a custom action string. So
+# this polls via adb and re-fires that action when the overlay's missing;
+# it can't create the trigger for you.
+ADB_PATH = os.environ.get("ADB_PATH", "adb")
+ADB_SERIAL = os.environ.get("ADB_SERIAL")  # set if more than one device/emulator is attached
+LYFT_PACKAGE = "com.lyft.android.driver"
+MACRODROID_PACKAGE = "com.arlosoft.macrodroid"
+OVERLAY_RECOVERY_ACTION = os.environ.get("MACRODROID_OVERLAY_RECOVERY_ACTION")
+HEARTBEAT_INTERVAL_S = 12
+# Give the macro a chance to actually redraw before checking again -- and
+# keep a broken macro from turning into a broadcast storm.
+RECOVERY_COOLDOWN_S = 60
+
+_FOCUS_PACKAGE_RE = re.compile(r"mCurrentFocus=Window\{[^ ]+ [^ ]+ ([\w.]+)/")
+
+
+def _adb(args: list[str], timeout: float = 5.0) -> str | None:
+    """Runs `adb [-s SERIAL] <args>`; returns stdout, or None if the device
+    isn't reachable right now (unplugged, wifi debugging dropped, adb not on
+    PATH). Callers treat None as "skip this poll", never as "overlay missing"
+    -- a disconnected phone must not look like a broken macro."""
+    cmd = [ADB_PATH]
+    if ADB_SERIAL:
+        cmd += ["-s", ADB_SERIAL]
+    cmd += args
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return None
+    return result.stdout if result.returncode == 0 else None
+
+
+def _focused_package(window_dump: str) -> str | None:
+    match = _FOCUS_PACKAGE_RE.search(window_dump)
+    return match.group(1) if match else None
+
+
+def _has_window_from_package(window_dump: str, package: str) -> bool:
+    return f"package={package}" in window_dump
+
+
+def _check_overlay_once() -> bool | None:
+    """True = Lyft is focused and MacroDroid has no window on screen (needs
+    recovery). False = fine (Lyft not focused, or overlay is present). None =
+    device unreachable this poll."""
+    dump = _adb(["shell", "dumpsys", "window"])
+    if dump is None:
+        return None
+    if _focused_package(dump) != LYFT_PACKAGE:
+        return False
+    return not _has_window_from_package(dump, MACRODROID_PACKAGE)
+
+
+def _should_fire_recovery(overlay_missing: bool, last_recovery_at: float | None, now: float) -> bool:
+    if not overlay_missing:
+        return False
+    return last_recovery_at is None or now - last_recovery_at >= RECOVERY_COOLDOWN_S
+
+
+def _fire_recovery() -> None:
+    if not OVERLAY_RECOVERY_ACTION:
+        print(
+            "[heartbeat] overlay missing over Lyft, but MACRODROID_OVERLAY_RECOVERY_ACTION "
+            "isn't set -- add an 'Intent Received' trigger to the overlay macro in "
+            "MacroDroid, give it a custom action string, and set that action here.",
+            flush=True,
+        )
+        return
+    _adb(["shell", "am", "broadcast", "-a", OVERLAY_RECOVERY_ACTION])
+    print(f"[heartbeat] overlay missing over Lyft -- fired recovery broadcast: {OVERLAY_RECOVERY_ACTION}", flush=True)
+
+
+def _heartbeat_loop(stop_event: threading.Event) -> None:
+    last_recovery_at: float | None = None
+    while not stop_event.is_set():
+        status = _check_overlay_once()
+        if status is not None:
+            now = time.monotonic()
+            if _should_fire_recovery(status, last_recovery_at, now):
+                _fire_recovery()
+                last_recovery_at = now
+        stop_event.wait(HEARTBEAT_INTERVAL_S)
+
 # Backstop for a MacroDroid "Application Launched" trigger (fires every time
 # the PWA is foregrounded, potentially many times an hour) -- independent of
 # the already_running dedup above, which only protects against overlapping
@@ -237,7 +324,62 @@ def _selftest() -> None:
         LAST_TRIGGERED_AT = None
         os.environ.pop("LYFT_BRIDGE_API_KEY", None)
 
+    _selftest_heartbeat()
     print("selftest OK")
+
+
+def _selftest_heartbeat() -> None:
+    global OVERLAY_RECOVERY_ACTION, _adb
+
+    lyft_focus_no_overlay = 'mCurrentFocus=Window{aaf17f6 u0 com.lyft.android.driver/com.lyft.android.driver.app.ui.DriverMainActivity}\nsome other window package=com.android.systemui'
+    lyft_focus_with_overlay = 'mCurrentFocus=Window{aaf17f6 u0 com.lyft.android.driver/com.lyft.android.driver.app.ui.DriverMainActivity}\nmOwnerUid=11210 package=com.arlosoft.macrodroid'
+    settings_focused = 'mCurrentFocus=Window{e410645 u0 com.android.settings/com.android.settings.SubSettings}'
+
+    assert _focused_package(lyft_focus_no_overlay) == "com.lyft.android.driver"
+    assert _focused_package("no focus line here") is None
+    assert _has_window_from_package(lyft_focus_with_overlay, MACRODROID_PACKAGE) is True
+    assert _has_window_from_package(lyft_focus_no_overlay, MACRODROID_PACKAGE) is False
+
+    # Cooldown: no prior recovery -> fire; too soon after one -> don't; past
+    # the cooldown -> fire again. Never fires when overlay isn't missing.
+    assert _should_fire_recovery(True, None, 100.0) is True
+    assert _should_fire_recovery(True, 100.0, 130.0) is False
+    assert _should_fire_recovery(True, 100.0, 161.0) is True
+    assert _should_fire_recovery(False, None, 100.0) is False
+
+    original_adb = _adb
+    original_action = OVERLAY_RECOVERY_ACTION
+    calls: list[tuple] = []
+    dumps = iter([lyft_focus_no_overlay, lyft_focus_with_overlay, settings_focused, None])
+
+    def stub_adb(args, timeout=5.0):
+        calls.append(tuple(args))
+        return next(dumps)
+
+    _adb = stub_adb
+    try:
+        assert _check_overlay_once() is True  # Lyft focused, no macrodroid window
+        assert _check_overlay_once() is False  # Lyft focused, overlay present
+        assert _check_overlay_once() is False  # settings focused, not Lyft at all
+        assert _check_overlay_once() is None  # device unreachable this poll
+        assert all(c == ("shell", "dumpsys", "window") for c in calls)
+
+        _adb = lambda args, timeout=5.0: (calls.append(tuple(args)), None)[1]  # noqa: E731
+
+        # No recovery action configured -> warns, never calls adb again.
+        OVERLAY_RECOVERY_ACTION = None
+        calls.clear()
+        _fire_recovery()
+        assert calls == []
+
+        # Configured -> broadcasts exactly that action.
+        OVERLAY_RECOVERY_ACTION = "com.delivroom.SHOW_OVERLAY"
+        calls.clear()
+        _fire_recovery()
+        assert calls == [("shell", "am", "broadcast", "-a", "com.delivroom.SHOW_OVERLAY")]
+    finally:
+        _adb = original_adb
+        OVERLAY_RECOVERY_ACTION = original_action
 
 
 def main() -> int:
@@ -245,6 +387,7 @@ def main() -> int:
     parser.add_argument("--selftest", action="store_true", help="offline check, no device/network needed")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=5000)
+    parser.add_argument("--no-heartbeat", action="store_true", help="disable the overlay-watchdog adb poll")
     args = parser.parse_args()
 
     if args.selftest:
@@ -258,12 +401,24 @@ def main() -> int:
             file=sys.stderr,
         )
 
+    stop_heartbeat = threading.Event()
+    if not args.no_heartbeat:
+        if not OVERLAY_RECOVERY_ACTION:
+            print(
+                "MACRODROID_OVERLAY_RECOVERY_ACTION not set -- heartbeat will detect a missing "
+                "overlay but can't recover it until the macro has an Intent Received trigger.",
+                file=sys.stderr,
+            )
+        threading.Thread(target=_heartbeat_loop, args=(stop_heartbeat,), daemon=True).start()
+
     server = ThreadingHTTPServer((args.host, args.port), BridgeHandler)
     print(f"Lyft bridge listening on {args.host}:{args.port} (Ctrl+C to stop)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        stop_heartbeat.set()
     return 0
 
 
