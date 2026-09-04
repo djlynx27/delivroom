@@ -2,6 +2,8 @@
 // index.ts so it can be unit-tested (deno test) without triggering index.ts's
 // module-level serve() call, which binds a listener on import.
 
+import { decode as decodeImage, Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
+
 export interface LyftSnapshot {
   // Optional: absent in nearby-only captures (Wait Times / Recent Demand
   // are deliberately no longer scraped -- see index.ts's optionalSlots).
@@ -73,6 +75,40 @@ export function decodeBase64Image(input: string): DecodedImage | null {
     return { bytes, mimeType };
   } catch {
     return null;
+  }
+}
+
+// Gemini bills images by 768x768 tile regardless of how much detail is in
+// each tile — a full S23 Ultra screenshot (1080x2316+) burns several tiles'
+// worth of tokens to count car icons, a task that doesn't need native
+// resolution. Downscaling to this cap before sending is a pure cost
+// optimization: same signal in, far fewer tokens billed (see cost incident
+// 2026-09-04, docs/ingest-lyft-screenshots-macrodroid.md §"Coût Gemini").
+export const GEMINI_MAX_DIMENSION = 1024;
+const GEMINI_JPEG_QUALITY = 80;
+
+/**
+ * Downscales an image so its longer side is at most GEMINI_MAX_DIMENSION,
+ * re-encoded as JPEG to shrink bytes further. No-ops (returns the original)
+ * if the image is already small enough or fails to decode — a corrupt/odd
+ * screenshot should still reach Gemini at full size rather than be dropped.
+ */
+export async function resizeForGemini(image: DecodedImage): Promise<DecodedImage> {
+  try {
+    const decoded = await decodeImage(image.bytes);
+    // decodeImage can return a GIF's FrameCollection; screenshots are never
+    // animated, so only a single Image is a shape this function handles.
+    if (!(decoded instanceof Image)) return image;
+    const longSide = Math.max(decoded.width, decoded.height);
+    if (longSide <= GEMINI_MAX_DIMENSION) return image;
+
+    const scale = GEMINI_MAX_DIMENSION / longSide;
+    decoded.resize(Math.round(decoded.width * scale), Math.round(decoded.height * scale));
+    const bytes = await decoded.encodeJPEG(GEMINI_JPEG_QUALITY);
+    return { bytes, mimeType: 'image/jpeg' };
+  } catch (err) {
+    console.error('resizeForGemini: falling back to original image', err);
+    return image;
   }
 }
 

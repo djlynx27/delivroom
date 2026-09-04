@@ -41,6 +41,7 @@ import {
   haversineKm,
   parseLyftSnapshot,
   parseNearbyOnlySnapshot,
+  resizeForGemini,
   shouldFlagEmergingHotspot,
   type LyftSnapshot,
 } from './lyftSnapshot.ts';
@@ -246,8 +247,14 @@ async function handleRequest(req: Request): Promise<Response> {
     }
   }
 
+  // Resize after hashing (dedup must key off the original bytes MacroDroid
+  // sent, not a resized derivative) but before Gemini (image tokens are
+  // billed per 768x768 tile -- a full-res S23 Ultra screenshot burns several
+  // tiles' worth just to count car icons). See lyftSnapshot.ts.
+  const resizedImages = await Promise.all(images.map(resizeForGemini));
+
   const nearbyOnly = optionalSlots.length === 0;
-  const snapshot = await runGeminiVision(env.geminiKey, images, nearbyOnly);
+  const snapshot = await runGeminiVision(env.geminiKey, resizedImages, nearbyOnly);
   if (!snapshot) {
     return json({ error: 'Gemini n\'a pas pu extraire un snapshot valide de ces captures' }, 502);
   }

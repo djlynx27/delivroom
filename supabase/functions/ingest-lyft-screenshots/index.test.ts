@@ -13,6 +13,7 @@ import {
   formatGpsAddress,
   hashImages,
   parseLyftSnapshot,
+  resizeForGemini,
   shouldFlagEmergingHotspot,
 } from './lyftSnapshot.ts';
 
@@ -140,6 +141,12 @@ Deno.test('shouldFlagEmergingHotspot: does not flag low demand even when far', (
 
 Deno.test('shouldFlagEmergingHotspot: does not flag when distance is unknown (explicit zone_id override)', () => {
   assertEquals(shouldFlagEmergingHotspot(null, 10), false);
+});
+
+Deno.test('resizeForGemini: falls back to the original image when decoding fails', async () => {
+  const original = { bytes: new Uint8Array([104, 105]), mimeType: 'image/jpeg' }; // not a real image
+  const result = await resizeForGemini(original);
+  assertEquals(result, original);
 });
 
 Deno.test('formatGpsAddress: rounds to 4 decimal places', () => {

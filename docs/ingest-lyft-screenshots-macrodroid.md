@@ -207,6 +207,42 @@ pour ajouter une contrainte à une action précise : swipe/long-press sur la
 ligne de l'action dans l'éditeur de macro → menu contextuel → **Add
 constraint** (documenté aussi dans la section fix boucle infinie ci-dessus).
 
+## Coût Gemini (2026-09-04) — resize serveur ajouté, cap budget manuel requis
+
+Facture août 2026 : 13,49 $ CAD (11,73 $ subtotal Gemini API), qui a fait
+tomber le solde prépayé à -0,19 $ et bloqué toute extraction (`429
+RESOURCE_EXHAUSTED`) jusqu'à recharge manuelle sur
+[ai.studio/projects](https://ai.studio/projects).
+
+**Root cause identifiée :** le screenshot "Nearby drivers" était envoyé à
+Gemini en pleine résolution S23 Ultra (1080x2316+), sans resize ni crop.
+Gemini facture les images par tuile de 768x768 peu importe le detail réel —
+une capture pleine résolution consomme ~6 tuiles pour compter des icônes de
+voitures, une tâche qui n'a besoin d'aucune finesse.
+
+**Décision (analysée contre 3 scénarios : compression/fréquence côté
+MacroDroid, optimisation modèle/prompt côté Edge Function, cap budget +
+fallback) :** resize serveur uniquement — zéro changement MacroDroid requis,
+déployable immédiatement, aucune fragilité liée au layout de l'app (contrairement
+à un crop de la zone carte, qui aurait dû être recalibré à chaque mise à jour
+Lyft — voir la mésaventure du même jour plus haut dans ce doc). Modèle et
+fréquence de déclenchement (déjà limitée à 1x/5min via la contrainte macro)
+laissés inchangés : le goulot était les tokens d'image, pas le modèle ni le
+volume d'appels.
+
+**Implémenté :** `resizeForGemini()` dans `lyftSnapshot.ts` — downscale à
+1024px de long côté max (`imagescript`, pure Deno/WASM) + réencode JPEG
+qualité 80, appliqué juste avant l'appel Gemini (le hash de dédup reste basé
+sur les octets originaux). Mesuré sur une vraie capture : 227 Ko → 66 Ko
+(-71 %), ~6 tuiles → ~2 tuiles Gemini.
+
+**Reste à faire manuellement (aucune API pour ça) :** configurer un budget
+cap sur [ai.studio/projects](https://ai.studio/projects) — c'est un filet de
+sécurité contre une future facture surprise, pas un levier d'économie en soi.
+Le fallback applicatif existe déjà de facto : la macro ne retry pas sur un
+502, et `useDemandScores.ts` continue de fonctionner sans le Lyft Realtime
+Factor quand `platform_signals` n'a pas de ligne fraîche.
+
 ## 1. Configuration (une seule fois)
 
 ```bash
