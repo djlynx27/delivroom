@@ -28,7 +28,8 @@ import {
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { ensureShiftStarted } from '@/lib/activeShift';
-import { markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
+import { idleMinutes as computeIdleMinutes, loadIdleMap, markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
+import { getActiveTimeBoosts } from '@/lib/timeBoosts';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { recordRide as shiftRecordRide } from '@/lib/shiftTracker';
@@ -39,6 +40,11 @@ import { toast } from 'sonner';
 
 const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
 type Platform = (typeof PLATFORMS)[number];
+
+// Which of this screen's platform options also have an idle-time tracker in
+// platformIdle.ts (its Platform union is a different, unrelated list —
+// 'autre' and its 'skip'/'ubereats' aren't the same set at all).
+const IDLE_PLATFORMS = new Set<IdlePlatform>(['lyft', 'uber', 'hypra', 'imoove', 'doordash']);
 
 interface ExtractedData {
   earnings?: number | null;
@@ -268,6 +274,12 @@ export function ScreenshotAnalyzer() {
     const pickupScore = d.pickup_zone_id
       ? allScores.find((s) => s.zone_id === d.pickup_zone_id)?.final_score ?? null
       : null;
+    const idleMap = loadIdleMap();
+    const idle = IDLE_PLATFORMS.has(platform as IdlePlatform)
+      ? computeIdleMinutes(idleMap[platform as IdlePlatform])
+      : null;
+    const isPeakHour = getActiveTimeBoosts(new Date()).length > 0;
+
     return decideRideOffer({
       earnings: d.earnings ?? null,
       pickupTimeMin: d.pickup_time_minutes ?? null,
@@ -276,8 +288,10 @@ export function ScreenshotAnalyzer() {
       rideDistKm: d.ride_distance_km ?? null,
       dropoffZoneScore: dropoffScore,
       pickupZoneScore: pickupScore,
+      idleMinutes: idle,
+      isPeakHour,
     });
-  }, [result, allScores]);
+  }, [result, allScores, platform]);
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];

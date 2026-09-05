@@ -36,6 +36,12 @@ export interface RideOfferContext {
   pickupZoneScore?: number | null;
   /** 'rideshare' (Lyft/Uber, default) or 'delivery' (SkipTheDishes/DoorDash) — changes the floor thresholds below */
   platform?: 'rideshare' | 'delivery';
+  /** Minutes since the last ride ended (no active ride) — drives the elastic
+   * $/h floor below. Null/undefined = treated as not idle (no decay). */
+  idleMinutes?: number | null;
+  /** True during a peak/high-demand window (rush hour, weekend nightlife,
+   * an active event) — raises the elastic $/h floor's base. */
+  isPeakHour?: boolean;
 }
 
 export type Verdict = 'take' | 'skip' | 'meh';
@@ -65,19 +71,78 @@ const SKIP_PER_KM = 1.0;      // ≤$1/km → skip
 const SKIP_PICKUP_RATIO = 0.5; // pickup_km > 50% of ride_km → skip
 const STRATEGIC_DROPOFF_THRESHOLD = 70; // dropoff zone score ≥70 → strategic boost
 
-// Floor absolu — sous ces deux seuils SIMULTANÉMENT, la course est un skip
-// forcé quel que soit le reste du scoring (perte nette pour la Santa Fe 2018,
-// ~$0.55-0.60/mi de coût d'opération réel). $0.65/mi converti en $/km.
-const MILE_TO_KM = 1.60934;
-const FLOOR_PER_KM_RIDESHARE = round2(0.65 / MILE_TO_KM); // ≈ $0.40/km
-const FLOOR_HOURLY_RIDESHARE = 18;
-const FLOOR_PER_KM_DELIVERY = 0.85; // déjà en km (SkipTheDishes/DoorDash)
+// Delivery keeps its own fixed floor (unaffected by idle-time decay below —
+// SkipTheDishes/DoorDash payouts don't have the same "wait it out" dynamic
+// as a rideshare queue).
+const FLOOR_PER_KM_DELIVERY = 0.85; // already in km
 const FLOOR_HOURLY_DELIVERY = 28;
 
-function floorThresholds(platform: 'rideshare' | 'delivery') {
-  return platform === 'delivery'
-    ? { perKm: FLOOR_PER_KM_DELIVERY, hourly: FLOOR_HOURLY_DELIVERY }
-    : { perKm: FLOOR_PER_KM_RIDESHARE, hourly: FLOOR_HOURLY_RIDESHARE };
+// Elastic $/h floor (rideshare only) — the required rate a driver will
+// accept decays the longer they've been idle, since the opportunity cost of
+// continuing to wait rises with idle time. Never AND'd with the $/km floor
+// below: each is checked independently, so a ride can't slip through on a
+// good number in the other metric.
+const ELASTIC_HOURLY_OFFPEAK = 23;
+const ELASTIC_HOURLY_PEAK = 29;
+const ELASTIC_HOURLY_DECAY_GRACE_MIN = 15; // no decay before this much idle time
+const ELASTIC_HOURLY_DECAY_STEP_MIN = 10;  // one decay step per this many minutes past the grace period
+const ELASTIC_HOURLY_DECAY_PER_STEP = 2;   // $/h shaved off per step
+const ELASTIC_HOURLY_FLOOR = 20;           // hard minimum — never decays below this
+
+/**
+ * The $/h a ride must clear right now to not be a forced skip: starts at the
+ * peak/off-peak base and steps down $2/h every 10 minutes once idle time
+ * passes the 15-minute grace period, bottoming out at $20/h.
+ */
+export function computeElasticHourlyFloor(isPeakHour: boolean, idleMinutes: number | null | undefined): number {
+  const base = isPeakHour ? ELASTIC_HOURLY_PEAK : ELASTIC_HOURLY_OFFPEAK;
+  if (idleMinutes == null || idleMinutes <= ELASTIC_HOURLY_DECAY_GRACE_MIN) return base;
+  const steps = Math.floor((idleMinutes - ELASTIC_HOURLY_DECAY_GRACE_MIN) / ELASTIC_HOURLY_DECAY_STEP_MIN);
+  return Math.max(ELASTIC_HOURLY_FLOOR, base - steps * ELASTIC_HOURLY_DECAY_PER_STEP);
+}
+
+// Strict $/km floor (rideshare only) — never crossed regardless of how good
+// $/h looks or how long the driver has been idle: a short, fast, cheap ride
+// can post a great effective hourly rate while still under-compensating the
+// vehicle's real per-km cost (fuel/wear). $0.70/km is deliberately above the
+// Santa Fe 2018's measured ~$0.55-0.60/mi operating cost — a safety margin,
+// not just a break-even line.
+const STRICT_PER_KM_FLOOR_RIDESHARE = 0.7;
+
+type ForcedFloorMetrics = { dollarsPerKm: number | null; effectiveHourlyRate: number | null };
+
+/** Hard-floor gate, checked before any of the scored take/skip rules. Returns
+ * the forced-skip reasoning line, or null when nothing below-floor applies. */
+function checkForcedFloorSkip(
+  ctx: RideOfferContext,
+  metrics: ForcedFloorMetrics,
+  platform: 'rideshare' | 'delivery',
+): string | null {
+  const { dollarsPerKm: dpk, effectiveHourlyRate: eff } = metrics;
+
+  if (platform === 'delivery') {
+    // Delivery keeps the original combined floor (both metrics bad at once).
+    if (dpk !== null && eff !== null && dpk < FLOOR_PER_KM_DELIVERY && eff < FLOOR_HOURLY_DELIVERY) {
+      return `Floor absolu franchi : $${dpk.toFixed(2)}/km ET $${eff.toFixed(0)}/h sous les seuils ($${FLOOR_PER_KM_DELIVERY.toFixed(2)}/km, $${FLOOR_HOURLY_DELIVERY}/h) — perte nette`;
+    }
+    return null;
+  }
+
+  // Rideshare: two independent, unconditional floors — either one alone
+  // forces a skip, since a great number on the other metric doesn't
+  // compensate for undercutting vehicle cost or wasting idle time.
+  if (dpk !== null && dpk < STRICT_PER_KM_FLOOR_RIDESHARE) {
+    return `$/km sous le plancher strict : $${dpk.toFixed(2)}/km < $${STRICT_PER_KM_FLOOR_RIDESHARE.toFixed(2)}/km — coûts véhicule non couverts`;
+  }
+  const elasticFloor = computeElasticHourlyFloor(ctx.isPeakHour ?? false, ctx.idleMinutes);
+  if (eff !== null && eff < elasticFloor) {
+    const idleNote = ctx.idleMinutes != null ? `, idle ${ctx.idleMinutes} min` : '';
+    return (
+      `Taux horaire sous le seuil élastique : $${eff.toFixed(0)}/h < $${elasticFloor.toFixed(0)}/h ` +
+      `(${ctx.isPeakHour ? 'heure de pointe' : 'hors pointe'}${idleNote})`
+    );
+  }
+  return null;
 }
 
 export function decideRideOffer(ctx: RideOfferContext): Decision {
@@ -111,20 +176,13 @@ export function decideRideOffer(ctx: RideOfferContext): Decision {
     };
   }
 
-  const { perKm: floorPerKm, hourly: floorHourly } = floorThresholds(ctx.platform ?? 'rideshare');
   const dpk = metrics.dollarsPerKm;
   const eff = metrics.effectiveHourlyRate;
+  const platform = ctx.platform ?? 'rideshare';
 
-  // Floor absolu : sous les DEUX seuils en même temps → skip forcé, perte nette.
-  if (dpk !== null && eff !== null && dpk < floorPerKm && eff < floorHourly) {
-    return {
-      verdict: 'skip',
-      confidence: 100,
-      reasoning: [
-        `Floor absolu franchi : $${dpk.toFixed(2)}/km ET $${eff.toFixed(0)}/h sous les seuils ($${floorPerKm.toFixed(2)}/km, $${floorHourly}/h) — perte nette`,
-      ],
-      metrics,
-    };
+  const forcedFloorReason = checkForcedFloorSkip(ctx, metrics, platform);
+  if (forcedFloorReason) {
+    return { verdict: 'skip', confidence: 100, reasoning: [forcedFloorReason], metrics };
   }
 
   // Score is summed from each rule (positive = take, negative = skip)

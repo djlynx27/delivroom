@@ -78,6 +78,16 @@ Lire le `SKILL.md` correspondant pour le détail. Note : ces skills sont post-re
 
 ---
 
+## Device Android (MacroDroid, PWA native)
+
+Règle ADB Wireless Debugging (S23 Ultra / Pixel 8) — voir §14 du `CLAUDE.md`
+global (`~/.claude/CLAUDE.md`), pas dupliquée ici. En bref : tâche
+macro/PWA/native sur ces devices → `adb devices` d'abord, puis demander le
+code d'appairage si aucune session active, ne pas s'arrêter à des
+instructions manuelles non testées.
+
+---
+
 ## Commandes fréquentes
 
 ```powershell
