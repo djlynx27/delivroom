@@ -25,6 +25,7 @@ import { QuickDecideWidget } from '@/components/QuickDecideWidget';
 import { ShiftTally } from '@/components/ShiftTally';
 import { ScoreFactorIcons } from '@/components/ScoreFactorIcons';
 import { SurgeIndicator } from '@/components/SurgeIndicator';
+import { TacticalSpotBadge } from '@/components/TacticalSpotBadge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
@@ -47,6 +48,7 @@ import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
 import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
+import { computeMicroSpot } from '@/lib/spotter';
 import {
   getConservativePresencePreference,
   getDriverFingerprint,
@@ -384,6 +386,22 @@ export default function DriveScreen() {
     .filter((z) => !heroZone || z.id !== heroZone.id)
     .slice(0, 6);
   const heroEventBadge = heroZone ? zoneEventBadge.get(heroZone.id) : undefined;
+
+  // Inverse Proximity Spotter: a tactical 50-150m offset from the hero
+  // zone's coordinate, toward whichever cell of the Lyft nearby-drivers grid
+  // has the fewest rival cars (null when no grid is available yet, or the
+  // zone's own coordinate is already the quietest spot). navigateOneTap and
+  // the Waze button both target this instead of the zone's raw centroid
+  // when it's active -- the displayed zone name/score/distance stay the
+  // zone's own, only the nav *destination* moves.
+  const heroMicroSpot = useMemo(() => {
+    if (!heroZone) return null;
+    return computeMicroSpot(heroZone, lyftSignalByZone.get(heroZone.id)?.nearbyDriversGrid);
+  }, [heroZone, lyftSignalByZone]);
+  const heroNavTarget: RouteCandidateZone | null =
+    heroZone && heroMicroSpot && heroMicroSpot.offsetMeters > 0
+      ? { ...heroZone, latitude: heroMicroSpot.latitude, longitude: heroMicroSpot.longitude }
+      : heroZone;
 
   // Light haptic when a Lyft realtime signal (not e.g. a weather/traffic
   // recompute) actually flips the top recommendation -- gated on
@@ -813,6 +831,7 @@ export default function DriveScreen() {
                     🔄 Syncing Lyft Metrics...
                   </span>
                 )}
+                {heroMicroSpot && <TacticalSpotBadge spot={heroMicroSpot} />}
               </div>
 
               <div className="flex justify-center items-center gap-3">
@@ -829,13 +848,19 @@ export default function DriveScreen() {
 
               <div className="space-y-2 pt-2">
                 <Button
-                  onClick={() => navigateOneTap(heroZone)}
+                  onClick={() => navigateOneTap(heroNavTarget ?? heroZone)}
                   className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
                 >
                   <Car className="w-6 h-6 flex-shrink-0" /> Naviguer
                 </Button>
                 <Button
-                  onClick={() => openWazeNav(heroZone.name, heroZone.latitude, heroZone.longitude)}
+                  onClick={() =>
+                    openWazeNav(
+                      heroZone.name,
+                      heroNavTarget?.latitude ?? heroZone.latitude,
+                      heroNavTarget?.longitude ?? heroZone.longitude
+                    )
+                  }
                   variant="secondary"
                   className="w-full h-16 text-[18px] font-display font-bold gap-2"
                 >

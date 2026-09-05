@@ -277,6 +277,7 @@ async function handleRequest(req: Request): Promise<Response> {
       estimated_wait_min:
         snapshot.wait_time_min != null ? Math.round(snapshot.wait_time_min) : null,
       nearby_drivers_count: snapshot.nearby_drivers_count,
+      nearby_drivers_grid: snapshot.nearby_drivers_grid ?? null,
       source: 'screenshot',
       captured_at: new Date().toISOString(),
       content_hash: contentHash,

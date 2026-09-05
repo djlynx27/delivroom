@@ -388,7 +388,7 @@ export function useDemandScores(
       const { data, error } = await supabase
         .from('platform_signals')
         .select(
-          'zone_id, demand_level, surge_active, estimated_wait_min, nearby_drivers_count, captured_at'
+          'zone_id, demand_level, surge_active, estimated_wait_min, nearby_drivers_count, nearby_drivers_grid, captured_at'
         )
         .eq('platform', 'lyft')
         .in(
@@ -473,6 +473,10 @@ export function useDemandScores(
             signal.nearby_drivers_count == null
               ? null
               : Number(signal.nearby_drivers_count),
+          // Row-major 3x3 driver-density grid -- absent when Gemini didn't
+          // return spatial data, or on older signals from before this field
+          // existed. Consumed by src/lib/spotter.ts.
+          nearbyDriversGrid: signal.nearby_drivers_grid ?? null,
         },
       ])
     );

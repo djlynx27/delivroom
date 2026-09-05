@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  bearingToCompassLabel,
   computeMicroSpot,
   findQuietestQuadrant,
   isValidDriverGrid,
@@ -59,6 +60,23 @@ describe('offsetCoordinate', () => {
     const point = offsetCoordinate(CHOMEDEY, 90, 100);
     expect(point.longitude).toBeGreaterThan(CHOMEDEY.longitude);
     expect(point.latitude).toBeCloseTo(CHOMEDEY.latitude, 6);
+  });
+});
+
+describe('bearingToCompassLabel', () => {
+  it('labels all 8 cardinal/intercardinal bearings in French', () => {
+    expect(bearingToCompassLabel(0)).toBe('N');
+    expect(bearingToCompassLabel(45)).toBe('N-E');
+    expect(bearingToCompassLabel(90)).toBe('E');
+    expect(bearingToCompassLabel(135)).toBe('S-E');
+    expect(bearingToCompassLabel(180)).toBe('S');
+    expect(bearingToCompassLabel(225)).toBe('S-O');
+    expect(bearingToCompassLabel(270)).toBe('O');
+    expect(bearingToCompassLabel(315)).toBe('N-O');
+  });
+
+  it('labels a null bearing (center-quietest) as "centre"', () => {
+    expect(bearingToCompassLabel(null)).toBe('centre');
   });
 });
 

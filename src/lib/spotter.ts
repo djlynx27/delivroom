@@ -56,6 +56,25 @@ const QUADRANT_BEARING_DEG: Record<Quadrant, number | null> = {
   bottom_right: 135,
 };
 
+const COMPASS_LABEL_BY_BEARING: Record<number, string> = {
+  0: 'N',
+  45: 'N-E',
+  90: 'E',
+  135: 'S-E',
+  180: 'S',
+  225: 'S-O',
+  270: 'O',
+  315: 'N-O',
+};
+
+/** French compass abbreviation for a bearing produced by this module
+ * (always one of the 8 values above), or "centre" when there's no
+ * direction (the quietest cell was the center one). */
+export function bearingToCompassLabel(bearingDeg: number | null): string {
+  if (bearingDeg === null) return 'centre';
+  return COMPASS_LABEL_BY_BEARING[bearingDeg] ?? `${Math.round(bearingDeg)}°`;
+}
+
 export interface MicroSpot extends GeoPoint {
   quadrant: Quadrant;
   bearingDeg: number | null;
