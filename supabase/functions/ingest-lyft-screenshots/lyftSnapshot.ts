@@ -4,12 +4,36 @@
 
 import { decode as decodeImage, Image } from 'https://deno.land/x/imagescript@1.3.0/mod.ts';
 
+// Row-major 3x3 density grid over the visible map: [TL, TC, TR, ML, C, MR, BL, BC, BR].
+// Used by src/lib/spotter.ts (a separate, client-side module -- this Deno
+// function and the Vite app don't share a module graph) to steer the driver
+// toward whichever cell has the fewest rival cars.
+export type DriverGrid = number[];
+export const DRIVER_GRID_SIZE = 9;
+
 export interface LyftSnapshot {
   // Optional: absent in nearby-only captures (Wait Times / Recent Demand
   // are deliberately no longer scraped -- see index.ts's optionalSlots).
   demand_score?: number;
   wait_time_min?: number;
   nearby_drivers_count: number;
+  // Optional: only nearby-only captures ask Gemini for spatial distribution
+  // (see index.ts's prompt) -- absent if Gemini omits/malforms it, since a
+  // missing grid shouldn't fail the whole snapshot.
+  nearby_drivers_grid?: DriverGrid;
+}
+
+/**
+ * Validates a Gemini-extracted grid: must be an array of exactly
+ * DRIVER_GRID_SIZE non-negative finite numbers. Returns null (not a
+ * best-effort fallback like clampNumber) because a malformed grid has no
+ * safe default -- the caller should just treat spatial data as unavailable.
+ */
+function parseDriverGrid(value: unknown): DriverGrid | null {
+  if (!Array.isArray(value) || value.length !== DRIVER_GRID_SIZE) return null;
+  const grid = value.map((v) => Number(v));
+  if (grid.some((n) => !Number.isFinite(n) || n < 0)) return null;
+  return grid;
 }
 
 /** Clamps a Gemini-extracted numeric field into a sane, finite range. */
@@ -48,8 +72,10 @@ export function parseNearbyOnlySnapshot(raw: unknown): LyftSnapshot | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const obj = raw as Record<string, unknown>;
   if (obj.nearby_drivers_count === undefined) return null;
+  const grid = parseDriverGrid(obj.nearby_drivers_grid);
   return {
     nearby_drivers_count: Math.round(clampNumber(obj.nearby_drivers_count, 0, 200, 0)),
+    ...(grid && { nearby_drivers_grid: grid }),
   };
 }
 

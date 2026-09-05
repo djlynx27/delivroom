@@ -13,6 +13,7 @@ import {
   formatGpsAddress,
   hashImages,
   parseLyftSnapshot,
+  parseNearbyOnlySnapshot,
   resizeForGemini,
   shouldFlagEmergingHotspot,
 } from './lyftSnapshot.ts';
@@ -141,6 +142,29 @@ Deno.test('shouldFlagEmergingHotspot: does not flag low demand even when far', (
 
 Deno.test('shouldFlagEmergingHotspot: does not flag when distance is unknown (explicit zone_id override)', () => {
   assertEquals(shouldFlagEmergingHotspot(null, 10), false);
+});
+
+Deno.test('parseNearbyOnlySnapshot: accepts a valid 3x3 grid', () => {
+  const grid = [0, 1, 0, 2, 3, 0, 1, 0, 0];
+  const result = parseNearbyOnlySnapshot({ nearby_drivers_count: 7, nearby_drivers_grid: grid });
+  assertEquals(result?.nearby_drivers_grid, grid);
+});
+
+Deno.test('parseNearbyOnlySnapshot: drops a grid of the wrong length rather than failing the snapshot', () => {
+  const result = parseNearbyOnlySnapshot({
+    nearby_drivers_count: 7,
+    nearby_drivers_grid: [1, 2, 3], // Gemini hallucinated fewer than 9 cells
+  });
+  assertEquals(result?.nearby_drivers_count, 7);
+  assertEquals(result?.nearby_drivers_grid, undefined);
+});
+
+Deno.test('parseNearbyOnlySnapshot: drops a grid with a negative or non-numeric cell', () => {
+  const result = parseNearbyOnlySnapshot({
+    nearby_drivers_count: 7,
+    nearby_drivers_grid: [0, 0, 0, 0, 0, 0, 0, 0, -1],
+  });
+  assertEquals(result?.nearby_drivers_grid, undefined);
 });
 
 Deno.test('resizeForGemini: falls back to the original image when decoding fails', async () => {

@@ -338,15 +338,17 @@ async function runGeminiVision(
   nearbyOnly: boolean
 ): Promise<LyftSnapshot | null> {
   const prompt = nearbyOnly
-    ? `You are analyzing 1 screenshot from the Lyft Driver app: the "Nearby drivers" screen (map showing rival driver car icons near the current position).
+    ? `You are analyzing 1 screenshot from the Lyft Driver app: the "Nearby drivers" screen (map showing rival driver car icons near the current position, which is at the center of the map).
 
 Extract and return ONLY a raw JSON object (no markdown fences) matching:
 {
-  "nearby_drivers_count": number // count of visually distinct rival driver car icons on the map
+  "nearby_drivers_count": number,  // count of visually distinct rival driver car icons on the map
+  "nearby_drivers_grid": number[]  // exactly 9 numbers: how many of those car icons fall in each cell of a 3x3 grid over the visible map area, row-major order (top-left, top-center, top-right, middle-left, center, middle-right, bottom-left, bottom-center, bottom-right)
 }
 
 Rules:
 - If the count isn't clearly visible, make your best visual estimate rather than returning null.
+- nearby_drivers_grid's 9 values must sum to (approximately) nearby_drivers_count.
 - Return ONLY the JSON, no other text.`
     : `You are analyzing 3 screenshots from the Lyft Driver app, in this exact order:
 1. Wait times screen
