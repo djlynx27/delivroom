@@ -31,10 +31,13 @@ import {
   clearAutoScanConfig,
   configureAutoScan as configureScanner,
   getConfiguredLabel,
+  getScanStatus,
   isAutoScanConfigured,
+  regrantPermission,
   rescanConfigured,
   scannerKind,
   silentRescan,
+  type ScanStatus,
 } from '@/lib/scannerService';
 import { drainSharedFiles } from '@/lib/shareInbox';
 import { insertTripsResilient } from '@/lib/tripBulkInsert';
@@ -173,8 +176,11 @@ export function BulkScreenshotUploader() {
   const [autoScanConfigured, setAutoScanConfigured] = useState(false);
   const [autoScanLabel, setAutoScanLabel] = useState<string | null>(null);
   const [autoScanning, setAutoScanning] = useState(false);
+  const [scanStatus, setScanStatus] = useState<ScanStatus>('not-configured');
+  const [lastSyncCount, setLastSyncCount] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+  const newUploadsRef = useRef(0);
   const kind = scannerKind();
 
   // On mount: refresh the configured-state from the active scanner backend
@@ -192,6 +198,10 @@ export function BulkScreenshotUploader() {
       setAutoScanConfigured(true);
       const label = await getConfiguredLabel();
       if (label) setAutoScanLabel(label);
+      const status = await getScanStatus();
+      if (cancelled) return;
+      setScanStatus(status);
+      if (status !== 'granted') return;
       const files = await silentRescan(nameFilter || '');
       if (cancelled || !files.length) return;
       ingest(files, { fromFolder: true });
@@ -230,6 +240,7 @@ export function BulkScreenshotUploader() {
     }
     setAutoScanConfigured(true);
     if (result.label) setAutoScanLabel(`📁 ${result.label}`);
+    setScanStatus(await getScanStatus());
     toast.success('Auto-scan configuré');
     await runConfiguredScan(false);
 
@@ -259,13 +270,29 @@ export function BulkScreenshotUploader() {
     await unregisterMaxymoPeriodicSync();
     setAutoScanConfigured(false);
     setAutoScanLabel(null);
+    setScanStatus('not-configured');
+    setLastSyncCount(null);
     toast.info('Auto-scan désactivé');
+  }
+
+  // Banner's 1-tap grant button: re-request permission on the already-picked
+  // handle (no folder picker) then run a scan immediately.
+  async function requestPermission() {
+    const ok = await regrantPermission();
+    if (!ok) {
+      toast.error('Permission refusée');
+      return;
+    }
+    setScanStatus('granted');
+    toast.success('Permission accordée');
+    await runConfiguredScan(false);
   }
 
   async function runConfiguredScan(silent: boolean): Promise<void> {
     setAutoScanning(true);
     try {
       const files = await rescanConfigured(nameFilter || '');
+      setScanStatus(await getScanStatus());
       if (!files.length) {
         if (!silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
         return;
@@ -310,6 +337,7 @@ export function BulkScreenshotUploader() {
   function reset() {
     setItems([]);
     setFolderStats(null);
+    setLastSyncCount(null);
     // La plateforme n'est pas détectée par screenshot — un seul sélecteur
     // s'applique à tout le lot. Sans ce reset, un lot Hypra suivi d'un lot
     // Lyft hérite silencieusement du choix précédent (bug rapporté : courses
@@ -330,6 +358,7 @@ export function BulkScreenshotUploader() {
     }
     if (opts.fromFolder) {
       setFolderStats({ totalInFolder: rawFiles.length, matched: filtered.length });
+      setLastSyncCount(filtered.length);
     } else {
       setFolderStats(null);
     }
@@ -402,6 +431,7 @@ export function BulkScreenshotUploader() {
         source: 'bulk',
         analysisResult: analysis,
       });
+      newUploadsRef.current += 1;
 
       const earnings = analysis?.extracted_data?.earnings;
       const summaryBits: string[] = [];
@@ -425,8 +455,25 @@ export function BulkScreenshotUploader() {
     }
   }
 
+  // After a batch lands new (non-duplicate) screenshots, kick the zone
+  // scoring recalculation so the learning loop reflects them right away
+  // instead of waiting for the next cron tick. Best-effort: a failure here
+  // doesn't affect what's already uploaded, just delays the score refresh.
+  async function triggerRetrain(newCount: number): Promise<void> {
+    if (newCount <= 0) return;
+    const toastId = toast.loading(`Recalcul des zones (${newCount} nouveau(x))…`);
+    try {
+      await supabase.functions.invoke('score-calculator');
+      toast.success('Scores de zones mis à jour', { id: toastId });
+    } catch (err) {
+      console.error('[retrain] score-calculator failed:', err);
+      toast.error('Recalcul des zones échoué (les courses restent sauvegardées)', { id: toastId });
+    }
+  }
+
   async function runBatch() {
     setRunning(true);
+    newUploadsRef.current = 0;
     try {
       for (const item of items) {
         if (item.status === 'skipped') continue;
@@ -436,6 +483,7 @@ export function BulkScreenshotUploader() {
       }
       qc.invalidateQueries({ queryKey: ['trips-feed'] });
       qc.invalidateQueries({ queryKey: ['trip-history'] });
+      await triggerRetrain(newUploadsRef.current);
     } finally {
       setRunning(false);
     }
@@ -484,11 +532,13 @@ export function BulkScreenshotUploader() {
       `${newItems.length} import(s) en attente repris automatiquement`,
     );
 
+    newUploadsRef.current = 0;
     for (const item of newItems) {
       await processOne(item);
     }
     qc.invalidateQueries({ queryKey: ['trips-feed'] });
     qc.invalidateQueries({ queryKey: ['trip-history'] });
+    await triggerRetrain(newUploadsRef.current);
   }
 
   useEffect(() => {
@@ -633,6 +683,33 @@ export function BulkScreenshotUploader() {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Sync status banner — always visible when a scanner backend exists,
+            so the driver never wonders whether the folder is actually being
+            watched. */}
+        {kind !== 'unsupported' && autoScanConfigured && (
+          <>
+            {autoScanning ? (
+              <div className="flex items-center gap-2 bg-primary/5 border border-primary/30 rounded-md p-2 text-xs text-primary">
+                <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                Scan du dossier en cours…
+              </div>
+            ) : scanStatus === 'permission-needed' ? (
+              <div className="flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-md p-2 text-xs text-amber-400">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="flex-1">Permission requise pour scanner le dossier Maxymo/Lyft</span>
+                <Button size="sm" className="h-7 text-xs" onClick={requestPermission}>
+                  Autoriser
+                </Button>
+              </div>
+            ) : scanStatus === 'granted' && lastSyncCount != null ? (
+              <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-md p-2 text-xs text-green-400">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                {lastSyncCount} nouveau{lastSyncCount > 1 ? 'x' : ''} fichier{lastSyncCount > 1 ? 's' : ''} synchronisé{lastSyncCount > 1 ? 's' : ''}
+              </div>
+            ) : null}
+          </>
+        )}
+
         {fromShare && (
           <div className="flex items-start gap-2 bg-primary/5 border border-primary/30 rounded-md p-2">
             <Share2 className="w-4 h-4 text-primary shrink-0 mt-0.5" />

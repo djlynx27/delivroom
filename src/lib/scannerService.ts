@@ -37,6 +37,34 @@ export async function isAutoScanConfigured(): Promise<boolean> {
   return !!(await getStoredHandle());
 }
 
+export type ScanStatus = 'unsupported' | 'not-configured' | 'granted' | 'permission-needed';
+
+/** Current state for the admin banner — never prompts, just reports. */
+export async function getScanStatus(): Promise<ScanStatus> {
+  const kind = scannerKind();
+  if (kind === 'unsupported') return 'unsupported';
+  if (kind === 'native') {
+    return getConfiguredPath() ? 'granted' : 'not-configured';
+  }
+  const handle = await getStoredHandle();
+  if (!handle) return 'not-configured';
+  const ok = await ensureReadPermission(handle, false);
+  return ok ? 'granted' : 'permission-needed';
+}
+
+/**
+ * Re-request permission on the already-configured folder handle (no folder
+ * picker) — used by the "1-tap grant" banner button. Native permission decay
+ * doesn't happen the same way (see capacitorScanner.ts), so this is a no-op
+ * there.
+ */
+export async function regrantPermission(): Promise<boolean> {
+  if (isNative()) return true;
+  const handle = await getStoredHandle();
+  if (!handle) return false;
+  return ensureReadPermission(handle, true);
+}
+
 export async function getConfiguredLabel(): Promise<string | null> {
   if (isNative()) {
     const path = getConfiguredPath();
