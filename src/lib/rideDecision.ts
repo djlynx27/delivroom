@@ -11,6 +11,18 @@
 //   offer worth doing vs. a counterfactual better ride).
 // - Pickup ratio: if pickup distance > 50% of the ride distance, it's
 //   typically not worth it (huge deadhead).
+//
+// Units: km throughout, matching what the Lyft Driver screenshot actually
+// shows in Québec (the analyze-screenshot edge function already converts
+// mi → km on ingest). The $/mi Maxymo floor below is a separate driver
+// tool configured in miles to mirror Lyft's own summary screen — it's
+// converted to $/km here so both stay in sync without mixing units.
+//
+// Lyft Upfront Pay is a fixed fare: it does not get recalculated if
+// traffic makes the trip take longer, so ETA/time estimates from the
+// screenshot are the only lever on effectiveHourlyRate — there's no
+// "actual vs. estimated" data available at accept-time to penalize
+// further.
 
 export interface RideOfferContext {
   earnings: number | null;
@@ -22,6 +34,8 @@ export interface RideOfferContext {
   dropoffZoneScore?: number | null;
   /** Optional — pickup zone score */
   pickupZoneScore?: number | null;
+  /** 'rideshare' (Lyft/Uber, default) or 'delivery' (SkipTheDishes/DoorDash) — changes the floor thresholds below */
+  platform?: 'rideshare' | 'delivery';
 }
 
 export type Verdict = 'take' | 'skip' | 'meh';
@@ -50,6 +64,21 @@ const TAKE_PER_KM = 2.0;      // ≥$2/km → take
 const SKIP_PER_KM = 1.0;      // ≤$1/km → skip
 const SKIP_PICKUP_RATIO = 0.5; // pickup_km > 50% of ride_km → skip
 const STRATEGIC_DROPOFF_THRESHOLD = 70; // dropoff zone score ≥70 → strategic boost
+
+// Floor absolu — sous ces deux seuils SIMULTANÉMENT, la course est un skip
+// forcé quel que soit le reste du scoring (perte nette pour la Santa Fe 2018,
+// ~$0.55-0.60/mi de coût d'opération réel). $0.65/mi converti en $/km.
+const MILE_TO_KM = 1.60934;
+const FLOOR_PER_KM_RIDESHARE = round2(0.65 / MILE_TO_KM); // ≈ $0.40/km
+const FLOOR_HOURLY_RIDESHARE = 18;
+const FLOOR_PER_KM_DELIVERY = 0.85; // déjà en km (SkipTheDishes/DoorDash)
+const FLOOR_HOURLY_DELIVERY = 28;
+
+function floorThresholds(platform: 'rideshare' | 'delivery') {
+  return platform === 'delivery'
+    ? { perKm: FLOOR_PER_KM_DELIVERY, hourly: FLOOR_HOURLY_DELIVERY }
+    : { perKm: FLOOR_PER_KM_RIDESHARE, hourly: FLOOR_HOURLY_RIDESHARE };
+}
 
 export function decideRideOffer(ctx: RideOfferContext): Decision {
   const reasoning: string[] = [];
@@ -82,12 +111,38 @@ export function decideRideOffer(ctx: RideOfferContext): Decision {
     };
   }
 
+  const { perKm: floorPerKm, hourly: floorHourly } = floorThresholds(ctx.platform ?? 'rideshare');
+  const dpk = metrics.dollarsPerKm;
+  const eff = metrics.effectiveHourlyRate;
+
+  // Floor absolu : sous les DEUX seuils en même temps → skip forcé, perte nette.
+  if (dpk !== null && eff !== null && dpk < floorPerKm && eff < floorHourly) {
+    return {
+      verdict: 'skip',
+      confidence: 100,
+      reasoning: [
+        `Floor absolu franchi : $${dpk.toFixed(2)}/km ET $${eff.toFixed(0)}/h sous les seuils ($${floorPerKm.toFixed(2)}/km, $${floorHourly}/h) — perte nette`,
+      ],
+      metrics,
+    };
+  }
+
   // Score is summed from each rule (positive = take, negative = skip)
   let score = 0;
 
-  // $/km signal
-  const dpk = metrics.dollarsPerKm;
-  if (dpk !== null) {
+  // $/hr prime sur $/km : un $/hr vert valide la course même si $/km est faible.
+  if (eff !== null && eff >= TAKE_HOURLY) {
+    score += 2;
+    reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h ✓ (prime sur $/km)`);
+  } else if (eff !== null && eff <= SKIP_HOURLY) {
+    score -= 3;
+    reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h (sous le seuil $${SKIP_HOURLY}/h)`);
+  } else if (eff !== null) {
+    reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h (acceptable)`);
+  }
+
+  // $/km signal — ignoré si le $/hr est déjà vert (règle de hiérarchie ci-dessus)
+  if (dpk !== null && !(eff !== null && eff >= TAKE_HOURLY)) {
     if (dpk >= TAKE_PER_KM) {
       score += 2;
       reasoning.push(`$/km excellent : $${dpk.toFixed(2)}/km (cible ≥$${TAKE_PER_KM})`);
@@ -96,20 +151,6 @@ export function decideRideOffer(ctx: RideOfferContext): Decision {
       reasoning.push(`$/km trop bas : $${dpk.toFixed(2)}/km (seuil $${SKIP_PER_KM})`);
     } else {
       reasoning.push(`$/km moyen : $${dpk.toFixed(2)}/km`);
-    }
-  }
-
-  // Effective hourly rate (including pickup deadhead)
-  const eff = metrics.effectiveHourlyRate;
-  if (eff !== null) {
-    if (eff >= TAKE_HOURLY) {
-      score += 2;
-      reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h ✓`);
-    } else if (eff <= SKIP_HOURLY) {
-      score -= 3;
-      reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h (sous le seuil $${SKIP_HOURLY}/h)`);
-    } else {
-      reasoning.push(`Taux horaire effectif : $${eff.toFixed(0)}/h (acceptable)`);
     }
   }
 
