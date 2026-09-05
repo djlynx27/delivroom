@@ -9,6 +9,37 @@
 // - Easy to reset at shift end (or auto-roll at midnight).
 
 const KEY = 'delivroom-shift-tally';
+export const SHIFT_TARGET_KEY = 'delivroom-shift-target';
+export const DEFAULT_SHIFT_TARGET = 150;
+
+// Santa Fe Sport 2018 cost-per-km estimates — shared with NetProfitWidget so
+// there's one source of truth for the vehicle cost model.
+export const FUEL_COST_PER_KM = 0.22; // ~13 L/100km × $1.67/L
+export const DEPRECIATION_PER_KM = 0.08; // CRA class 10 declining-balance approximation
+
+// Below this net $/h, a shift is losing money against the effort — flagged
+// in the UI rather than baked into a "good/bad" verdict.
+export const MIN_VIABLE_NET_PER_HOUR = 29;
+
+export function readShiftTarget(): number {
+  if (typeof localStorage === 'undefined') return DEFAULT_SHIFT_TARGET;
+  try {
+    const raw = localStorage.getItem(SHIFT_TARGET_KEY);
+    const parsed = raw !== null ? Number(raw) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SHIFT_TARGET;
+  } catch {
+    return DEFAULT_SHIFT_TARGET;
+  }
+}
+
+export function writeShiftTarget(value: number): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(SHIFT_TARGET_KEY, String(value));
+  } catch {
+    /* ignore storage errors */
+  }
+}
 
 export interface ShiftRide {
   ts: number;          // epoch ms
@@ -85,6 +116,12 @@ export interface ShiftStats {
   activeHourlyRate: number | null;
   /** $/km based on ACTUAL fares + total km driven. */
   dollarsPerKm: number | null;
+  /** Gross fare minus estimated fuel + depreciation for the km driven. */
+  netFare: number;
+  /** Net $/h = netFare / wallHours. */
+  netHourlyRate: number | null;
+  /** Net $/km = netFare / totalKm. */
+  netPerKm: number | null;
 }
 
 export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
@@ -100,6 +137,9 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
       trueHourlyRate: null,
       activeHourlyRate: null,
       dollarsPerKm: null,
+      netFare: 0,
+      netHourlyRate: null,
+      netPerKm: null,
     };
   }
 
@@ -108,6 +148,7 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
   const totalMin = rides.reduce((sum, r) => sum + (r.rideMin ?? 0), 0);
   const activeHours = totalMin / 60;
   const wallHours = (now - tally.startedAt) / 3_600_000;
+  const netFare = totalFare - totalKm * (FUEL_COST_PER_KM + DEPRECIATION_PER_KM);
   return {
     rideCount: rides.length,
     totalFare,
@@ -118,5 +159,8 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
     trueHourlyRate: wallHours > 0.05 ? totalFare / wallHours : null,
     activeHourlyRate: activeHours > 0.05 ? totalFare / activeHours : null,
     dollarsPerKm: totalKm > 0 ? totalFare / totalKm : null,
+    netFare,
+    netHourlyRate: wallHours > 0.05 ? netFare / wallHours : null,
+    netPerKm: totalKm > 0 ? netFare / totalKm : null,
   };
 }

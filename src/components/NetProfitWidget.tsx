@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, TrendingDown } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { DEPRECIATION_PER_KM, FUEL_COST_PER_KM } from '@/lib/shiftTracker';
 
 interface NetProfitWidgetProps {
   /** Gross earnings for the period (CAD) */
@@ -15,10 +16,8 @@ interface NetProfitWidgetProps {
 // ── Cost constants ────────────────────────────────────────────────────────────
 // CRA 2025 automobile mileage rate (first 5 000 km at the higher tier)
 const CRA_RATE_PER_KM = 0.72; // $/km deductible business travel
-// Fuel estimate for a 2018 Hyundai Santa Fe Sport at ~13 L/100 km × $1.67/L
-const FUEL_COST_PER_KM = 0.22; // $/km
-// Depreciation approximation (CRA declining-balance class 10 = 30%/yr)
-const DEPRECIATION_PER_KM = 0.08; // $/km — conservative estimate
+// FUEL_COST_PER_KM / DEPRECIATION_PER_KM live in shiftTracker.ts — shared with
+// ShiftTally's net $/h so there's one source of truth for the cost model.
 // Combined federal + Quebec marginal rate for ~$60k self-employed income
 const ESTIMATED_TAX_RATE = 0.3;
 
