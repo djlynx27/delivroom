@@ -47,6 +47,17 @@ interface ExtractedData {
   active_trip_distance_total_km?: number | null;
   active_trip_time_remaining_min?: number | null;
   active_trip_time_total_min?: number | null;
+  // Ordered stop sequence for multi-destination rides (Lyft "add a stop"),
+  // in visit order: pickup first, dropoff last, any intermediate stops
+  // between them. Empty/absent for a normal single-destination ride —
+  // pickup_address/dropoff_address above remain the source of truth for
+  // those, this is additive for the multi-stop case.
+  trip_waypoints?: TripWaypoint[] | null;
+}
+
+interface TripWaypoint {
+  type: 'pickup' | 'stop' | 'dropoff';
+  address: string;
 }
 
 interface AnalysisResult {
@@ -625,12 +636,14 @@ Extract all useful information from this image and return ONLY a raw JSON object
     "active_trip_distance_remaining_km": number|null,
     "active_trip_distance_total_km": number|null,
     "active_trip_time_remaining_min": number|null,
-    "active_trip_time_total_min": number|null
+    "active_trip_time_total_min": number|null,
+    "trip_waypoints": [{ "type": "pickup"|"stop"|"dropoff", "address": string }]|null
   },
   "matched_zone_id": string|null
 }
 
 Rules:
+- trip_waypoints: ONLY populate when the ride has more than 2 stops (Lyft's "add a stop" feature — you'll see 3+ pins/addresses on the trip card, not just one pickup and one dropoff). List them in visit order: exactly one "pickup" first, exactly one "dropoff" last, any number of "stop" entries between them. Leave null for a normal single-destination ride — pickup_address/dropoff_address already cover that case.
 - active_trip_*: the Maxymo Trip Tracking overlay is a small white floating widget on top of the Lyft Driver navigation screen during an active ride, showing a payout (e.g. "$11.04"), a distance as "remaining / total" (e.g. "1.5 mi / 2.8 mi"), and a time as "remaining / total" (e.g. "7 min / 13 min"). Extract payout as active_trip_payout, convert miles to km for both distance fields, and populate the remaining/total minute fields directly. Only populate these if that overlay is actually visible — null otherwise, do not confuse it with the pickup/ride offer card fields above.
 - matched_zone_id: read any text/labels visible on the image (street names, borough names, neighbourhoods, landmarks, transit stations, bridges). If you can locate the screenshot inside one of the catalog entries above, return its EXACT id from the catalog. If unsure, return null — DO NOT invent ids.
 - pickup_address / dropoff_address: copy the addresses verbatim from the image if present (Lyft/Uber/DoorDash trip cards usually show origin near the green/pickup pin and destination near the red/drop pin). Otherwise null.

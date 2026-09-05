@@ -16,7 +16,15 @@ import {
 } from '@/components/ui/select';
 import { useZones, type Zone } from '@/hooks/useSupabase';
 import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
-import { computeActiveTripRates, nearestZoneId, normalizeStartedAt } from '@/lib/tripSave';
+import {
+  computeActiveTripRates,
+  copyAddressToClipboard,
+  nearestZoneId,
+  normalizeStartedAt,
+  resolveNextNavigationWaypoint,
+  resolveTripWaypoints,
+  type TripWaypoint,
+} from '@/lib/tripSave';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { ensureShiftStarted } from '@/lib/activeShift';
@@ -54,6 +62,7 @@ interface ExtractedData {
   active_trip_distance_total_km?: number | null;
   active_trip_time_remaining_min?: number | null;
   active_trip_time_total_min?: number | null;
+  trip_waypoints?: TripWaypoint[] | null;
 }
 
 interface AnalysisResult {
@@ -163,6 +172,30 @@ async function saveActiveTripTrackingIfPresent(d: ExtractedData | undefined | nu
   }
 }
 
+// Maxymo's overlay only renders once a ride is actually underway, so its
+// presence is the signal that we've moved from "en route to pickup" to
+// "passenger onboard" — the app has no other way to observe that transition.
+function resolveRidePhase(d: ExtractedData): 'to_pickup' | 'active_trip' {
+  return d.active_trip_payout != null ? 'active_trip' : 'to_pickup';
+}
+
+async function copyNextWaypoint(
+  d: ExtractedData,
+  stopsVisited: number,
+): Promise<TripWaypoint | null> {
+  const next = resolveNextNavigationWaypoint(
+    resolveTripWaypoints(d),
+    resolveRidePhase(d),
+    stopsVisited,
+  );
+  if (!next) return null;
+  const ok = await copyAddressToClipboard(next.address);
+  if (ok) {
+    toast.success('Adresse copiée dans le presse-papier', { description: next.address });
+  }
+  return next;
+}
+
 function ActiveTripTrackingCard({ data }: { data: ExtractedData }) {
   const { dollarsPerHour, dollarsPerKm } = computeActiveTripRates({
     payout_cad: data.active_trip_payout ?? null,
@@ -210,6 +243,9 @@ export function ScreenshotAnalyzer() {
   const [saved, setSaved] = useState(false);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [storedPath, setStoredPath] = useState<string | null>(null);
+  // How many multi-stop waypoints the "Prochain arrêt" button has already
+  // advanced past for THIS analysis — reset whenever a new screenshot comes in.
+  const [stopsVisited, setStopsVisited] = useState(0);
 
   // Pull current zone scores so the decision agent can reason about the
   // strategic value of the dropoff (lands in a hot zone = better ride).
@@ -251,6 +287,7 @@ export function ScreenshotAnalyzer() {
     setResult(null);
     setSaved(false);
     setStoredPath(null);
+    setStopsVisited(0);
     const reader = new FileReader();
     reader.onload = () => setPreview(reader.result as string);
     reader.readAsDataURL(f);
@@ -262,6 +299,7 @@ export function ScreenshotAnalyzer() {
     setResult(null);
     setSaved(false);
     setStoredPath(null);
+    setStopsVisited(0);
     let uploaded: UploadedScreenshot | null = null;
     try {
       // Dedup: skip the upload + Gemini call if this exact file was already
@@ -303,6 +341,9 @@ export function ScreenshotAnalyzer() {
           toast.info('Shift démarré automatiquement');
         }
         void saveActiveTripTrackingIfPresent(analysis?.extracted_data);
+        if (analysis?.extracted_data) {
+          void copyNextWaypoint(analysis.extracted_data, 0);
+        }
       }
 
       // Persist dedup record so a future re-upload of the same file is skipped
@@ -389,6 +430,21 @@ export function ScreenshotAnalyzer() {
     } finally {
       setSaving(false);
     }
+  }
+
+  const nextWaypoint = useMemo(() => {
+    if (!result?.extracted_data) return null;
+    return resolveNextNavigationWaypoint(
+      resolveTripWaypoints(result.extracted_data),
+      resolveRidePhase(result.extracted_data),
+      stopsVisited,
+    );
+  }, [result, stopsVisited]);
+
+  async function handleCopyNextWaypoint() {
+    if (!result?.extracted_data) return;
+    const copied = await copyNextWaypoint(result.extracted_data, stopsVisited);
+    if (copied?.type === 'stop') setStopsVisited((n) => n + 1);
   }
 
   const hasTripData = (result?.extracted_data?.earnings ?? 0) > 0
@@ -540,6 +596,21 @@ export function ScreenshotAnalyzer() {
                   </div>
                 )}
               </div>
+            )}
+
+            {nextWaypoint && (
+              <Button
+                onClick={() => void handleCopyNextWaypoint()}
+                variant="outline"
+                className="w-full gap-2 text-xs h-8"
+              >
+                <Navigation className="w-3.5 h-3.5" />
+                {nextWaypoint.type === 'pickup'
+                  ? 'Copier adresse pickup'
+                  : nextWaypoint.type === 'stop'
+                    ? 'Copier prochain arrêt'
+                    : 'Copier adresse dropoff'}
+              </Button>
             )}
 
             {/* Decision verdict — TAKE / SKIP / MEH with reasoning */}

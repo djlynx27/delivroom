@@ -46,6 +46,56 @@ export function nearestZoneId(lat: number, lng: number, zones: Zone[]): string |
   return bestKm <= MAX_GPS_ZONE_KM ? bestId : null;
 }
 
+export interface TripWaypoint {
+  type: 'pickup' | 'stop' | 'dropoff';
+  address: string;
+}
+
+/** trip_waypoints when Gemini found a multi-stop ride; otherwise synthesized
+ * from the plain pickup/dropoff fields (the normal single-destination case). */
+export function resolveTripWaypoints(d: {
+  pickup_address?: string | null;
+  dropoff_address?: string | null;
+  trip_waypoints?: TripWaypoint[] | null;
+}): TripWaypoint[] {
+  if (d.trip_waypoints?.length) return d.trip_waypoints;
+  const waypoints: TripWaypoint[] = [];
+  if (d.pickup_address) waypoints.push({ type: 'pickup', address: d.pickup_address });
+  if (d.dropoff_address) waypoints.push({ type: 'dropoff', address: d.dropoff_address });
+  return waypoints;
+}
+
+/**
+ * Which address to push to clipboard/Maps right now: the pickup while still
+ * en route to the passenger, otherwise the next unvisited stop (or the
+ * dropoff once every stop has been visited).
+ */
+export function resolveNextNavigationWaypoint(
+  waypoints: TripWaypoint[],
+  phase: 'to_pickup' | 'active_trip',
+  stopsVisited = 0,
+): TripWaypoint | null {
+  if (phase === 'to_pickup') {
+    return waypoints.find((w) => w.type === 'pickup') ?? null;
+  }
+  const stops = waypoints.filter((w) => w.type === 'stop');
+  if (stopsVisited < stops.length) return stops[stopsVisited];
+  return waypoints.find((w) => w.type === 'dropoff') ?? null;
+}
+
+/** Android/Chrome clipboard write — needs a secure context (HTTPS/TWA), same
+ * requirement the app already runs under. Returns false on denial/failure so
+ * the caller can skip the confirmation toast instead of lying about it. */
+export async function copyAddressToClipboard(address: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(address.trim());
+    return true;
+  } catch (err) {
+    console.error('[clipboard] writeText failed:', err);
+    return false;
+  }
+}
+
 export interface ActiveTripTracking {
   payout_cad: number | null;
   distance_remaining_km: number | null;
