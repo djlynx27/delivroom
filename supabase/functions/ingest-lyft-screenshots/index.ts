@@ -385,6 +385,13 @@ Rules:
           responseMimeType: 'application/json',
           temperature: 0.2,
           maxOutputTokens: 512,
+          // Gemini 2.5 Flash spends part of maxOutputTokens on internal
+          // "thinking" tokens before the visible answer, which was cutting
+          // the tiny JSON response off mid-field (observed 2026-09-04:
+          // `{"nearby_drivers_count":` with nothing after). This task is a
+          // one-shot visual count, not reasoning -- disabling thinking
+          // fixes the truncation and is strictly cheaper besides.
+          thinkingConfig: { thinkingBudget: 0 },
         },
       }),
     }
