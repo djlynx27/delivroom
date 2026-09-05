@@ -11,8 +11,8 @@ export interface RouteCandidateZone {
   score: number;
   /** Zone category (e.g. 'commercial', 'transport') — used by
    * waypointSelector to keep prospection stops to genuine high-traffic
-   * hubs. Absent for synthetic waypoints (patrol-sweep) and callers that
-   * don't carry it; treated as unknown, not excluded. */
+   * hubs. Absent for callers that don't carry it; an absent type is
+   * rejected (unverifiable), not treated as allowed. */
   type?: string;
 }
 

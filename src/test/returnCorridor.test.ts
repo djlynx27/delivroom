@@ -102,11 +102,10 @@ describe('getReturnCorridor', () => {
     expect(result.steps.find((s) => s.id === 'off-corridor')).toBeUndefined();
   });
 
-  it('falls back to a synthetic patrol step when no real candidates qualify', () => {
+  it('stays inactive (direct route) when no real candidates qualify — no synthetic filler step', () => {
     const result = getReturnCorridor(current, hub, []);
-    expect(result.active).toBe(true);
-    expect(result.steps).toHaveLength(1);
-    expect(result.steps[0]!.id).toBe('patrol-sweep');
+    expect(result.active).toBe(false);
+    expect(result.steps).toEqual([]);
   });
 });
 

@@ -60,7 +60,7 @@ describe('getDriveRoute (prospection mode)', () => {
     }
   });
 
-  it('falls back to the patrol-sweep waypoint (not NaN) when no real candidate qualifies', async () => {
+  it('returns a direct (0-waypoint) route — no synthetic filler — when no real candidate qualifies', async () => {
     mockFetchOnce(mapboxRouteResponse);
 
     const origin = { lat: 45.5917, lng: -73.5893 };
@@ -74,9 +74,6 @@ describe('getDriveRoute (prospection mode)', () => {
 
     const route = await getDriveRoute(origin, destination, [], 'prospection');
 
-    expect(route.waypointsUsed).toHaveLength(1);
-    expect(route.waypointsUsed[0]!.id).toBe('patrol-sweep');
-    expect(Number.isFinite(route.waypointsUsed[0]!.latitude)).toBe(true);
-    expect(Number.isFinite(route.waypointsUsed[0]!.longitude)).toBe(true);
+    expect(route.waypointsUsed).toEqual([]);
   });
 });

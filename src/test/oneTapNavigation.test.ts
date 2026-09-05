@@ -14,7 +14,7 @@ describe('buildOneTapNavigationUrl', () => {
   it('includes prospection waypoints when origin (GPS) is available', () => {
     const origin = { lat: 45.51, lng: -73.57 };
     const candidates: RouteCandidateZone[] = [
-      { id: 'z1', name: 'Zone chaude', latitude: 45.54, longitude: -73.66, score: 80 },
+      { id: 'z1', name: 'Zone chaude', latitude: 45.54, longitude: -73.66, score: 80, type: 'commercial' },
     ];
 
     const url = buildOneTapNavigationUrl(origin, destination, candidates);
@@ -27,8 +27,8 @@ describe('buildOneTapNavigationUrl', () => {
     // longitude), not a RoutePoint (lat/lng) — passing it straight into
     // selectProspectionWaypoints's RoutePoint-typed destination param
     // silently produced NaN,NaN throughout the corridor math (destVec,
-    // routeLenKm, the patrol-sweep fallback), which `toContain('waypoints=')`
-    // alone can't catch since a NaN,NaN waypoint still contains that string.
+    // routeLenKm), which `toContain('waypoints=')` alone can't catch since a
+    // NaN,NaN waypoint still contains that string.
     expect(url).not.toContain('NaN');
     const waypointsParam = new URL(url).searchParams.get('waypoints') ?? '';
     for (const pair of waypointsParam.split('|')) {

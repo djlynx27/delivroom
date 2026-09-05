@@ -12,7 +12,7 @@ const destination: RouteCandidateZone = {
 
 const origin = { lat: 45.51, lng: -73.57 };
 const candidates: RouteCandidateZone[] = [
-  { id: 'z1', name: 'Zone chaude', latitude: 45.54, longitude: -73.66, score: 80 },
+  { id: 'z1', name: 'Zone chaude', latitude: 45.54, longitude: -73.66, score: 80, type: 'commercial' },
 ];
 
 describe('handleNavigationLaunch', () => {

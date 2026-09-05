@@ -21,13 +21,6 @@ function toLocalKm(origin: RoutePoint, point: RoutePoint): Vec2 {
   };
 }
 
-function fromLocalKm(origin: RoutePoint, vec: Vec2): RoutePoint {
-  return {
-    lat: origin.lat + vec.y / KM_PER_DEG_LAT,
-    lng: origin.lng + vec.x / kmPerDegLng(origin.lat),
-  };
-}
-
 function distanceKm(a: Vec2, b: Vec2): number {
   return Math.hypot(a.x - b.x, a.y - b.y);
 }
@@ -42,6 +35,12 @@ export interface WaypointSelectionOptions {
   maxDetourRatio?: number;
   /** Exclude a candidate matching this id (typically the destination zone itself). */
   destinationId?: string;
+  /** Minimum live demand score (0-100) a candidate must clear (strictly) to
+   * be eligible at all — below this, it's not a real prospection opportunity
+   * even if it sits perfectly on the corridor. Default 65: a deliberately
+   * strict bar so prospection only ever detours for a genuinely hot hub,
+   * never a mediocre one just because it happened to be nearby. */
+  minScore?: number;
 }
 
 // High-traffic hubs worth a prospection detour — transit stations, malls,
@@ -57,9 +56,6 @@ const HUB_ZONE_TYPES = new Set(['transport', 'métro', 'aéroport', 'commercial'
 // "allowed" is exactly how an isolated business (e.g. a promoted
 // zone-discovery entry with no type set, like "Nan Hair Stylist") slipped
 // through as a prospection waypoint. Reject anything not explicitly typed.
-// The synthetic patrol-sweep waypoint (buildPatrolWaypoint) never passes
-// through this filter — it's the fallback path's own return value, not a
-// `candidates` entry — so it's unaffected by this being strict.
 function isHubZone(zone: RouteCandidateZone): boolean {
   return zone.type !== undefined && HUB_ZONE_TYPES.has(zone.type);
 }
@@ -151,7 +147,8 @@ function evaluateCandidate(
   routeLenKm: number,
   corridorBufferKm: number,
   maxSingleDetourKm: number,
-  destinationId: string | undefined
+  destinationId: string | undefined,
+  minScore: number
 ): CandidateEvaluation & { vec: Vec2 | null } {
   const base = {
     id: zone.id,
@@ -180,6 +177,9 @@ function evaluateCandidate(
   // isHubZone) — reject before computing any geometry for it.
   if (!base.isHub) {
     return { ...base, accepted: false, reason: describeNonHubReason(zone.type) };
+  }
+  if (zone.score <= minScore) {
+    return { ...base, accepted: false, reason: `score ${zone.score} does not exceed minimum ${minScore}` };
   }
 
   const vec = toLocalKm(origin, { lat: zone.latitude, lng: zone.longitude });
@@ -245,6 +245,7 @@ export function selectProspectionWaypoints(
     corridorBufferKm = 2,
     maxDetourRatio = 1.2,
     destinationId,
+    minScore = 65,
   } = options;
 
   console.log('[waypointSelector] origin:', origin, 'destination:', destination);
@@ -268,7 +269,8 @@ export function selectProspectionWaypoints(
       routeLenKm,
       effectiveCorridorBufferKm,
       maxSingleDetourKm,
-      destinationId
+      destinationId,
+      minScore
     )
   );
   console.log(`[waypointSelector] evaluated ${evaluations.length} candidate(s) (routeLenKm=${routeLenKm.toFixed(2)}):`);
@@ -316,76 +318,9 @@ export function selectProspectionWaypoints(
     return finalWaypoints;
   }
 
-  // No real high-demand zone qualified (empty candidate list, or none within
-  // the corridor / detour budget) — prospection mode must still diverge from
-  // the direct route, so sweep a nearby boulevard instead of silently
-  // collapsing to the same line.
-  const patrol = resolvePatrolFallback(origin, destVec, routeLenKm, maxDetourRatio);
-  const patrolPoint = patrol[0];
-  console.log(
-    '[waypointSelector] final waypoints: none qualified — patrol-sweep fallback:',
-    patrolPoint ? `${patrolPoint.latitude},${patrolPoint.longitude}` : '(none, route too short)'
-  );
-  return patrol;
-}
-
-function resolvePatrolFallback(
-  origin: RoutePoint,
-  destVec: Vec2,
-  routeLenKm: number,
-  maxDetourRatio: number
-): RouteCandidateZone[] {
-  // Below ~1.5 km a sweep isn't worth the fuel: road snapping amplifies a
-  // small straight-line offset into a disproportionate real-world loop (the
-  // 2.3 km-direct-trip-turned-10 km Montmorency case). Short hop → direct.
-  if (routeLenKm < 1.5) return [];
-  const patrol = buildPatrolWaypoint(origin, destVec, routeLenKm, maxDetourRatio);
-  return patrol ? [patrol] : [];
-}
-
-/**
- * Synthesizes a single off-route point near the route's midpoint so the
- * Directions API is forced through nearby streets instead of retracing the
- * direct line. Not a real zone — Mapbox snaps it to the closest road, which
- * is enough to produce a genuine "patrol the neighbouring boulevard" detour.
- */
-function buildPatrolWaypoint(
-  origin: RoutePoint,
-  destVec: Vec2,
-  routeLenKm: number,
-  maxDetourRatio: number
-): RouteCandidateZone | null {
-  const midpoint: Vec2 = { x: destVec.x / 2, y: destVec.y / 2 };
-  // Perpendicular unit vector to the route direction.
-  const perp = { x: -destVec.y / routeLenKm, y: destVec.x / routeLenKm };
-
-  // Budget the sweep so the round trip through the offset point stays within
-  // the detour cap: 2 legs of ~sqrt((routeLenKm/2)^2 + offset^2) vs routeLenKm.
-  const maxRoundTripKm = routeLenKm * maxDetourRatio;
-  const halfRouteKm = routeLenKm / 2;
-  const maxOffsetKm = Math.sqrt(
-    Math.max(0, (maxRoundTripKm / 2) ** 2 - halfRouteKm ** 2)
-  );
-  // ponytail: straight-line geometry underestimates road distance — the 0.5 km
-  // hard cap (down from 1.0, itself down from 1.5) absorbs that amplification;
-  // a 2026-09-02 audit against 21 real patrol-sweep trips measured the 1.0 km
-  // cap producing 49-84% real-road detours vs the intended +20%, ~3-4x worse
-  // than the geometry assumed. A road-network-aware budget would need a
-  // Directions round-trip this sync path can't afford.
-  const offsetKm = Math.min(maxOffsetKm, 0.5, routeLenKm * 0.25);
-  if (offsetKm < 0.15) return null;
-
-  const sweepVec: Vec2 = {
-    x: midpoint.x + perp.x * offsetKm,
-    y: midpoint.y + perp.y * offsetKm,
-  };
-  const point = fromLocalKm(origin, sweepVec);
-
-  return {
-    id: 'patrol-sweep',
-    name: 'Boulevard voisin',
-    latitude: point.lat,
-    longitude: point.lng,
-    score: 0,
-  };
+  // No real zone qualified (empty candidate list, none within the corridor /
+  // detour budget, or none clears minScore) — direct route to the locked
+  // destination, never a synthetic filler waypoint.
+  console.log('[waypointSelector] final waypoints: none qualified — direct route');
+  return [];
 }

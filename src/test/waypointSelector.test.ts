@@ -27,7 +27,9 @@ describe('selectProspectionWaypoints', () => {
       zone('far-off', 45.53, -73.4, 95, 'commercial'), // high score but way off the corridor
     ];
 
-    const result = selectProspectionWaypoints(origin, destination, candidates);
+    // minScore: 0 — this test isolates the corridor filter, not the score
+    // threshold (covered separately below).
+    const result = selectProspectionWaypoints(origin, destination, candidates, { minScore: 0 });
 
     expect(result.map((z) => z.id)).toEqual(['on-route-low', 'on-route-high']);
   });
@@ -40,6 +42,7 @@ describe('selectProspectionWaypoints', () => {
 
     const result = selectProspectionWaypoints(origin, destination, candidates, {
       destinationId: 'dest-dup',
+      minScore: 0,
     });
 
     expect(result.map((z) => z.id)).toEqual(['on-route']);
@@ -52,6 +55,7 @@ describe('selectProspectionWaypoints', () => {
 
     const result = selectProspectionWaypoints(origin, destination, candidates, {
       maxWaypoints: 3,
+      minScore: 0,
     });
 
     expect(result).toHaveLength(3);
@@ -77,11 +81,10 @@ describe('selectProspectionWaypoints', () => {
     expect(result.map((z) => z.id)).toEqual(['small-detour']);
   });
 
-  it('falls back to a patrol waypoint when no candidates are in the corridor', () => {
+  it('returns a direct (0-waypoint) route when no candidate is in the corridor', () => {
     const candidates = [zone('far-off', 45.3, -73.2, 100)];
     const result = selectProspectionWaypoints(origin, destination, candidates);
-    expect(result).toHaveLength(1);
-    expect(result[0]!.id).toBe('patrol-sweep');
+    expect(result).toEqual([]);
   });
 
   it('returns an empty array when origin equals destination', () => {
@@ -91,34 +94,16 @@ describe('selectProspectionWaypoints', () => {
     expect(result).toEqual([]);
   });
 
-  it('falls back to a synthetic patrol waypoint when no real candidates qualify', () => {
-    // No candidates at all — the empty-corridor case the bug report described
-    // as "prospection route identical to direct".
+  it('returns a direct route (no synthetic filler) when there are no candidates at all', () => {
+    // No candidates — must not inject a synthetic off-corridor waypoint just
+    // to make prospection "look different" from direct; a real hub or nothing.
     const result = selectProspectionWaypoints(origin, destination, []);
-
-    expect(result).toHaveLength(1);
-    expect(result[0]!.id).toBe('patrol-sweep');
-    // The synthetic point must actually be off the direct line, otherwise
-    // Mapbox would just retrace the same route.
-    const midLat = (origin.lat + destination.lat) / 2;
-    const midLng = (origin.lng + destination.lng) / 2;
-    const offLine =
-      Math.abs(result[0]!.latitude - midLat) > 0.0005 ||
-      Math.abs(result[0]!.longitude - midLng) > 0.0005;
-    expect(offLine).toBe(true);
-  });
-
-  it('skips the patrol fallback for a very short hop (nowhere to sweep)', () => {
-    const veryClose = { lat: origin.lat + 0.001, lng: origin.lng + 0.001 };
-    const result = selectProspectionWaypoints(origin, veryClose, []);
     expect(result).toEqual([]);
   });
 
-  it('skips the patrol fallback below 1.5 km — road snapping blows up short sweeps', () => {
-    // ~1.2 km hop: geometry says a small offset fits the budget, but real
-    // roads amplify it (the 2.3 km→10 km Montmorency report) — no sweep.
-    const shortHop = { lat: origin.lat + 0.011, lng: origin.lng };
-    const result = selectProspectionWaypoints(origin, shortHop, []);
+  it('returns a direct route for a very short hop with no candidates', () => {
+    const veryClose = { lat: origin.lat + 0.001, lng: origin.lng + 0.001 };
+    const result = selectProspectionWaypoints(origin, veryClose, []);
     expect(result).toEqual([]);
   });
 
@@ -131,30 +116,7 @@ describe('selectProspectionWaypoints', () => {
     expect(result.map((z) => z.id)).not.toContain('behind-origin');
   });
 
-  it('keeps the patrol detour within the detour ratio budget', () => {
-    const result = selectProspectionWaypoints(origin, destination, [], {
-      maxDetourRatio: 1.2,
-    });
-    expect(result).toHaveLength(1);
-
-    const direct = Math.hypot(
-      (destination.lat - origin.lat) * 110.574,
-      (destination.lng - origin.lng) * 78.02
-    );
-    const patrolPoint = result[0]!;
-    const viaPatrol =
-      Math.hypot(
-        (patrolPoint.latitude - origin.lat) * 110.574,
-        (patrolPoint.longitude - origin.lng) * 78.02
-      ) +
-      Math.hypot(
-        (destination.lat - patrolPoint.latitude) * 110.574,
-        (destination.lng - patrolPoint.longitude) * 78.02
-      );
-    expect(viaPatrol).toBeLessThanOrEqual(direct * 1.2 + 0.01);
-  });
-
-  it('defaults maxDetourRatio to 1.2 (strict — never +25% or +50%)', () => {
+  it('defaults maxDetourRatio to 1.2 (strict — well within the 1.25x max)', () => {
     // Two candidates far off-corridor (wide buffer bypasses the corridor
     // filter) so only the detour-ratio trim decides between them.
     const candidates = [
@@ -187,7 +149,7 @@ describe('selectProspectionWaypoints', () => {
   it('excludes non-hub zone types (résidentiel) even with a high score and good position', () => {
     const candidates = [
       zone('corner-store', 45.53, -73.595, 95, 'résidentiel'),
-      zone('mall', 45.545, -73.61, 40, 'commercial'),
+      zone('mall', 45.545, -73.61, 70, 'commercial'),
     ];
     const result = selectProspectionWaypoints(origin, destination, candidates);
     expect(result.map((z) => z.id)).toEqual(['mall']);
@@ -201,8 +163,11 @@ describe('selectProspectionWaypoints', () => {
       zone('t4', 45.53, -73.59, 50, 'commercial'),
       zone('t5', 45.535, -73.595, 50, 'tourisme'),
     ];
+    // minScore: 0 — this test isolates the hub-type allowlist, not the score
+    // threshold (covered separately below).
     const result = selectProspectionWaypoints(origin, destination, candidates, {
       maxWaypoints: 5,
+      minScore: 0,
     });
     expect(new Set(result.map((z) => z.id))).toEqual(
       new Set(['t1', 't2', 't3', 't4', 't5'])
@@ -252,6 +217,7 @@ describe('selectProspectionWaypoints', () => {
 
     const waypoints = selectProspectionWaypoints(origin, destination, candidates, {
       maxWaypoints: 3,
+      minScore: 0,
     });
 
     expect(waypoints.map((w) => w.id)).toEqual(['near-origin', 'midway', 'near-dest']);
@@ -343,6 +309,39 @@ describe('selectProspectionWaypoints', () => {
       }
 
       expect(totalKm).toBeLessThan(3.5);
+    });
+  });
+
+  describe('minimum score threshold', () => {
+    it('defaults to 65 — rejects an otherwise-perfect candidate scoring at or below it', () => {
+      const mediocre = zone('mediocre', 45.53, -73.595, 65, 'commercial');
+      const result = selectProspectionWaypoints(origin, destination, [mediocre]);
+      expect(result).toEqual([]);
+    });
+
+    it('accepts a candidate strictly above the default threshold', () => {
+      const hot = zone('hot', 45.53, -73.595, 66, 'commercial');
+      const result = selectProspectionWaypoints(origin, destination, [hot]);
+      expect(result.map((z) => z.id)).toEqual(['hot']);
+    });
+
+    it('returns a direct (0-waypoint) route — never a filler zone — when nothing clears the threshold', () => {
+      const candidates = [
+        zone('low-1', 45.53, -73.595, 40, 'commercial'),
+        zone('low-2', 45.545, -73.61, 60, 'métro'),
+      ];
+      const result = selectProspectionWaypoints(origin, destination, candidates);
+      expect(result).toEqual([]);
+    });
+
+    it('respects a custom minScore override', () => {
+      const candidates = [zone('ok-at-50', 45.53, -73.595, 55, 'commercial')];
+      expect(
+        selectProspectionWaypoints(origin, destination, candidates, { minScore: 50 }).map((z) => z.id)
+      ).toEqual(['ok-at-50']);
+      expect(
+        selectProspectionWaypoints(origin, destination, candidates, { minScore: 60 })
+      ).toEqual([]);
     });
   });
 });

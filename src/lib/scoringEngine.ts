@@ -999,7 +999,13 @@ export function getReturnCorridor(
     currentCoords,
     targetHubCoords,
     costAdjustedCandidates,
-    { maxWaypoints: 3, corridorBufferKm: maxDetourKm }
+    // minScore: 0 — the corridor already ranks by cost-adjusted score, which
+    // isn't the same 0-100 "is this a hot zone" scale the prospection
+    // engine's absolute floor is calibrated against (a genuinely good zone
+    // here can legitimately net out under 65 once distance cost is
+    // deducted). Applying that floor here would silently break the
+    // corridor's own cost-vs-score tradeoff.
+    { maxWaypoints: 3, corridorBufferKm: maxDetourKm, minScore: 0 }
   );
 
   const steps: ReturnCorridorStep[] = waypoints.map((wp) => {
