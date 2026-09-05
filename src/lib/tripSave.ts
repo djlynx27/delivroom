@@ -46,6 +46,37 @@ export function nearestZoneId(lat: number, lng: number, zones: Zone[]): string |
   return bestKm <= MAX_GPS_ZONE_KM ? bestId : null;
 }
 
+export interface ActiveTripTracking {
+  payout_cad: number | null;
+  distance_remaining_km: number | null;
+  distance_total_km: number | null;
+  time_remaining_min: number | null;
+  time_total_min: number | null;
+}
+
+/**
+ * Real-time $/h and $/km from the Maxymo overlay's payout + elapsed portion
+ * of the trip (total - remaining). Null once no time/distance has elapsed
+ * yet (division by ~0 right after accepting) rather than a misleading spike.
+ */
+export function computeActiveTripRates(
+  t: ActiveTripTracking,
+): { dollarsPerHour: number | null; dollarsPerKm: number | null } {
+  if (t.payout_cad == null) return { dollarsPerHour: null, dollarsPerKm: null };
+  const elapsedMin =
+    t.time_total_min != null && t.time_remaining_min != null
+      ? t.time_total_min - t.time_remaining_min
+      : null;
+  const elapsedKm =
+    t.distance_total_km != null && t.distance_remaining_km != null
+      ? t.distance_total_km - t.distance_remaining_km
+      : null;
+  return {
+    dollarsPerHour: elapsedMin != null && elapsedMin > 0.01 ? (t.payout_cad / elapsedMin) * 60 : null,
+    dollarsPerKm: elapsedKm != null && elapsedKm > 0.01 ? t.payout_cad / elapsedKm : null,
+  };
+}
+
 export interface AnalysisZoneFields {
   matched_zone_id?: string | null;
   extracted_data?: {

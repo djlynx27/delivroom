@@ -38,6 +38,15 @@ interface ExtractedData {
   pickup_distance_km?: number | null;
   ride_time_minutes?: number | null;
   ride_distance_km?: number | null;
+  // Maxymo's white floating "Trip Tracking" overlay, visible on top of Lyft
+  // Driver during an active ride — distinct from ride_time/ride_distance
+  // above (the pre-accept offer card): these are LIVE remaining/total values
+  // read mid-trip, used to compute real-time $/h and $/km.
+  active_trip_payout?: number | null;
+  active_trip_distance_remaining_km?: number | null;
+  active_trip_distance_total_km?: number | null;
+  active_trip_time_remaining_min?: number | null;
+  active_trip_time_total_min?: number | null;
 }
 
 interface AnalysisResult {
@@ -611,12 +620,18 @@ Extract all useful information from this image and return ONLY a raw JSON object
     "pickup_time_minutes": number|null,
     "pickup_distance_km": number|null,
     "ride_time_minutes": number|null,
-    "ride_distance_km": number|null
+    "ride_distance_km": number|null,
+    "active_trip_payout": number|null,
+    "active_trip_distance_remaining_km": number|null,
+    "active_trip_distance_total_km": number|null,
+    "active_trip_time_remaining_min": number|null,
+    "active_trip_time_total_min": number|null
   },
   "matched_zone_id": string|null
 }
 
 Rules:
+- active_trip_*: the Maxymo Trip Tracking overlay is a small white floating widget on top of the Lyft Driver navigation screen during an active ride, showing a payout (e.g. "$11.04"), a distance as "remaining / total" (e.g. "1.5 mi / 2.8 mi"), and a time as "remaining / total" (e.g. "7 min / 13 min"). Extract payout as active_trip_payout, convert miles to km for both distance fields, and populate the remaining/total minute fields directly. Only populate these if that overlay is actually visible — null otherwise, do not confuse it with the pickup/ride offer card fields above.
 - matched_zone_id: read any text/labels visible on the image (street names, borough names, neighbourhoods, landmarks, transit stations, bridges). If you can locate the screenshot inside one of the catalog entries above, return its EXACT id from the catalog. If unsure, return null — DO NOT invent ids.
 - pickup_address / dropoff_address: copy the addresses verbatim from the image if present (Lyft/Uber/DoorDash trip cards usually show origin near the green/pickup pin and destination near the red/drop pin). Otherwise null.
 - pickup_time_minutes / pickup_distance_km: extract the "X mins · Y km" line associated with the pickup pin (typically the FIRST leg before the dropoff). Lyft Driver shows it as e.g. "2 mins · 0.5 km" right under the pickup address.

@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select';
 import { useZones, type Zone } from '@/hooks/useSupabase';
 import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
-import { nearestZoneId, normalizeStartedAt } from '@/lib/tripSave';
+import { computeActiveTripRates, nearestZoneId, normalizeStartedAt } from '@/lib/tripSave';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { ensureShiftStarted } from '@/lib/activeShift';
@@ -49,6 +49,11 @@ interface ExtractedData {
   pickup_distance_km?: number | null;
   ride_time_minutes?: number | null;
   ride_distance_km?: number | null;
+  active_trip_payout?: number | null;
+  active_trip_distance_remaining_km?: number | null;
+  active_trip_distance_total_km?: number | null;
+  active_trip_time_remaining_min?: number | null;
+  active_trip_time_total_min?: number | null;
 }
 
 interface AnalysisResult {
@@ -136,6 +141,55 @@ async function analyzeScreenshot(
   const payload = (data ?? {}) as AnalyzeScreenshotResponse;
   if (payload.error) throw new Error(payload.error);
   return payload.analysis ?? null;
+}
+
+// Best-effort — a Maxymo overlay capture is a nice-to-have live signal, not
+// something worth blocking or erroring the analysis flow over.
+async function saveActiveTripTrackingIfPresent(d: ExtractedData | undefined | null): Promise<void> {
+  if (!d?.active_trip_payout) return;
+  const { data: authData } = await supabase.auth.getUser();
+  if (!authData.user) return;
+  try {
+    await supabase.from('active_trip_tracking').insert({
+      driver_id: authData.user.id,
+      payout_cad: d.active_trip_payout,
+      distance_remaining_km: d.active_trip_distance_remaining_km ?? null,
+      distance_total_km: d.active_trip_distance_total_km ?? null,
+      time_remaining_min: d.active_trip_time_remaining_min ?? null,
+      time_total_min: d.active_trip_time_total_min ?? null,
+    });
+  } catch (err) {
+    console.error('[activeTripTracking] save failed:', err);
+  }
+}
+
+function ActiveTripTrackingCard({ data }: { data: ExtractedData }) {
+  const { dollarsPerHour, dollarsPerKm } = computeActiveTripRates({
+    payout_cad: data.active_trip_payout ?? null,
+    distance_remaining_km: data.active_trip_distance_remaining_km ?? null,
+    distance_total_km: data.active_trip_distance_total_km ?? null,
+    time_remaining_min: data.active_trip_time_remaining_min ?? null,
+    time_total_min: data.active_trip_time_total_min ?? null,
+  });
+  return (
+    <div className="bg-background rounded-lg border border-border p-3 space-y-1">
+      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Course en cours (Maxymo)</p>
+      <div className="grid grid-cols-3 gap-1 text-[10px]">
+        <div className="text-center">
+          <p className="text-muted-foreground">Payout</p>
+          <p className="font-mono font-medium text-green-400">${data.active_trip_payout!.toFixed(2)}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-muted-foreground">$/h</p>
+          <p className="font-mono font-medium">{dollarsPerHour != null ? `$${dollarsPerHour.toFixed(0)}` : '—'}</p>
+        </div>
+        <div className="text-center">
+          <p className="text-muted-foreground">$/km</p>
+          <p className="font-mono font-medium">{dollarsPerKm != null ? `$${dollarsPerKm.toFixed(2)}` : '—'}</p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ScreenshotAnalyzer() {
@@ -248,6 +302,7 @@ export function ScreenshotAnalyzer() {
         if (ensureShiftStarted()) {
           toast.info('Shift démarré automatiquement');
         }
+        void saveActiveTripTrackingIfPresent(analysis?.extracted_data);
       }
 
       // Persist dedup record so a future re-upload of the same file is skipped
@@ -445,6 +500,11 @@ export function ScreenshotAnalyzer() {
               <p className="text-xs text-muted-foreground">
                 Zone détectée par l'IA : <span className="text-foreground font-medium">{result.matched_zone_name}</span>
               </p>
+            )}
+
+            {/* Maxymo Trip Tracking overlay — live payout mid-ride */}
+            {result.extracted_data?.active_trip_payout != null && (
+              <ActiveTripTrackingCard data={result.extracted_data} />
             )}
 
             {/* Trajet pickup → dropoff */}
