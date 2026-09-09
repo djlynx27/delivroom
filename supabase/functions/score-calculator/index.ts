@@ -302,7 +302,12 @@ async function fetchWeather(lat: number, lon: number): Promise<Weather> {
 
   const res = await fetch(url);
   if (!res.ok) return fallbackWeather();
-  const data = await res.json();
+  let data: { current?: Record<string, number> };
+  try {
+    data = await res.json();
+  } catch {
+    return fallbackWeather();
+  }
   const current = data?.current ?? {};
   return {
     temp: current.temperature_2m ?? 5,

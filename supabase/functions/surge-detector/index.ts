@@ -129,7 +129,8 @@ async function loadPriorSurgeState<
     .from('zone_context_vectors')
     .select('zone_id, surge_class, surge_multiplier, captured_at')
     .in('zone_id', zoneIds)
-    .order('captured_at', { ascending: false });
+    .order('captured_at', { ascending: false })
+    .limit(zoneIds.length * 3);
   if (error) throw new Error(`Prior surge state lookup failed: ${error.message}`);
 
   const byZone = new Map<string, PriorSurgeState>();
@@ -180,6 +181,13 @@ serve(async (req: Request) => {
       (zones as Zone[]).map((z) => z.id)
     );
     const newPeakCandidates: NewPeakCandidate[] = [];
+    const contextInserts: Array<{
+      zone_id: string;
+      context_vector: string;
+      surge_multiplier: number;
+      surge_class: SurgeClass;
+      captured_at: string;
+    }> = [];
 
     for (const zone of zones as Zone[]) {
       if (zone.current_score == null) continue;
@@ -218,30 +226,20 @@ serve(async (req: Request) => {
         now
       );
 
-      // 4. Store vector (skip 'normal' to avoid DB bloat)
+      // 4. Queue vector for bulk insert (skip 'normal' to avoid DB bloat)
       if (surgeClass !== 'normal') {
         const contextVector = buildContextVector(
           now,
           zone.current_score,
           surgeMultiplier
         );
-        const vectorStr = `[${contextVector.map((v) => v.toFixed(6)).join(',')}]`;
-
-        const { error: contextInsertError } = await supabase
-          .from('zone_context_vectors')
-          .insert({
-            zone_id: zone.id,
-            context_vector: vectorStr,
-            surge_multiplier: surgeMultiplier,
-            surge_class: surgeClass,
-            captured_at: now.toISOString(),
-          });
-
-        if (contextInsertError) {
-          throw new Error(
-            `Surge context insert failed for zone ${zone.id}: ${contextInsertError.message}`
-          );
-        }
+        contextInserts.push({
+          zone_id: zone.id,
+          context_vector: `[${contextVector.map((v) => v.toFixed(6)).join(',')}]`,
+          surge_multiplier: surgeMultiplier,
+          surge_class: surgeClass,
+          captured_at: now.toISOString(),
+        });
       }
 
       const prior = priorByZone.get(zone.id);
@@ -260,6 +258,19 @@ serve(async (req: Request) => {
         surge_class: surgeClass,
         surge_multiplier: Math.round(surgeMultiplier * 100) / 100,
       });
+    }
+
+    // 4b. Single round-trip for all queued context vectors instead of one
+    // insert per zone — cuts up to 61 sequential awaits down to 1, which is
+    // what was pushing this function past the Edge Function timeout.
+    if (contextInserts.length > 0) {
+      const { error: contextInsertError } = await supabase
+        .from('zone_context_vectors')
+        .insert(contextInserts);
+
+      if (contextInsertError) {
+        throw new Error(`Surge context bulk insert failed: ${contextInsertError.message}`);
+      }
     }
 
     // 5. Push notification — only for zones that newly crossed into 'peak'

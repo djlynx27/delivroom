@@ -26,8 +26,18 @@ export function useZoneScores(cityIds: string | string[]) {
   useEffect(() => {
     if (ids.length === 0) return;
 
+    const topicName = `scores-${ids.join('-')}`;
+    // Defensive: a channel on this topic can already exist (two components
+    // watching the same city set, or a remount racing the previous cleanup)
+    // — supabase-js throws "cannot add postgres_changes callbacks ... after
+    // subscribe()" if .on() lands on one that's already subscribed.
+    supabase
+      .getChannels()
+      .filter((ch) => ch.topic === `realtime:${topicName}`)
+      .forEach((ch) => supabase.removeChannel(ch));
+
     const channel = supabase
-      .channel(`scores-${ids.join('-')}`)
+      .channel(topicName)
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'scores' },

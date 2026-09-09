@@ -1,4 +1,5 @@
 import { useI18n } from '@/contexts/I18nContext';
+import { hasFiniteCoordinates } from '@/lib/demandUtils';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import {
   Component,
@@ -119,6 +120,7 @@ export function MapboxHeatmap({
   const hasAutoFocused = useRef(false);
 
   const applyPos = useCallback((lat: number, lng: number) => {
+    if (!hasFiniteCoordinates({ latitude: lat, longitude: lng })) return;
     const pos = { lat, lng };
     setDriverPos(pos);
     try {
