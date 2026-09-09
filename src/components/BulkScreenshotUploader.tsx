@@ -460,10 +460,18 @@ export function BulkScreenshotUploader() {
 
       const existing = await findExistingUpload(contentHash);
       if (existing) {
+        // A previous session already paid for the upload + Gemini call for
+        // these bytes — reuse its stored analysis instead of re-fetching
+        // either. This is what lets a "duplicate" screenshot still become a
+        // savable trip candidate below (isSavableAsTrip), e.g. when it was
+        // uploaded before duration_minutes extraction existed, or before an
+        // earlier save attempt was rejected (RLS, network) and never retried.
+        const existingAnalysis = existing.analysis_result as AnalysisResultMinimal | null;
         updateItem(item.id, {
           status: 'duplicate',
           message: `Déjà uploadé le ${new Date(existing.uploaded_at).toLocaleDateString('fr-CA')}`,
           filePath: existing.file_path,
+          analysis: existingAnalysis,
         });
         return;
       }
@@ -613,16 +621,20 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A screenshot is only eligible for bulk save once its OWN analysis pass
-  // actually completed successfully — a 'failed' or 'duplicate' item never
-  // gets `analysis` populated by processOne, so `hasTripEarnings` alone
-  // already excludes them today, but that's an implicit invariant of
-  // processOne's control flow, not something this filter defends on its own.
-  // Checking `status === 'done'` explicitly means a future change to
-  // processOne can't silently let a failed/duplicate item slip into the
-  // insert just because it happens to carry a stale `analysis` value.
+  // A screenshot is eligible once it carries a completed analysis with
+  // earnings — either 'done' (analyzed this run) or 'duplicate' (analyzed in
+  // a PRIOR session, e.g. before duration_minutes extraction existed, or
+  // before an earlier save attempt failed and was never retried — processOne
+  // now backfills `analysis` from the stored screenshot_uploads row for
+  // those). handleSaveAllAsTrips separately checks this user's existing
+  // trips by filename before inserting, so a screenshot already turned into
+  // a trip in an earlier session can't be double-counted here.
   function isSavableAsTrip(it: FileItem): boolean {
-    return it.status === 'done' && !it.tripSaved && hasTripEarnings(it.analysis);
+    return (
+      (it.status === 'done' || it.status === 'duplicate') &&
+      !it.tripSaved &&
+      hasTripEarnings(it.analysis)
+    );
   }
 
   // Persist every analyzed screenshot that carries a fare as a row in `trips`,
@@ -647,13 +659,33 @@ export function BulkScreenshotUploader() {
       return;
     }
 
+    // Now that 'duplicate' items (already-uploaded screenshots from a prior
+    // session) are savable too, guard against re-inserting a trip for one
+    // that already has a trips row — one query up front, matched by the
+    // exact notes string this same code writes below, rather than a
+    // per-file round trip.
+    const { data: existingNotesRows } = await supabase
+      .from('trips')
+      .select('notes')
+      .eq('user_id', userId)
+      .like('notes', 'Import bulk — %');
+    const alreadySavedNotes = new Set(
+      (existingNotesRows ?? []).map((r) => r.notes).filter((n): n is string => !!n),
+    );
+
     setSavingTrips(true);
     try {
       const rows: { id: string; row: TablesInsert<'trips'> }[] = [];
       let skippedNoZone = 0;
+      let skippedAlreadySaved = 0;
       for (const it of candidates) {
         const a = it.analysis;
         if (!a) continue;
+        const notes = `Import bulk — ${it.file.name}`.slice(0, 500);
+        if (alreadySavedNotes.has(notes)) {
+          skippedAlreadySaved += 1;
+          continue;
+        }
         const zoneId = resolveZoneIdFromAnalysis(a);
         if (!zoneId) {
           skippedNoZone += 1;
@@ -674,15 +706,19 @@ export function BulkScreenshotUploader() {
             duration_minutes: durationMinutes,
             ended_at: computeEndedAt(startedAt, durationMinutes),
             platform,
-            notes: `Import bulk — ${it.file.name}`.slice(0, 500),
+            notes,
           },
         });
       }
 
       if (!rows.length) {
-        toast.warning(
-          `Aucune zone identifiable sur ${skippedNoZone} course(s) — rien sauvegardé`,
-        );
+        if (skippedAlreadySaved > 0 && skippedNoZone === 0) {
+          toast.info(`${skippedAlreadySaved} course(s) déjà sauvegardée(s) précédemment — rien à faire`);
+        } else {
+          toast.warning(
+            `Aucune zone identifiable sur ${skippedNoZone} course(s) — rien sauvegardé`,
+          );
+        }
         return;
       }
 
@@ -701,6 +737,7 @@ export function BulkScreenshotUploader() {
       qc.invalidateQueries({ queryKey: ['trip-history'] });
 
       const parts = [`${savedIds.size} course(s) sauvegardée(s)`];
+      if (skippedAlreadySaved) parts.push(`${skippedAlreadySaved} déjà sauvegardée(s)`);
       if (skippedNoZone) parts.push(`${skippedNoZone} sans zone ignorée(s)`);
       if (failedCount) parts.push(`${failedCount} rejetée(s) par la base`);
       if (failedCount) {
