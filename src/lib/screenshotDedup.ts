@@ -43,6 +43,33 @@ export async function findExistingUpload(
   return data;
 }
 
+/**
+ * Bulk pre-filter for an incremental folder scan: checks which (name, size)
+ * candidates already have a screenshot_uploads row for the current user, in
+ * one query — cheaper than hashing every file in a large folder just to
+ * find out most were already imported. RLS scopes the result to the
+ * signed-in user, same as findExistingUpload above.
+ */
+export async function findExistingFileNames(
+  candidates: { name: string; size: number }[],
+): Promise<Set<string>> {
+  if (!candidates.length) return new Set();
+  const names = Array.from(new Set(candidates.map((c) => c.name)));
+  const { data, error } = await supabase
+    .from('screenshot_uploads')
+    .select('file_name, file_size_bytes')
+    .in('file_name', names);
+  if (error) {
+    console.error('[screenshotDedup] bulk filename lookup failed:', error);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => fileKey(r.file_name, r.file_size_bytes)));
+}
+
+export function fileKey(name: string, size: number): string {
+  return `${name}::${size}`;
+}
+
 export interface RecordUploadInput {
   contentHash: string;
   filePath: string;

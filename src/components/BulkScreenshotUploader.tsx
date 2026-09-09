@@ -17,7 +17,13 @@ import {
 } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import type { TablesInsert } from '@/integrations/supabase/types';
-import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
+import {
+  fileKey,
+  findExistingFileNames,
+  findExistingUpload,
+  hashFile,
+  recordUpload,
+} from '@/lib/screenshotDedup';
 import { normalizeStartedAt, resolveZoneIdFromAnalysis } from '@/lib/tripSave';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
@@ -204,7 +210,7 @@ export function BulkScreenshotUploader() {
       if (status !== 'granted') return;
       const files = await silentRescan(nameFilter || '');
       if (cancelled || !files.length) return;
-      ingest(files, { fromFolder: true });
+      void ingest(files, { fromFolder: true });
     }
 
     void attemptScan();
@@ -297,8 +303,11 @@ export function BulkScreenshotUploader() {
         if (!silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
         return;
       }
-      ingest(files, { fromFolder: true });
-      if (!silent) toast.success(`Scan terminé — ${files.length} fichier(s) candidat(s)`);
+      // await'd: ingest itself decides what's actually new (registry
+      // pre-filter) and toasts accordingly — a count based on the raw
+      // pre-filter `files.length` here would be misleading once
+      // already-imported files are dropped.
+      await ingest(files, { fromFolder: true });
     } catch (err) {
       console.error('[autoScan] failed:', err);
       toast.error('Échec du scan automatique');
@@ -321,7 +330,7 @@ export function BulkScreenshotUploader() {
         if (cancelled) return;
         if (sharedFiles.length) {
           setFromShare(true);
-          ingest(sharedFiles, { fromFolder: false });
+          void ingest(sharedFiles, { fromFolder: false });
           toast.success(`${sharedFiles.length} screenshot(s) reçu(s) depuis la galerie`);
         }
       } else if (from === 'auto-scan') {
@@ -347,7 +356,7 @@ export function BulkScreenshotUploader() {
     if (folderInputRef.current) folderInputRef.current.value = '';
   }
 
-  function ingest(rawFiles: File[], opts: { fromFolder: boolean }) {
+  async function ingest(rawFiles: File[], opts: { fromFolder: boolean }): Promise<void> {
     if (!rawFiles.length) return;
     let filtered = rawFiles;
     // Keep only image files (a folder dump will also include other things)
@@ -356,6 +365,21 @@ export function BulkScreenshotUploader() {
       const needle = nameFilter.trim().toLowerCase();
       filtered = filtered.filter((f) => f.name.toLowerCase().includes(needle));
     }
+
+    // Incremental scan: drop files the import registry already has a row
+    // for (name + size) before they ever reach the queue — cheaper than
+    // hashing every file in a large folder just to find out most were
+    // already imported, and keeps a rescan silent about what it skipped.
+    let alreadyImported = 0;
+    if (opts.fromFolder && filtered.length) {
+      const known = await findExistingFileNames(
+        filtered.map((f) => ({ name: f.name, size: f.size })),
+      );
+      const before = filtered.length;
+      filtered = filtered.filter((f) => !known.has(fileKey(f.name, f.size)));
+      alreadyImported = before - filtered.length;
+    }
+
     if (opts.fromFolder) {
       setFolderStats({ totalInFolder: rawFiles.length, matched: filtered.length });
       setLastSyncCount(filtered.length);
@@ -364,7 +388,11 @@ export function BulkScreenshotUploader() {
     }
     if (!filtered.length) {
       if (opts.fromFolder) {
-        toast.warning(`Aucun fichier ne matche "${nameFilter}" dans ce dossier`);
+        toast.info(
+          alreadyImported > 0
+            ? `Aucun nouveau fichier — ${alreadyImported} déjà importé(s)`
+            : `Aucun fichier ne matche "${nameFilter}" dans ce dossier`,
+        );
       } else {
         toast.error('Aucune image dans la sélection');
       }
@@ -385,14 +413,22 @@ export function BulkScreenshotUploader() {
       };
     });
     setItems(newItems);
+
+    // Auto-trigger: a folder scan (manual pick, rescan, or the silent
+    // auto-scan on mount) no longer waits on a "Lancer le batch" click —
+    // pass the freshly-filtered list directly rather than reading `items`
+    // state, which wouldn't reflect this setItems call yet.
+    if (opts.fromFolder && newItems.some((it) => it.status === 'pending')) {
+      void runBatchFor(newItems);
+    }
   }
 
   function handleFilesInput(e: React.ChangeEvent<HTMLInputElement>) {
-    ingest(Array.from(e.target.files ?? []), { fromFolder: false });
+    void ingest(Array.from(e.target.files ?? []), { fromFolder: false });
   }
 
   function handleFolderInput(e: React.ChangeEvent<HTMLInputElement>) {
-    ingest(Array.from(e.target.files ?? []), { fromFolder: true });
+    void ingest(Array.from(e.target.files ?? []), { fromFolder: true });
   }
 
   function updateItem(id: string, patch: Partial<FileItem>) {
@@ -471,11 +507,11 @@ export function BulkScreenshotUploader() {
     }
   }
 
-  async function runBatch() {
+  async function runBatchFor(list: FileItem[]): Promise<void> {
     setRunning(true);
     newUploadsRef.current = 0;
     try {
-      for (const item of items) {
+      for (const item of list) {
         if (item.status === 'skipped') continue;
         if (item.status === 'done' || item.status === 'duplicate' || item.status === 'failed') continue;
         // eslint-disable-next-line no-await-in-loop
@@ -487,6 +523,13 @@ export function BulkScreenshotUploader() {
     } finally {
       setRunning(false);
     }
+  }
+
+  // Manual re-run button — reprocesses whatever's currently pending in
+  // state (e.g. after a failure), distinct from the auto-run in ingest()
+  // which passes its own freshly-filtered list to avoid a stale closure.
+  async function runBatch(): Promise<void> {
+    await runBatchFor(items);
   }
 
   // Re-run analysis for a single failed screenshot — reuses processOne as-is
