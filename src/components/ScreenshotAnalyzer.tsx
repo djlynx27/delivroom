@@ -412,9 +412,19 @@ export function ScreenshotAnalyzer() {
         return;
       }
 
+      // RLS on trips requires user_id = auth.uid() on insert — the client
+      // has to set it explicitly, there's no column default.
+      const { data: authData } = await supabase.auth.getUser();
+      const userId = authData.user?.id;
+      if (!userId) {
+        toast.error('Session expirée — reconnecte-toi avant de sauvegarder');
+        return;
+      }
+
       const startedAt = normalizeStartedAt(date);
       const durationMinutes = resolveDurationMinutes(d);
       const { error } = await supabase.from('trips').insert({
+        user_id: userId,
         zone_id: effectiveZoneId,
         started_at: startedAt,
         earnings: earnings ?? null,

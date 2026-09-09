@@ -1,5 +1,6 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Card,
   CardContent,
@@ -180,6 +181,12 @@ export function BulkScreenshotUploader() {
   const [items, setItems] = useState<FileItem[]>([]);
   const [running, setRunning] = useState(false);
   const [nameFilter, setNameFilter] = useState(DEFAULT_FILTER);
+  // Bypasses the filename+size registry pre-filter for a folder scan — for a
+  // one-time historical backfill (e.g. re-running extraction after adding a
+  // new field) where "already seen by name" isn't the same as "nothing new
+  // to extract". The SHA-256 content-hash dedup in processOne still applies
+  // underneath, so real duplicates stay cheap (no re-upload, no re-Gemini).
+  const [forceFullRescan, setForceFullRescan] = useState(false);
   const [platform, setPlatform] = useState<Platform>('lyft');
   const [savingTrips, setSavingTrips] = useState(false);
   const [folderStats, setFolderStats] = useState<{
@@ -378,8 +385,10 @@ export function BulkScreenshotUploader() {
     // for (name + size) before they ever reach the queue — cheaper than
     // hashing every file in a large folder just to find out most were
     // already imported, and keeps a rescan silent about what it skipped.
+    // Skipped entirely in forceFullRescan mode (see its declaration) — the
+    // content-hash dedup in processOne remains the safety net either way.
     let alreadyImported = 0;
-    if (opts.fromFolder && filtered.length) {
+    if (opts.fromFolder && filtered.length && !forceFullRescan) {
       const known = await findExistingFileNames(
         filtered.map((f) => ({ name: f.name, size: f.size })),
       );
@@ -629,6 +638,15 @@ export function BulkScreenshotUploader() {
       return;
     }
 
+    // RLS on trips requires user_id = auth.uid() on insert — every row
+    // needs it explicitly, the client can't leave it to a column default.
+    const { data: authData } = await supabase.auth.getUser();
+    const userId = authData.user?.id;
+    if (!userId) {
+      toast.error('Session expirée — reconnecte-toi avant de sauvegarder');
+      return;
+    }
+
     setSavingTrips(true);
     try {
       const rows: { id: string; row: TablesInsert<'trips'> }[] = [];
@@ -647,6 +665,7 @@ export function BulkScreenshotUploader() {
         rows.push({
           id: it.id,
           row: {
+            user_id: userId,
             zone_id: zoneId,
             started_at: startedAt,
             earnings: d.earnings ?? null,
@@ -793,6 +812,20 @@ export function BulkScreenshotUploader() {
             sont importés. Vide = tout prendre.
           </p>
         </div>
+
+        <label className="flex items-start gap-2 text-[10px] text-muted-foreground cursor-pointer">
+          <Checkbox
+            checked={forceFullRescan}
+            onCheckedChange={(v) => setForceFullRescan(v === true)}
+            disabled={running}
+            className="mt-0.5"
+          />
+          <span>
+            <span className="text-foreground font-medium">Scan complet</span> — ignore le registre
+            des fichiers déjà vus et repasse tout le dossier (utile pour rattraper un backlog
+            historique). Les doublons de contenu restent détectés par hash, aucun re-coût Gemini.
+          </span>
+        </label>
 
         <div className="grid grid-cols-2 gap-2">
           <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
