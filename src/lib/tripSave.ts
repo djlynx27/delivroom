@@ -127,6 +127,42 @@ export function computeActiveTripRates(
   };
 }
 
+export interface DurationSource {
+  pickup_time_minutes?: number | null;
+  ride_time_minutes?: number | null;
+  hours_worked?: number | null;
+}
+
+/**
+ * Ride duration in minutes for the $/h metric: pickup (deadhead) + ride leg
+ * when Gemini extracted both, falling back to just the ride leg, then to
+ * hours_worked (shift-summary screenshots have no pickup/ride split). Null
+ * when nothing usable was extracted — never guessed, so a $/h query can
+ * filter on it being present instead of silently averaging in a fabricated
+ * duration.
+ */
+export function resolveDurationMinutes(d: DurationSource): number | null {
+  if (d.pickup_time_minutes != null && d.ride_time_minutes != null) {
+    return d.pickup_time_minutes + d.ride_time_minutes;
+  }
+  if (d.ride_time_minutes != null) return d.ride_time_minutes;
+  if (d.hours_worked != null) return d.hours_worked * 60;
+  return null;
+}
+
+/**
+ * ended_at from started_at + duration_minutes. Null when duration is
+ * unknown or non-positive — leaving it unset (rather than guessing) is what
+ * keeps a $/h query honest about which rows are actually usable.
+ */
+export function computeEndedAt(
+  startedAtIso: string,
+  durationMinutes: number | null,
+): string | null {
+  if (durationMinutes == null || durationMinutes <= 0) return null;
+  return new Date(new Date(startedAtIso).getTime() + durationMinutes * 60_000).toISOString();
+}
+
 export interface AnalysisZoneFields {
   matched_zone_id?: string | null;
   extracted_data?: {

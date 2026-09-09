@@ -18,9 +18,11 @@ import { useZones, type Zone } from '@/hooks/useSupabase';
 import { requestCurrentPreciseLocation } from '@/hooks/useUserLocation';
 import {
   computeActiveTripRates,
+  computeEndedAt,
   copyAddressToClipboard,
   nearestZoneId,
   normalizeStartedAt,
+  resolveDurationMinutes,
   resolveNextNavigationWaypoint,
   resolveTripWaypoints,
   type TripWaypoint,
@@ -411,12 +413,15 @@ export function ScreenshotAnalyzer() {
       }
 
       const startedAt = normalizeStartedAt(date);
+      const durationMinutes = resolveDurationMinutes(d);
       const { error } = await supabase.from('trips').insert({
         zone_id: effectiveZoneId,
         started_at: startedAt,
         earnings: earnings ?? null,
         tips: tips ?? null,
         distance_km: distance_km ?? null,
+        duration_minutes: durationMinutes,
+        ended_at: computeEndedAt(startedAt, durationMinutes),
         platform,
         notes: `Import screenshot — ${result.notes ?? ''}`.slice(0, 500),
       });

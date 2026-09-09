@@ -958,10 +958,12 @@ export type Database = {
         Row: {
           created_at: string
           distance_km: number | null
+          duration_minutes: number | null
           earnings: number | null
           ended_at: string | null
           experiment: boolean
           id: string
+          is_synthetic: boolean | null
           notes: string | null
           platform: string | null
           source: string
@@ -974,10 +976,12 @@ export type Database = {
         Insert: {
           created_at?: string
           distance_km?: number | null
+          duration_minutes?: number | null
           earnings?: number | null
           ended_at?: string | null
           experiment?: boolean
           id?: string
+          is_synthetic?: boolean | null
           notes?: string | null
           platform?: string | null
           source?: string
@@ -990,10 +994,12 @@ export type Database = {
         Update: {
           created_at?: string
           distance_km?: number | null
+          duration_minutes?: number | null
           earnings?: number | null
           ended_at?: string | null
           experiment?: boolean
           id?: string
+          is_synthetic?: boolean | null
           notes?: string | null
           platform?: string | null
           source?: string

@@ -24,7 +24,12 @@ import {
   hashFile,
   recordUpload,
 } from '@/lib/screenshotDedup';
-import { normalizeStartedAt, resolveZoneIdFromAnalysis } from '@/lib/tripSave';
+import {
+  computeEndedAt,
+  normalizeStartedAt,
+  resolveDurationMinutes,
+  resolveZoneIdFromAnalysis,
+} from '@/lib/tripSave';
 import { useQueryClient } from '@tanstack/react-query';
 import { Input } from '@/components/ui/input';
 import {
@@ -129,6 +134,9 @@ interface AnalysisResultMinimal {
     dropoff_address?: string | null;
     pickup_zone_id?: string | null;
     dropoff_zone_id?: string | null;
+    pickup_time_minutes?: number | null;
+    ride_time_minutes?: number | null;
+    hours_worked?: number | null;
   } | null;
 }
 
@@ -634,14 +642,18 @@ export function BulkScreenshotUploader() {
           continue;
         }
         const d = a.extracted_data ?? {};
+        const startedAt = normalizeStartedAt(d.date);
+        const durationMinutes = resolveDurationMinutes(d);
         rows.push({
           id: it.id,
           row: {
             zone_id: zoneId,
-            started_at: normalizeStartedAt(d.date),
+            started_at: startedAt,
             earnings: d.earnings ?? null,
             tips: d.tips ?? null,
             distance_km: d.distance_km ?? null,
+            duration_minutes: durationMinutes,
+            ended_at: computeEndedAt(startedAt, durationMinutes),
             platform,
             notes: `Import bulk — ${it.file.name}`.slice(0, 500),
           },
