@@ -25,6 +25,10 @@ describe('parseMaxymoDistanceKm', () => {
     expect(parseMaxymoDistanceKm('')).toBeNull();
     expect(parseMaxymoDistanceKm('n/a')).toBeNull();
   });
+
+  it('converts a no-space miles value ("3.2mi") — regression for the missed word-boundary case', () => {
+    expect(parseMaxymoDistanceKm('3.2mi')).toBe(5.1);
+  });
 });
 
 describe('parseMaxymoDurationMin', () => {
@@ -58,9 +62,9 @@ describe('parseMaxymoOfferStatus', () => {
     expect(parseMaxymoOfferStatus('Cancelled')).toBe('rejected');
   });
 
-  it('defaults unknown/blank statuses to accepted', () => {
-    expect(parseMaxymoOfferStatus('')).toBe('accepted');
-    expect(parseMaxymoOfferStatus('Weird Status')).toBe('accepted');
+  it('fails closed to unknown for blank/unrecognized statuses — never a fabricated accepted', () => {
+    expect(parseMaxymoOfferStatus('')).toBe('unknown');
+    expect(parseMaxymoOfferStatus('Weird Status')).toBe('unknown');
   });
 });
 
@@ -105,16 +109,20 @@ describe('buildTripsRawInsert', () => {
       '1 mi,2 min,,,Declined,\n';
     const rows = parseMaxymoCsv(csv);
 
-    const inserts = buildTripsRawInsert(rows, '2026-03-20T10:00:00.000Z');
+    const inserts = buildTripsRawInsert(rows, '2026-03-20T10:00:00.000Z', 'driver-1', 'zone-1');
 
     expect(inserts).toHaveLength(2);
     expect(inserts[0]).toMatchObject({
+      driver_id: 'driver-1',
       platform: 'maxymo',
       offer_status: 'accepted',
+      zone_id: 'zone-1',
       pickup_distance_km: 3.7,
       trip_distance_km: 6.6,
     });
+    expect(inserts[0]?.content_hash).toBeTruthy();
     expect(inserts[1]).toMatchObject({
+      driver_id: 'driver-1',
       platform: 'maxymo',
       offer_status: 'rejected',
       pickup_distance_km: 1.6,
@@ -128,7 +136,7 @@ describe('buildTripsRawInsert', () => {
       '2026-03-20T08:00:00.000Z,2.3 mi,3 min,4.1 mi,12 min,Completed,18.50\n';
     const rows = parseMaxymoCsv(csv);
 
-    const inserts = buildTripsRawInsert(rows, '2026-01-01T00:00:00.000Z');
+    const inserts = buildTripsRawInsert(rows, '2026-01-01T00:00:00.000Z', 'driver-1', null);
 
     expect(inserts[0]?.started_at).toBe('2026-03-20T08:00:00.000Z');
   });
@@ -145,12 +153,14 @@ describe('buildAcceptedTripInsert', () => {
     const insert = buildAcceptedTripInsert(
       accepted!,
       'user-1',
-      '2026-03-20T10:00:00.000Z'
+      '2026-03-20T10:00:00.000Z',
+      'zone-1'
     );
 
     expect(insert).toMatchObject({
       user_id: 'user-1',
       platform: 'maxymo',
+      zone_id: 'zone-1',
       earnings: 18.5,
       distance_km: 6.6,
       pickup_distance_km: 3.7,
@@ -163,7 +173,7 @@ describe('buildAcceptedTripInsert', () => {
 
   it('returns null for a rejected offer — those only feed trips_raw', () => {
     expect(
-      buildAcceptedTripInsert(rejected!, 'user-1', '2026-03-20T10:00:00.000Z')
+      buildAcceptedTripInsert(rejected!, 'user-1', '2026-03-20T10:00:00.000Z', null)
     ).toBeNull();
   });
 });

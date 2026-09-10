@@ -7,6 +7,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { useCities, useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
 import { runAutoPipeline, type PipelineItem } from '@/lib/bulkImportPipeline';
 import { DEADHEAD_PENALTY_KM_THRESHOLD } from '@/lib/learningEngine';
@@ -29,12 +37,14 @@ interface MaxymoStats {
   total: number;
   accepted: number;
   rejected: number;
+  unknownStatus: number;
   avgDeadheadKm: number;
 }
 
 interface ImportResult {
   trips: number;
   marketRows: number;
+  skippedDuplicates: number;
 }
 
 function toPipelineItem(record: MaxymoCsvRecord): MaxymoPipelineItem {
@@ -55,10 +65,28 @@ function average(values: number[]): number {
 
 function computeStats(records: MaxymoCsvRecord[]): MaxymoStats {
   const accepted = records.filter((r) => r.offerStatus === 'accepted').length;
+  const rejected = records.filter((r) => r.offerStatus === 'rejected').length;
+  const unknownStatus = records.filter((r) => r.offerStatus === 'unknown').length;
   const avgDeadheadKm = average(
     records.map((r) => r.pickupDistanceKm).filter((v): v is number => v != null)
   );
-  return { total: records.length, accepted, rejected: records.length - accepted, avgDeadheadKm };
+  return { total: records.length, accepted, rejected, unknownStatus, avgDeadheadKm };
+}
+
+/** Rows already saved in a prior import (same driver, same content hash) —
+ * skipped so re-dropping the same export doesn't double-count revenue. RLS
+ * scopes the lookup to the signed-in driver already. */
+async function findExistingContentHashes(hashes: string[]): Promise<Set<string>> {
+  if (!hashes.length) return new Set();
+  const { data, error } = await supabase
+    .from('trips_raw')
+    .select('content_hash')
+    .in('content_hash', hashes);
+  if (error) {
+    console.error('[MaxymoCsvImporter] dedup lookup failed:', error);
+    return new Set();
+  }
+  return new Set((data ?? []).map((r) => r.content_hash).filter((h): h is string => h != null));
 }
 
 async function readFileText(file: File): Promise<string> {
@@ -79,10 +107,11 @@ async function resolveUserId(): Promise<string | null> {
 async function saveAcceptedTrips(
   candidates: MaxymoPipelineItem[],
   userId: string,
-  importedAt: string
+  importedAt: string,
+  zoneId: string | null
 ): Promise<number> {
   const rows = candidates
-    .map((c) => buildAcceptedTripInsert(c.record, userId, importedAt))
+    .map((c) => buildAcceptedTripInsert(c.record, userId, importedAt, zoneId))
     .filter((row): row is NonNullable<typeof row> => row !== null);
   if (!rows.length) return 0;
   const { error } = await supabase.from('trips').insert(rows);
@@ -110,21 +139,31 @@ async function triggerRetrain(savedCount: number): Promise<void> {
 async function importMaxymoRecords(
   records: MaxymoCsvRecord[],
   userId: string,
+  zoneId: string | null,
   invalidate: (key: string) => void
 ): Promise<ImportResult> {
   const importedAt = new Date().toISOString();
 
-  const marketRows = buildTripsRawInsert(records, importedAt);
+  // Skip rows already saved in a prior import of this (or an overlapping)
+  // CSV — re-dropping the same export must not double-count revenue.
+  const existingHashes = await findExistingContentHashes(records.map((r) => r.contentHash));
+  const newRecords = records.filter((r) => !existingHashes.has(r.contentHash));
+  const skippedDuplicates = records.length - newRecords.length;
+  if (!newRecords.length) {
+    return { trips: 0, marketRows: 0, skippedDuplicates };
+  }
+
+  const marketRows = buildTripsRawInsert(newRecords, importedAt, userId, zoneId);
   const { error: marketError } = await supabase.from('trips_raw').insert(marketRows);
   if (marketError) throw marketError;
 
-  const { savedCount } = await runAutoPipeline(records.map(toPipelineItem), {
-    saveTrips: (candidates) => saveAcceptedTrips(candidates, userId, importedAt),
+  const { savedCount } = await runAutoPipeline(newRecords.map(toPipelineItem), {
+    saveTrips: (candidates) => saveAcceptedTrips(candidates, userId, importedAt, zoneId),
     invalidate,
     retrain: triggerRetrain,
   });
 
-  return { trips: savedCount, marketRows: marketRows.length };
+  return { trips: savedCount, marketRows: marketRows.length, skippedDuplicates };
 }
 
 function getDropzoneClassName(dragActive: boolean): string {
@@ -140,12 +179,18 @@ function getImportButtonLabel(importing: boolean, imported: ImportResult | null,
 
 function ImportPreview({
   stats,
+  zoneId,
+  zoneOptions,
+  onZoneChange,
   importing,
   imported,
   onImport,
   onReset,
 }: {
   stats: MaxymoStats;
+  zoneId: string;
+  zoneOptions: { id: string; name: string }[];
+  onZoneChange: (v: string) => void;
   importing: boolean;
   imported: ImportResult | null;
   onImport: () => void;
@@ -162,6 +207,11 @@ function ImportPreview({
           {stats.accepted} acceptées
         </Badge>
         <Badge variant="secondary">{stats.rejected} refusées</Badge>
+        {stats.unknownStatus > 0 && (
+          <Badge variant="destructive" title="Statut non reconnu — ni acceptée ni refusée, exclue du CA par prudence">
+            {stats.unknownStatus} statut(s) inconnu(s)
+          </Badge>
+        )}
         <Badge
           variant={deadheadWarning ? 'destructive' : 'outline'}
           title="Distance moyenne à vide vers le pickup"
@@ -173,6 +223,25 @@ function ImportPreview({
         <p className="text-[10px] text-amber-400">
           Au-dessus de {DEADHEAD_PENALTY_KM_THRESHOLD} km en moyenne — le moteur pénalisera le
           score de rentabilité des zones concernées.
+        </p>
+      )}
+
+      <Select value={zoneId} onValueChange={onZoneChange} disabled={importing || imported !== null}>
+        <SelectTrigger className="bg-background border-border">
+          <SelectValue placeholder="Zone où ces courses ont été faites (optionnel)" />
+        </SelectTrigger>
+        <SelectContent className="bg-card border-border max-h-60">
+          {zoneOptions.map((z) => (
+            <SelectItem key={z.id} value={z.id}>
+              {z.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!zoneId && (
+        <p className="text-[10px] text-muted-foreground">
+          Le CSV Maxymo ne contient pas de coordonnées GPS — sans zone choisie ici, ces courses
+          n'entrent pas dans le scoring par zone (seulement dans le CA global).
         </p>
       )}
 
@@ -199,6 +268,11 @@ function ImportedSummary({ imported }: { imported: ImportResult | null }) {
         <p className="text-muted-foreground">
           {imported.marketRows} offre(s) archivée(s) comme historique de marché
         </p>
+        {imported.skippedDuplicates > 0 && (
+          <p className="text-muted-foreground">
+            {imported.skippedDuplicates} offre(s) déjà importée(s) précédemment — ignorée(s)
+          </p>
+        )}
       </div>
     </div>
   );
@@ -217,9 +291,14 @@ export function MaxymoCsvImporter() {
   const queryClient = useQueryClient();
   const [fileName, setFileName] = useState<string | null>(null);
   const [records, setRecords] = useState<MaxymoCsvRecord[]>([]);
+  const [zoneId, setZoneId] = useState('');
   const [importing, setImporting] = useState(false);
   const [imported, setImported] = useState<ImportResult | null>(null);
   const [dragActive, setDragActive] = useState(false);
+
+  const { data: cities = [] } = useCities();
+  const cityIds = useMemo(() => cities.map((c) => c.id), [cities]);
+  const { data: zones = [] } = useZones(cityIds);
 
   const stats = useMemo(() => computeStats(records), [records]);
 
@@ -268,12 +347,15 @@ export function MaxymoCsvImporter() {
         return;
       }
 
-      const result = await importMaxymoRecords(records, userId, (key) =>
+      const result = await importMaxymoRecords(records, userId, zoneId || null, (key) =>
         queryClient.invalidateQueries({ queryKey: [key] })
       );
       setImported(result);
+      const learningNote = zoneId
+        ? 'le moteur va apprendre pour cette zone'
+        : 'aucune zone choisie — CA global seulement, pas de scoring par zone';
       toast.success(
-        `${result.trips} course(s) sauvegardée(s), ${result.marketRows} offre(s) archivée(s) — le moteur va apprendre`
+        `${result.trips} course(s) sauvegardée(s), ${result.marketRows} offre(s) archivée(s) — ${learningNote}`
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Échec de l’import Maxymo');
@@ -286,6 +368,7 @@ export function MaxymoCsvImporter() {
     setFileName(null);
     setRecords([]);
     setImported(null);
+    setZoneId('');
   }
 
   return (
@@ -325,6 +408,9 @@ export function MaxymoCsvImporter() {
 
         <ImportPreview
           stats={stats}
+          zoneId={zoneId}
+          zoneOptions={zones}
+          onZoneChange={setZoneId}
           importing={importing}
           imported={imported}
           onImport={handleImport}

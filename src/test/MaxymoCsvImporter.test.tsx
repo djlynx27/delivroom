@@ -7,6 +7,7 @@ const mockGetUser = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
 const mockTripsRawInsert = vi.hoisted(() => vi.fn());
 const mockTripsInsert = vi.hoisted(() => vi.fn());
+const mockDedupLookup = vi.hoisted(() => vi.fn());
 const mockFrom = vi.hoisted(() => vi.fn());
 
 vi.mock('@/integrations/supabase/client', () => ({
@@ -46,9 +47,35 @@ describe('MaxymoCsvImporter', () => {
     mockInvoke.mockReset().mockResolvedValue({ data: null, error: null });
     mockTripsRawInsert.mockReset().mockResolvedValue({ error: null });
     mockTripsInsert.mockReset().mockResolvedValue({ error: null });
-    mockFrom.mockReset().mockImplementation((table: string) => ({
-      insert: table === 'trips_raw' ? mockTripsRawInsert : mockTripsInsert,
-    }));
+    mockDedupLookup.mockReset().mockResolvedValue({ data: [], error: null });
+    mockFrom.mockReset().mockImplementation((table: string) => {
+      if (table === 'trips_raw') {
+        return {
+          insert: mockTripsRawInsert,
+          select: () => ({ in: mockDedupLookup }),
+        };
+      }
+      if (table === 'trips') {
+        return { insert: mockTripsInsert };
+      }
+      if (table === 'cities') {
+        return {
+          select: () => ({
+            order: () => Promise.resolve({ data: [{ id: 'mtl', name: 'Montréal' }], error: null }),
+          }),
+        };
+      }
+      if (table === 'zones') {
+        return {
+          select: () => ({
+            in: () => ({
+              order: () => Promise.resolve({ data: [], error: null }),
+            }),
+          }),
+        };
+      }
+      return {};
+    });
   });
 
   it('shows an empty state with no file loaded', () => {
@@ -78,7 +105,9 @@ describe('MaxymoCsvImporter', () => {
     fireEvent.click(screen.getByRole('button', { name: /Importer 2 offre/ }));
 
     await waitFor(() => expect(mockTripsRawInsert).toHaveBeenCalledTimes(1));
-    expect(mockTripsRawInsert.mock.calls[0]?.[0]).toHaveLength(2);
+    const marketRows = mockTripsRawInsert.mock.calls[0]?.[0] as Array<{ driver_id: string }>;
+    expect(marketRows).toHaveLength(2);
+    expect(marketRows[0]?.driver_id).toBe('user-1');
 
     await waitFor(() => expect(mockTripsInsert).toHaveBeenCalledTimes(1));
     const savedTrips = mockTripsInsert.mock.calls[0]?.[0] as Array<{ earnings: number | null }>;
@@ -87,5 +116,23 @@ describe('MaxymoCsvImporter', () => {
 
     await waitFor(() => expect(mockInvoke).toHaveBeenCalledWith('score-calculator'));
     expect(await screen.findByText(/1 course\(s\) sauvegardée/)).toBeInTheDocument();
+  });
+
+  it('skips rows already imported (same content hash) instead of double-counting revenue', async () => {
+    renderImporter();
+    dropCsv(CSV);
+    await screen.findByText('2 offres');
+
+    // Simulate: the accepted row's hash already exists from a prior import.
+    mockDedupLookup.mockImplementation((_col: string, hashes: string[]) =>
+      Promise.resolve({ data: [{ content_hash: hashes[0] }], error: null })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Importer 2 offre/ }));
+
+    await waitFor(() => expect(mockTripsRawInsert).toHaveBeenCalledTimes(1));
+    const marketRows = mockTripsRawInsert.mock.calls[0]?.[0] as unknown[];
+    expect(marketRows).toHaveLength(1);
+    expect(await screen.findByText(/déjà importée/)).toBeInTheDocument();
   });
 });
