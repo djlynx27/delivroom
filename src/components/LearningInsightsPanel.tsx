@@ -317,7 +317,10 @@ export function LearningInsightsPanel() {
   const { data: trips = [] } = useTrips({ limit: 500, includeSynthetic: true });
   const [isSyncing, setIsSyncing] = useState(false);
   const insights = useMemo(
-    () => deriveLearningInsights(trips, DEFAULT_WEIGHTS),
+    // `now` scopes "Top zones apprises" to the current time of day — a zone
+    // whose only history is a Sunday afternoon shopping rush must not be
+    // suggested at 3:45 AM (see learningEngine.ts's TOP_ZONES_TIME_WINDOW_HOURS).
+    () => deriveLearningInsights(trips, DEFAULT_WEIGHTS, new Date()),
     [trips]
   );
   const anchorTrip = useMemo(

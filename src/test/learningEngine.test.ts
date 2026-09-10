@@ -359,3 +359,58 @@ describe('deriveLearningInsights — deadhead penalty', () => {
     expect(pattern?.deadheadPenaltyApplied).toBe(false);
   });
 });
+
+// Regression for the 2026-09-10 incident: "Top zones apprises" must not
+// surface a zone whose only history is from a completely different time of
+// day (e.g. a mall's afternoon trips showing up as a 3:45 AM suggestion).
+describe('deriveLearningInsights — time-of-day window on topLearnedZones', () => {
+  function makeTimedTrip(id: string, isoStartedAt: string, zoneId: string, zoneName: string): TripWithZone {
+    const startedAt = new Date(isoStartedAt);
+    const endedAt = new Date(startedAt.getTime() + 3_600_000);
+    return {
+      id,
+      created_at: isoStartedAt,
+      distance_km: 10,
+      earnings: 40,
+      ended_at: endedAt.toISOString(),
+      experiment: false,
+      notes: null,
+      started_at: startedAt.toISOString(),
+      tips: 0,
+      zone_id: zoneId,
+      zone_score: 50,
+      platform: null,
+      source: 'real',
+      user_id: null,
+      zones: { name: zoneName, current_score: 50 },
+    };
+  }
+
+  // Carrefour Laval's only history is a Sunday afternoon shopping rush —
+  // great EMA, wrong time of day for a 3:45 AM query.
+  const afternoonMallTrips = Array.from({ length: 3 }, (_, i) =>
+    makeTimedTrip(`mall-${i}`, `2026-03-${15 + i}T14:30:00.000Z`, 'lvl-cl', 'Carrefour Laval')
+  );
+  // Station Montmorency has real overnight history, closer to 3:45 AM.
+  const nightZoneTrips = Array.from({ length: 3 }, (_, i) =>
+    makeTimedTrip(`night-${i}`, `2026-03-${15 + i}T03:30:00.000Z`, 'lvl-sm', 'Station Montmorency')
+  );
+  const allTrips = [...afternoonMallTrips, ...nightZoneTrips];
+
+  it('excludes a zone whose history sits outside the ±2h window around `now`', () => {
+    const now = new Date('2026-03-20T03:45:00.000Z');
+    const insights = deriveLearningInsights(allTrips, DEFAULT_WEIGHTS, now);
+
+    const names = insights.topLearnedZones.map((z) => z.zoneName);
+    expect(names).not.toContain('Carrefour Laval');
+    expect(names).toContain('Station Montmorency');
+  });
+
+  it('keeps the un-windowed global ranking when `now` is omitted (back-compat)', () => {
+    const insights = deriveLearningInsights(allTrips, DEFAULT_WEIGHTS);
+
+    const names = insights.topLearnedZones.map((z) => z.zoneName);
+    expect(names).toContain('Carrefour Laval');
+    expect(names).toContain('Station Montmorency');
+  });
+});

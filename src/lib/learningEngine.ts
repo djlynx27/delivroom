@@ -468,8 +468,34 @@ function buildSuggestions(
     .sort((left, right) => Math.abs(right.delta) - Math.abs(left.delta));
 }
 
-function buildTopLearnedZones(emaMap: Map<string, EmaPattern>) {
-  return [...emaMap.values()]
+// How far (in hours, either direction) from the current time an EMA slot may
+// be and still count toward "Top zones apprises" — without this, a zone's
+// best-ever slot (say a Sunday shopping rush) can outrank everything else
+// regardless of what time it actually is right now. See the 2026-09-10
+// incident: Carrefour Laval's daytime EMA got suggested at 3:44 AM.
+const TOP_ZONES_TIME_WINDOW_HOURS = 2;
+const SLOTS_PER_HOUR = 4;
+const SLOTS_PER_DAY = 24 * SLOTS_PER_HOUR;
+
+function isWithinSlotWindow(
+  slotIndex: number,
+  referenceSlotIndex: number,
+  windowHours: number
+): boolean {
+  const diff = Math.abs(slotIndex - referenceSlotIndex);
+  const circularDiff = Math.min(diff, SLOTS_PER_DAY - diff);
+  return circularDiff <= windowHours * SLOTS_PER_HOUR;
+}
+
+function buildTopLearnedZones(emaMap: Map<string, EmaPattern>, now?: Date) {
+  const referenceSlotIndex = now ? getSlotIndex(now) : null;
+  const patterns = [...emaMap.values()].filter(
+    (entry) =>
+      referenceSlotIndex === null ||
+      isWithinSlotWindow(entry.slotIndex, referenceSlotIndex, TOP_ZONES_TIME_WINDOW_HOURS)
+  );
+
+  return patterns
     .sort((left, right) => right.emaEarningsPerHour - left.emaEarningsPerHour)
     .slice(0, 5)
     .map((entry) => ({
@@ -489,7 +515,8 @@ function sortPredictionsByRecency(predictions: PredictionRecord[]) {
 
 export function deriveLearningInsights(
   trips: TripWithZone[],
-  weights: WeightConfig = DEFAULT_WEIGHTS
+  weights: WeightConfig = DEFAULT_WEIGHTS,
+  now?: Date
 ): LearningInsights {
   const sortedTrips = getSortedTrips(trips);
 
@@ -529,7 +556,7 @@ export function deriveLearningInsights(
     sampleCount,
     recentBias
   );
-  const topLearnedZones = buildTopLearnedZones(emaMap);
+  const topLearnedZones = buildTopLearnedZones(emaMap, now);
 
   return {
     emaPatterns: [...emaMap.values()],

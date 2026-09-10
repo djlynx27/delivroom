@@ -499,9 +499,9 @@ describe('computeDemandScore — named zone profiles', () => {
     expect(score).toBeGreaterThan(0);
   });
 
-  it('CHUM scores moderate at shift change hour (07:00)', () => {
+  it('CHUM Hôpital scores moderate at shift change hour (07:00)', () => {
     const zone = {
-      name: 'CHUM',
+      name: 'CHUM Hôpital',
       type: 'médical',
       latitude: 45.5126,
       longitude: -73.5565,
@@ -705,23 +705,23 @@ describe('computeDemandScore — additional Montréal zone profiles', () => {
     expect(peakScore).toBeGreaterThanOrEqual(lowScore);
   });
 
-  it('Vieux-Port scores during tourist hours (14:00)', () => {
+  it('Vieux-Port de Montréal scores during tourist hours (14:00)', () => {
     const { score } = computeDemandScore(
-      { name: 'Vieux-Port', type: 'tourisme' },
+      { name: 'Vieux-Port de Montréal', type: 'tourisme' },
       new Date('2026-03-18T14:00:00'),
       null
     );
     expect(score).toBeGreaterThan(20);
   });
 
-  it('Vieux-Port scores lower at nighttime (22:00)', () => {
+  it('Vieux-Port de Montréal scores lower at nighttime (22:00)', () => {
     const { score: day } = computeDemandScore(
-      { name: 'Vieux-Port', type: 'tourisme' },
+      { name: 'Vieux-Port de Montréal', type: 'tourisme' },
       new Date('2026-03-18T14:00:00'),
       null
     );
     const { score: night } = computeDemandScore(
-      { name: 'Vieux-Port', type: 'tourisme' },
+      { name: 'Vieux-Port de Montréal', type: 'tourisme' },
       new Date('2026-03-18T22:00:00'),
       null
     );
@@ -785,37 +785,37 @@ describe('computeDemandScore — Laval zone profiles', () => {
     expect(rush).toBeGreaterThanOrEqual(offPeak);
   });
 
-  it('CF Carrefour Laval peaks on weekend afternoon (14:00 Sunday)', () => {
+  it('Carrefour Laval peaks on weekend afternoon (14:00 Sunday)', () => {
     const { score: weekend } = computeDemandScore(
-      { name: 'CF Carrefour Laval', type: 'commercial' },
+      { name: 'Carrefour Laval', type: 'commercial' },
       new Date('2026-03-22T14:00:00'), // Sunday
       null
     );
     const { score: weekday } = computeDemandScore(
-      { name: 'CF Carrefour Laval', type: 'commercial' },
+      { name: 'Carrefour Laval', type: 'commercial' },
       new Date('2026-03-18T14:00:00'), // Wednesday
       null
     );
     expect(weekend).toBeGreaterThanOrEqual(weekday);
   });
 
-  it('Centropolis peaks Friday night (21:00)', () => {
+  it('Centropolis Laval peaks Friday night (21:00)', () => {
     const { score: fridayNight } = computeDemandScore(
-      { name: 'Centropolis', type: 'nightlife' },
+      { name: 'Centropolis Laval', type: 'nightlife' },
       new Date('2026-03-20T21:00:00'), // Friday
       null
     );
     const { score: weekday } = computeDemandScore(
-      { name: 'Centropolis', type: 'nightlife' },
+      { name: 'Centropolis Laval', type: 'nightlife' },
       new Date('2026-03-18T14:00:00'), // Wednesday
       null
     );
     expect(fridayNight).toBeGreaterThanOrEqual(weekday);
   });
 
-  it('Hôpital de la Cité-de-la-Santé scores at medical shift change (07:00)', () => {
+  it('Hôpital Cité-de-la-Santé scores at medical shift change (07:00)', () => {
     const { score } = computeDemandScore(
-      { name: 'Hôpital de la Cité-de-la-Santé', type: 'médical' },
+      { name: 'Hôpital Cité-de-la-Santé', type: 'médical' },
       new Date('2026-03-18T07:00:00'),
       null
     );
@@ -842,14 +842,14 @@ describe('computeDemandScore — Laval zone profiles', () => {
 // ===========================================================================
 
 describe('computeDemandScore — Longueuil zone profiles', () => {
-  it('Longueuil–Université-de-Sherbrooke peaks on weekday rush hour', () => {
+  it('Station Longueuil U. Sherbrooke peaks on weekday rush hour', () => {
     const { score: rush } = computeDemandScore(
-      { name: 'Longueuil–Université-de-Sherbrooke', type: 'métro' },
+      { name: 'Station Longueuil U. Sherbrooke', type: 'métro' },
       new Date('2026-03-18T08:00:00'), // Wednesday 08:00
       null
     );
     const { score: offPeak } = computeDemandScore(
-      { name: 'Longueuil–Université-de-Sherbrooke', type: 'métro' },
+      { name: 'Station Longueuil U. Sherbrooke', type: 'métro' },
       new Date('2026-03-18T12:00:00'),
       null
     );
@@ -967,14 +967,14 @@ describe('computeDemandScore — off-peak branches for uncovered zone profiles',
     expect(morning).toBeGreaterThanOrEqual(midday);
   });
 
-  it('CHUM returns lower score during non-medical hours (12:00)', () => {
+  it('CHUM Hôpital returns lower score during non-medical hours (12:00)', () => {
     const { score: shift } = computeDemandScore(
-      { name: 'CHUM', type: 'médical' },
+      { name: 'CHUM Hôpital', type: 'médical' },
       new Date('2026-03-16T07:00:00'), // shift change — pattern returns 7
       null
     );
     const { score: offPeak } = computeDemandScore(
-      { name: 'CHUM', type: 'médical' },
+      { name: 'CHUM Hôpital', type: 'médical' },
       new Date('2026-03-16T12:00:00'), // midday — pattern returns 3
       null
     );
@@ -1019,14 +1019,14 @@ describe('computeDemandScore — off-peak branches for uncovered zone profiles',
     expect(weekday).toBeGreaterThanOrEqual(weekend);
   });
 
-  it('Hôpital de la Cité-de-la-Santé returns lower score at non-medical hours (12:00)', () => {
+  it('Hôpital Cité-de-la-Santé returns lower score at non-medical hours (12:00)', () => {
     const { score: shift } = computeDemandScore(
-      { name: 'Hôpital de la Cité-de-la-Santé', type: 'médical' },
+      { name: 'Hôpital Cité-de-la-Santé', type: 'médical' },
       new Date('2026-03-16T07:00:00'), // shift change — pattern returns 7
       null
     );
     const { score: offPeak } = computeDemandScore(
-      { name: 'Hôpital de la Cité-de-la-Santé', type: 'médical' },
+      { name: 'Hôpital Cité-de-la-Santé', type: 'médical' },
       new Date('2026-03-16T12:00:00'), // midday — pattern returns 3
       null
     );
@@ -1083,8 +1083,8 @@ describe('reweightZonesByDriverMode', () => {
 // 2026-03-21 = Saturday.
 describe('computeDemandScore — mall closed-hours veto', () => {
   const carrefourLaval = {
-    id: 'lvl-cf',
-    name: 'CF Carrefour Laval',
+    id: 'lvl-cl',
+    name: 'Carrefour Laval',
     type: 'commercial',
     latitude: 45.5702,
     longitude: -73.7519,
@@ -1141,7 +1141,62 @@ describe('computeDemandScore — mall closed-hours veto', () => {
       makeLocalDate(2026, 2, 16, 22),
       null
     );
-    expect(scores.get('lvl-cf')).toBe(0);
+    expect(scores.get('lvl-cl')).toBe(0);
     expect(scores.get('lvl-other')!).toBeGreaterThan(0);
+  });
+});
+
+// Regression for the 2026-09-10 incident: at 3:44 AM Delivroom suggested
+// Carrefour Laval (a mall, closed overnight) instead of zones actually
+// active at that hour. Root cause was a ZONE_PROFILES key drift
+// ('CF Carrefour Laval' vs. the real 'Carrefour Laval' zone name), which
+// silently disabled the isClosed veto for the real zone.
+describe('computeDemandScore — 3:45 AM search from Chomedey (Laval)', () => {
+  const carrefourLaval = {
+    id: 'lvl-cl',
+    name: 'Carrefour Laval',
+    type: 'commercial',
+    latitude: 45.5702,
+    longitude: -73.7519,
+    current_score: 90,
+  };
+  const stationMontmorency = {
+    id: 'lvl-sm',
+    name: 'Station Montmorency',
+    type: 'métro',
+    latitude: 45.5638,
+    longitude: -73.7419,
+    current_score: 50,
+  };
+  const yul = {
+    id: 'mtl-yul',
+    name: 'Aéroport Trudeau (YUL)',
+    type: 'aéroport',
+    latitude: 45.4706,
+    longitude: -73.7408,
+    current_score: 55,
+  };
+  const residentialCorridor = {
+    id: 'lvl-res',
+    name: 'Chomedey Résidentiel',
+    type: 'résidentiel',
+    latitude: 45.55,
+    longitude: -73.74,
+    current_score: 30,
+  };
+
+  it('keeps Carrefour Laval out of the Top 3 at 03:45, in favour of zones active overnight', () => {
+    const zones = [carrefourLaval, stationMontmorency, yul, residentialCorridor];
+    const { scores } = scoreAllZones(
+      zones as unknown as Zone[],
+      makeLocalDate(2026, 8, 10, 3, 45),
+      null
+    );
+
+    const ranked = [...scores.entries()].sort((a, b) => b[1] - a[1]);
+    const top3Ids = ranked.slice(0, 3).map(([id]) => id);
+
+    expect(top3Ids).not.toContain('lvl-cl');
+    expect(scores.get('lvl-cl')).toBe(0);
   });
 });

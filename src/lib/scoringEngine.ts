@@ -302,7 +302,7 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
       return 3;
     },
   },
-  'Vieux-Port': {
+  'Vieux-Port de Montréal': {
     pattern: (h) => {
       if (h >= 10 && h <= 17) return 6;
       return 2;
@@ -316,7 +316,7 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
       return 4;
     },
   },
-  CHUM: {
+  'CHUM Hôpital': {
     pattern: (h) => {
       if (MEDICAL_SHIFT_HOURS.includes(h)) return 7;
       return 3;
@@ -357,7 +357,13 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
       return 3;
     },
   },
-  'CF Carrefour Laval': {
+  // Zone name below must match public.zones.name exactly (verified live via
+  // Supabase 2026-09-10) — a stale key here silently disables both the
+  // isClosed veto and the pattern curve for the real zone (see the incident
+  // this fixed: 'CF Carrefour Laval' never matched the real 'Carrefour
+  // Laval' row, so the mall's closed-hours veto never fired and it kept
+  // getting suggested at 3:44 AM).
+  'Carrefour Laval': {
     // Mall hours: 9h–21h en semaine, 9h–17h le week-end.
     pattern: (h, d) => {
       if ((d === 0 || d === 6) && h >= 12 && h <= 17) return 6;
@@ -368,13 +374,13 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
       return h < 9 || h >= closesAt;
     },
   },
-  Centropolis: {
+  'Centropolis Laval': {
     pattern: (h, d) => {
       if ((d === 5 || d === 6) && h >= 20 && (h <= 23 || h < 1)) return 7;
       return 3;
     },
   },
-  'Hôpital de la Cité-de-la-Santé': {
+  'Hôpital Cité-de-la-Santé': {
     pattern: (h) => {
       if (MEDICAL_SHIFT_HOURS.includes(h)) return 7;
       return 3;
@@ -388,7 +394,7 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
     },
   },
   // LONGUEUIL
-  'Longueuil–Université-de-Sherbrooke': {
+  'Station Longueuil U. Sherbrooke': {
     pattern: (h, d) => {
       if (d >= 1 && d <= 5 && ((h >= 7 && h <= 9) || (h >= 17 && h <= 19)))
         return 7;
@@ -452,6 +458,21 @@ function normalizeWeights(partial?: Partial<WeightConfig>): WeightConfig {
   }, {} as WeightConfig);
 }
 
+// Safety net for commercial/mall zones with no ZONE_PROFILES entry (or one
+// whose isClosed veto doesn't cover this exact case) — most shopping centres
+// are shut overnight, so a generic type-based penalty catches it even when
+// the precise per-zone hours aren't modeled.
+// ponytail: blanket by zone.type, not real posted hours — a genuinely 24h
+// commercial zone would get wrongly suppressed too; add a ZONE_PROFILES
+// isClosed override for that specific zone if one ever gets added.
+const OFF_PEAK_START_HOUR = 22;
+const OFF_PEAK_END_HOUR = 6;
+const OFF_PEAK_COMMERCIAL_PENALTY = 0.1;
+
+function isOffPeakHour(hour: number): boolean {
+  return hour >= OFF_PEAK_START_HOUR || hour < OFF_PEAK_END_HOUR;
+}
+
 function getMaxMultiplierForType(zoneType: string): number {
   const multipliers = TIME_RULES.flatMap((rule) =>
     rule.multipliers[zoneType] ? [rule.multipliers[zoneType]] : []
@@ -497,6 +518,10 @@ function computeTimePatternBase(
   if (profile) {
     const curveValue = profile.pattern(hour, dayOfWeek);
     baseScore = baseScore * 0.6 + (curveValue / 10) * 100 * 0.4;
+  }
+
+  if (zone.type === 'commercial' && isOffPeakHour(hour)) {
+    baseScore *= OFF_PEAK_COMMERCIAL_PENALTY;
   }
 
   return Math.min(100, baseScore);
