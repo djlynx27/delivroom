@@ -1,7 +1,11 @@
 import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import { GoogleMapsIcon } from '@/components/NavIcons';
 import { useZones, type Zone } from '@/hooks/useSupabase';
-import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
+import {
+  haversineKm,
+  useHasPreciseFix,
+  useUserLocation,
+} from '@/hooks/useUserLocation';
 import { useWeather } from '@/hooks/useWeather';
 import { getDemandLevel } from '@/lib/demandUtils';
 import { scoreAllZones, type WeatherCondition } from '@/lib/scoringEngine';
@@ -43,9 +47,10 @@ function findNearestHotspot(
         demandBoostPoints: number;
       }
     | null
-    | undefined
+    | undefined,
+  hasPreciseFix: boolean
 ) {
-  if (!userLocation || allZones.length === 0) return null;
+  if (!hasPreciseFix || !userLocation || allZones.length === 0) return null;
 
   const now = new Date();
   const { scores } = scoreAllZones(
@@ -77,6 +82,12 @@ function findNearestHotspot(
 export function NearestHotspot() {
   const { location: userLocation } = useUserLocation(30000);
   const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
+
+  // A cold GPS lock can briefly report a coarse/network-based position
+  // (100m-1km+ accuracy) that lands the "nearest zone" match across a city
+  // boundary (e.g. Longueuil instead of Montmorency while in Chomedey) — hold
+  // the suggestion until we've had at least one trustworthy fix.
+  const hasPreciseFix = useHasPreciseFix(userLocation);
 
   const { data: zonesMtl = [] } = useZones('mtl');
   const { data: zonesLvl = [] } = useZones('lvl');
@@ -112,8 +123,8 @@ export function NearestHotspot() {
   );
 
   const nearest = useMemo(
-    () => findNearestHotspot(userLocation, allZones, weatherMtl),
-    [userLocation, allZones, weatherMtl]
+    () => findNearestHotspot(userLocation, allZones, weatherMtl, hasPreciseFix),
+    [userLocation, allZones, weatherMtl, hasPreciseFix]
   );
 
   // navZone stays open even if `nearest` drops out (GPS blip, zone list

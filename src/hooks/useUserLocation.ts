@@ -197,6 +197,40 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
   return { location, status, error, refresh: update };
 }
 
+// Nearest-zone matching on a low-accuracy fix (a cold GPS lock, or a coarse
+// network-based fallback before the chip acquires satellites) has picked the
+// wrong zone across a city boundary — e.g. Station Longueuil instead of
+// Montmorency while actually in Chomedey. 50m is tight enough to rule that
+// out without stalling forever indoors, where accuracy may never improve.
+export const MAX_ZONE_MATCH_ACCURACY_M = 50;
+
+/** Whether a fix is trustworthy enough to drive a "nearest zone" match.
+ * `accuracy` is the GPS API's 1-sigma radius in metres — null/undefined
+ * (unsupported/unknown) is treated as imprecise, not as "trust it". */
+export function isLocationPrecise(
+  location: Pick<UserLocation, 'accuracy'> | null,
+  maxAccuracyM = MAX_ZONE_MATCH_ACCURACY_M
+): boolean {
+  return location?.accuracy != null && location.accuracy <= maxAccuracyM;
+}
+
+/** Latches `true` the first time `location` clears the accuracy bar and
+ * stays there — a single later noisy sample (a watchPosition blip) must not
+ * yank an already-good "nearest zone" match away again. Callers that gate
+ * zone-matching on GPS should hold off until this flips true. */
+export function useHasPreciseFix(
+  location: Pick<UserLocation, 'accuracy'> | null,
+  maxAccuracyM = MAX_ZONE_MATCH_ACCURACY_M
+): boolean {
+  const [hasPreciseFix, setHasPreciseFix] = useState(false);
+  useEffect(() => {
+    if (!hasPreciseFix && isLocationPrecise(location, maxAccuracyM)) {
+      setHasPreciseFix(true);
+    }
+  }, [location, maxAccuracyM, hasPreciseFix]);
+  return hasPreciseFix;
+}
+
 /** Haversine distance in km */
 export function haversineKm(
   lat1: number,
