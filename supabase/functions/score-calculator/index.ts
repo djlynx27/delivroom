@@ -28,6 +28,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
+import { computeEventBoost } from './eventBoost.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -86,23 +87,6 @@ interface ScoreRow {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function haversineKm(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number
-): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
 
 function weatherCodeToDescription(code: number): string {
   if (code === 0) return 'Ciel clair';
@@ -167,22 +151,6 @@ const OFF_PEAK_COMMERCIAL_PENALTY = 0.1;
 
 function isOffPeakHour(hour: number): boolean {
   return hour >= OFF_PEAK_START_HOUR || hour < OFF_PEAK_END_HOUR;
-}
-
-function computeEventBoost(zone: Zone, activeEvents: Event[]): number {
-  let boost = 0;
-  for (const event of activeEvents) {
-    const distKm = haversineKm(
-      zone.latitude,
-      zone.longitude,
-      event.latitude,
-      event.longitude
-    );
-    if (distKm <= (event.boost_radius_km ?? 3)) {
-      boost += Math.min((event.boost_multiplier - 1) * 15, 20);
-    }
-  }
-  return Math.min(boost, 25);
 }
 
 // Aggressive Montreal-tuned weather → demand boost. Calibrated against
