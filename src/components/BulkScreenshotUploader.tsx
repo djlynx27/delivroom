@@ -833,87 +833,19 @@ export function BulkScreenshotUploader() {
           </div>
         )}
 
-        <div className="space-y-1.5">
-          <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
-            Filtre nom de fichier (mode dossier)
-          </label>
-          <Input
-            value={nameFilter}
-            onChange={(e) => setNameFilter(e.target.value)}
-            placeholder="Maxymo, Lyft, Screenshot…"
-            disabled={running}
-            className="h-8 text-xs"
-          />
-          <p className="text-[10px] text-muted-foreground">
-            Quand tu choisis un dossier entier, seuls les fichiers dont le nom contient ce texte
-            sont importés. Vide = tout prendre.
-          </p>
-        </div>
-
-        <label className="flex items-start gap-2 text-[10px] text-muted-foreground cursor-pointer">
-          <Checkbox
-            checked={forceFullRescan}
-            onCheckedChange={(v) => setForceFullRescan(v === true)}
-            disabled={running}
-            className="mt-0.5"
-          />
-          <span>
-            <span className="text-foreground font-medium">Scan complet</span> — ignore le registre
-            des fichiers déjà vus et repasse tout le dossier (utile pour rattraper un backlog
-            historique). Les doublons de contenu restent détectés par hash, aucun re-coût Gemini.
-          </span>
-        </label>
-
-        <div className="grid grid-cols-2 gap-2">
-          <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
-            <div className="flex flex-col items-center gap-1 text-muted-foreground">
-              <FolderUp className="w-5 h-5" />
-              <span className="text-[10px]">Fichiers</span>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={handleFilesInput}
-              disabled={running}
-            />
-          </label>
-
-          <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/60 transition-colors">
-            <div className="flex flex-col items-center gap-1 text-primary/80">
-              <Folder className="w-5 h-5" />
-              <span className="text-[10px]">Dossier entier</span>
-            </div>
-            <input
-              ref={folderInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              webkitdirectory=""
-              directory=""
-              className="hidden"
-              onChange={handleFolderInput}
-              disabled={running}
-            />
-          </label>
-        </div>
-
-        {folderStats && (
-          <p className="text-[10px] text-muted-foreground bg-background border border-border rounded-md p-2">
-            Dossier scanné : <span className="font-medium text-foreground">{folderStats.totalInFolder}</span> fichier(s) →
-            <span className="font-medium text-foreground"> {folderStats.matched}</span> match{folderStats.matched > 1 ? 'ent' : 'e'} le filtre{nameFilter ? ` "${nameFilter}"` : ''}
-          </p>
-        )}
-
-        {/* Auto-scan — works in two modes:
+        {/* Auto-scan is the zero-touch path — once configured, the handle is
+            persisted (IndexedDB) and every check on mount / rescan is a
+            silent queryPermission() first (see maxymoScanner.ensureReadPermission);
+            the browser prompt only ever fires if Chrome itself decided the
+            grant decayed, which no amount of app code can skip (WICG spec).
+            Shown first so it's the default path, not an afterthought below
+            the manual pickers.
             - Native (Capacitor APK): persistent path + local notifications +
               true background tasks (no permission decay).
             - Web/TWA (FS Access API): persistent FileSystemDirectoryHandle
               with browser-managed ambient permission. */}
         {kind !== 'unsupported' && (
-          <div className="space-y-1.5 pt-2 border-t border-border">
+          <div className="space-y-1.5">
             <label className="text-[10px] uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
               <Zap className="w-3 h-3" /> Auto-scan du dossier Maxymo
               {kind === 'native' && (
@@ -971,10 +903,101 @@ export function BulkScreenshotUploader() {
             )}
             <p className="text-[10px] text-muted-foreground">
               Une fois configuré, l'app scanne automatiquement ton dossier Maxymo à chaque ouverture
-              et te propose les nouveaux fichiers à importer.
+              et te propose les nouveaux fichiers à importer — sans redemander la permission.
             </p>
           </div>
         )}
+
+        {/* Manual pickers: "Dossier entier" is the raw browser folder picker
+            (no handle to persist, no way around the native prompt every
+            time — a fundamentally different, one-shot API from the FS
+            Access handle above). Collapsed by default once auto-scan is
+            configured so it stops competing with the zero-touch path;
+            still front-and-center for first-time setup or unsupported
+            browsers (kind === 'unsupported'). */}
+        <details
+          className="space-y-3"
+          open={!autoScanConfigured}
+        >
+          <summary className="text-[10px] uppercase tracking-wide text-muted-foreground cursor-pointer pt-2 border-t border-border">
+            Import manuel (fichiers / dossier)
+          </summary>
+          <div className="space-y-3 pt-1.5">
+            <div className="space-y-1.5">
+              <label className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                Filtre nom de fichier (mode dossier)
+              </label>
+              <Input
+                value={nameFilter}
+                onChange={(e) => setNameFilter(e.target.value)}
+                placeholder="Maxymo, Lyft, Screenshot…"
+                disabled={running}
+                className="h-8 text-xs"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Quand tu choisis un dossier entier, seuls les fichiers dont le nom contient ce texte
+                sont importés. Vide = tout prendre.
+              </p>
+            </div>
+
+            <label className="flex items-start gap-2 text-[10px] text-muted-foreground cursor-pointer">
+              <Checkbox
+                checked={forceFullRescan}
+                onCheckedChange={(v) => setForceFullRescan(v === true)}
+                disabled={running}
+                className="mt-0.5"
+              />
+              <span>
+                <span className="text-foreground font-medium">Scan complet</span> — ignore le registre
+                des fichiers déjà vus et repasse tout le dossier (utile pour rattraper un backlog
+                historique). Les doublons de contenu restent détectés par hash, aucun re-coût Gemini.
+              </span>
+            </label>
+
+            <div className="grid grid-cols-2 gap-2">
+              <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-border bg-background cursor-pointer hover:border-primary/50 transition-colors">
+                <div className="flex flex-col items-center gap-1 text-muted-foreground">
+                  <FolderUp className="w-5 h-5" />
+                  <span className="text-[10px]">Fichiers</span>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={handleFilesInput}
+                  disabled={running}
+                />
+              </label>
+
+              <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/60 transition-colors">
+                <div className="flex flex-col items-center gap-1 text-primary/80">
+                  <Folder className="w-5 h-5" />
+                  <span className="text-[10px]">Dossier entier</span>
+                </div>
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  webkitdirectory=""
+                  directory=""
+                  className="hidden"
+                  onChange={handleFolderInput}
+                  disabled={running}
+                />
+              </label>
+            </div>
+
+            {folderStats && (
+              <p className="text-[10px] text-muted-foreground bg-background border border-border rounded-md p-2">
+                Dossier scanné : <span className="font-medium text-foreground">{folderStats.totalInFolder}</span> fichier(s) →
+                <span className="font-medium text-foreground"> {folderStats.matched}</span> match{folderStats.matched > 1 ? 'ent' : 'e'} le filtre{nameFilter ? ` "${nameFilter}"` : ''}
+              </p>
+            )}
+          </div>
+        </details>
 
         {items.length > 0 && (
           <>

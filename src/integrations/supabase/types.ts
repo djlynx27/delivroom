@@ -1554,6 +1554,14 @@ export type Database = {
           signal_count: number
         }[]
       }
+      get_discovery_performance: {
+        Args: { p_address: string }
+        Returns: {
+          avg_per_h: number
+          avg_per_km: number
+          sample_size: number
+        }[]
+      }
       get_latest_scores: {
         Args: { p_city_id: string }
         Returns: {
@@ -1582,6 +1590,13 @@ export type Database = {
           w_historical: number
           w_time: number
           w_weather: number
+        }[]
+      }
+      get_major_zone_benchmark: {
+        Args: { p_top_n?: number }
+        Returns: {
+          avg_per_h: number
+          avg_per_km: number
         }[]
       }
       get_platform_signals_by_zone: {

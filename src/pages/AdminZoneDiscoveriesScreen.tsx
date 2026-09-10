@@ -27,10 +27,12 @@ import {
   suggestZoneName,
   suggestZoneSlug,
 } from '@/lib/geocoding';
+import { evaluatePromotionCandidate, MIN_OCCURRENCES_FOR_AUTO_PROMOTION } from '@/lib/zonePromotion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowRight,
   CheckCircle2,
+  Gem,
   Loader2,
   MapPin,
   Navigation,
@@ -101,6 +103,7 @@ export default function AdminZoneDiscoveriesScreen() {
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [unpromotingId, setUnpromotingId] = useState<string | null>(null);
   const [bulk, setBulk] = useState<{ done: number; total: number } | null>(null);
+  const [autoBulk, setAutoBulk] = useState<{ done: number; total: number } | null>(null);
 
   const { data: discoveries = [], isLoading } = useQuery({
     queryKey: ['zone-discoveries'],
@@ -113,6 +116,11 @@ export default function AdminZoneDiscoveriesScreen() {
   const promotedZoneIds = discoveries
     .filter((d) => d.status === 'promoted' && d.promoted_zone_id)
     .map((d) => d.promoted_zone_id as string);
+
+  const pendingCount = discoveries.filter((d) => d.status === 'pending').length;
+  const nuggetCandidateCount = discoveries.filter(
+    (d) => d.status === 'pending' && d.count >= MIN_OCCURRENCES_FOR_AUTO_PROMOTION
+  ).length;
 
   const { data: tripCounts = {} } = useQuery({
     queryKey: ['zone-discovery-trip-counts', promotedZoneIds.sort().join(',')],
@@ -242,6 +250,148 @@ export default function AdminZoneDiscoveriesScreen() {
     }
   }
 
+  type NuggetOutcome = 'promoted' | 'rejected' | 'unresolvable';
+
+  // Geocode + derive a collision-free zone id for one discovery — the same
+  // Mapbox/slug logic promoteAll uses, split out so evaluateAndPromoteOne
+  // only has to handle "did this resolve or not", not the details of how.
+  async function resolveZoneCandidate(
+    d: DiscoveryRow,
+    usedIds: Set<string>
+  ): Promise<{ zoneId: string; cityId: string; latitude: number; longitude: number } | null> {
+    let city = d.city_hint ?? guessCityIdFromText(d.address);
+    const geo = await forwardGeocode(d.address);
+    if (!geo) return null;
+    if (!city) city = guessCityIdFromText(geo.matchedAddress);
+    if (!city) return null;
+
+    const slug = suggestZoneSlug(d.address);
+    let zoneId = `${city}-${slug}`;
+    let n = 2;
+    while (usedIds.has(zoneId)) zoneId = `${city}-${slug}-${n++}`;
+    usedIds.add(zoneId);
+
+    return { zoneId, cityId: city, latitude: geo.latitude, longitude: geo.longitude };
+  }
+
+  // One candidate: check it against the benchmark, geocode + promote if
+  // eligible. Pulled out of autoPromoteNuggets so that function's own
+  // complexity stays readable — this is where all the per-row branching lives.
+  async function evaluateAndPromoteOne(
+    d: DiscoveryRow,
+    benchmark: { avgPerKm: number; avgPerH: number },
+    usedIds: Set<string>
+  ): Promise<NuggetOutcome> {
+    const { data: perfRows, error: perfErr } = await supabase.rpc(
+      'get_discovery_performance',
+      { p_address: d.address }
+    );
+    if (perfErr) {
+      console.error('[autoPromoteNuggets] performance lookup failed:', perfErr);
+      return 'rejected';
+    }
+    const perfRow = perfRows?.[0];
+    const verdict = evaluatePromotionCandidate(
+      {
+        occurrenceCount: d.count,
+        sampleSize: perfRow?.sample_size ?? 0,
+        avgPerKm: perfRow?.avg_per_km ?? null,
+        avgPerH: perfRow?.avg_per_h ?? null,
+      },
+      benchmark
+    );
+    if (!verdict.eligible) return 'rejected';
+
+    const resolved = await resolveZoneCandidate(d, usedIds);
+    if (!resolved) return 'unresolvable';
+
+    const { data, error } = await supabase.functions.invoke('promote-discovery', {
+      body: {
+        action: 'promote',
+        discovery_id: d.id,
+        zone: {
+          id: resolved.zoneId,
+          city_id: resolved.cityId,
+          name: suggestZoneName(d.address),
+          type: 'résidentiel',
+          latitude: resolved.latitude,
+          longitude: resolved.longitude,
+          address: d.address,
+        },
+      },
+    });
+    return error || (data as { error?: string })?.error ? 'unresolvable' : 'promoted';
+  }
+
+  // Data-driven promotion: unlike promoteAll (which creates a zone for
+  // every pending address unconditionally), this only promotes addresses
+  // that are BOTH recurring (zone_discoveries.count) and out-earn the major
+  // zones' own $/km and $/h — see zonePromotion.evaluatePromotionCandidate.
+  // Candidates below the repetition threshold, or without enough matched
+  // real trips to trust an average, are left for manual review.
+  async function fetchMajorZoneBenchmark(): Promise<{ avgPerKm: number; avgPerH: number } | null> {
+    const { data: benchmarkRows, error } = await supabase.rpc('get_major_zone_benchmark', {
+      p_top_n: 5,
+    });
+    if (error) throw new Error(error.message);
+    const row = benchmarkRows?.[0];
+    if (!row || row.avg_per_km == null || row.avg_per_h == null) return null;
+    return { avgPerKm: row.avg_per_km, avgPerH: row.avg_per_h };
+  }
+
+  async function autoPromoteNuggets() {
+    const eligible = discoveries.filter(
+      (d) => d.status === 'pending' && d.count >= MIN_OCCURRENCES_FOR_AUTO_PROMOTION
+    );
+    // The same street corner can show up as two separate rows — pickup and
+    // dropoff are tracked as distinct (address, context) pairs — which would
+    // otherwise promote it twice into two different zones for one spot.
+    // Keep one candidate per address (the higher-count row).
+    const byAddress = new Map<string, DiscoveryRow>();
+    for (const d of eligible) {
+      const key = d.address.trim().toLowerCase();
+      const existing = byAddress.get(key);
+      if (!existing || d.count > existing.count) byAddress.set(key, d);
+    }
+    const candidates = Array.from(byAddress.values());
+    if (candidates.length === 0) {
+      toast.info(`Aucune adresse vue ${MIN_OCCURRENCES_FOR_AUTO_PROMOTION}× ou plus`);
+      return;
+    }
+
+    setAutoBulk({ done: 0, total: candidates.length });
+    const usedIds = new Set<string>();
+    const outcomes: Record<NuggetOutcome, number> = { promoted: 0, rejected: 0, unresolvable: 0 };
+    try {
+      const benchmark = await fetchMajorZoneBenchmark();
+      if (!benchmark) {
+        toast.warning('Pas assez de courses réelles pour établir la référence des zones majeures');
+        return;
+      }
+
+      for (const d of candidates) {
+        const outcome = await evaluateAndPromoteOne(d, benchmark, usedIds);
+        outcomes[outcome] += 1;
+        setAutoBulk({
+          done: outcomes.promoted + outcomes.rejected + outcomes.unresolvable,
+          total: candidates.length,
+        });
+      }
+
+      qc.invalidateQueries({ queryKey: ['zone-discoveries'] });
+      qc.invalidateQueries({ queryKey: ['zones'] });
+      toast.success(
+        `${outcomes.promoted} pépite(s) promue(s)` +
+          (outcomes.rejected ? ` · ${outcomes.rejected} sous le seuil de rendement` : '') +
+          (outcomes.unresolvable ? ` · ${outcomes.unresolvable} non géocodable(s)` : '')
+      );
+    } catch (err) {
+      toast.error(await functionErrorMessage(err));
+    } finally {
+      setAutoBulk(null);
+    }
+  }
+
   async function rejectDiscovery(id: string) {
     setRejectingId(id);
     try {
@@ -319,38 +469,16 @@ export default function AdminZoneDiscoveriesScreen() {
         </Button>
       </div>
 
-      {(() => {
-        const pendingCount = discoveries.filter(
-          (d) => d.status === 'pending'
-        ).length;
-        if (pendingCount === 0) return null;
-        return (
-          <div className="space-y-2">
-            <Button
-              size="sm"
-              variant="outline"
-              className="w-full gap-2"
-              onClick={promoteAll}
-              disabled={!!bulk}
-            >
-              {bulk ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Sparkles className="w-4 h-4" />
-              )}
-              {bulk
-                ? `Promotion… ${bulk.done}/${bulk.total}`
-                : `Tout promouvoir (${pendingCount})`}
-            </Button>
-            {bulk && (
-              <Progress
-                value={(bulk.done / bulk.total) * 100}
-                className="h-1.5"
-              />
-            )}
-          </div>
-        );
-      })()}
+      {pendingCount > 0 && (
+        <PendingActionsPanel
+          pendingCount={pendingCount}
+          nuggetCandidateCount={nuggetCandidateCount}
+          autoBulk={autoBulk}
+          bulk={bulk}
+          onAutoPromote={autoPromoteNuggets}
+          onPromoteAll={promoteAll}
+        />
+      )}
 
       {isLoading && (
         <Card className="bg-card border-border">
@@ -471,6 +599,58 @@ export default function AdminZoneDiscoveriesScreen() {
   );
 }
 
+interface PendingActionsPanelProps {
+  pendingCount: number;
+  nuggetCandidateCount: number;
+  autoBulk: { done: number; total: number } | null;
+  bulk: { done: number; total: number } | null;
+  onAutoPromote: () => void;
+  onPromoteAll: () => void;
+}
+
+function PendingActionsPanel({
+  pendingCount,
+  nuggetCandidateCount,
+  autoBulk,
+  bulk,
+  onAutoPromote,
+  onPromoteAll,
+}: PendingActionsPanelProps) {
+  return (
+    <div className="space-y-2">
+      <Button
+        size="sm"
+        variant="default"
+        className="w-full gap-2"
+        onClick={onAutoPromote}
+        disabled={!!autoBulk || !!bulk || nuggetCandidateCount === 0}
+      >
+        {autoBulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Gem className="w-4 h-4" />}
+        {autoBulk
+          ? `Analyse… ${autoBulk.done}/${autoBulk.total}`
+          : `Auto-promouvoir les pépites (${nuggetCandidateCount} vues ≥${MIN_OCCURRENCES_FOR_AUTO_PROMOTION}×)`}
+      </Button>
+      {autoBulk && <Progress value={(autoBulk.done / autoBulk.total) * 100} className="h-1.5" />}
+      <p className="text-[10px] text-muted-foreground px-1">
+        Ne promeut que les adresses vues ≥{MIN_OCCURRENCES_FOR_AUTO_PROMOTION}× dont le $/km et le
+        $/h réels (courses déjà importées) égalent ou dépassent tes 5 zones majeures.
+      </p>
+
+      <Button
+        size="sm"
+        variant="outline"
+        className="w-full gap-2"
+        onClick={onPromoteAll}
+        disabled={!!bulk || !!autoBulk}
+      >
+        {bulk ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+        {bulk ? `Promotion… ${bulk.done}/${bulk.total}` : `Tout promouvoir sans filtre (${pendingCount})`}
+      </Button>
+      {bulk && <Progress value={(bulk.done / bulk.total) * 100} className="h-1.5" />}
+    </div>
+  );
+}
+
 interface PromoteDialogProps {
   discovery: DiscoveryRow | null;
   onClose: () => void;
@@ -503,7 +683,6 @@ function PromoteDialog({ discovery, onClose, onSuccess }: PromoteDialogProps) {
     setLng('');
     setMatchedAddress(null);
     void runGeocode(addr, discovery.city_hint);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discovery]);
 
   async function runGeocode(
