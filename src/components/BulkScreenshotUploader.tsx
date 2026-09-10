@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
 import type { TablesInsert } from '@/integrations/supabase/types';
+import { isSavableAsTrip, runAutoPipeline } from '@/lib/bulkImportPipeline';
 import {
   fileKey,
   findExistingFileNames,
@@ -141,13 +142,6 @@ interface AnalysisResultMinimal {
   } | null;
 }
 
-// A screenshot is worth saving as a trip only if the AI actually read a fare
-// off it (heatmaps and fallbacks carry no earnings).
-function hasTripEarnings(a: AnalysisResultMinimal | null | undefined): boolean {
-  if (!a || a.is_fallback) return false;
-  return (a.extracted_data?.earnings ?? 0) > 0;
-}
-
 async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: string }> {
   const { data: authData, error: authError } = await supabase.auth.getUser();
   if (authError || !authData.user) {
@@ -201,8 +195,19 @@ export function BulkScreenshotUploader() {
   const [lastSyncCount, setLastSyncCount] = useState<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
-  const newUploadsRef = useRef(0);
+  // Mirrors `items` synchronously (see updateItemsState) so the end-of-batch
+  // auto pipeline always reads the freshest statuses instead of a stale
+  // closure over the `items` state from whichever render kicked off the run.
+  const itemsRef = useRef<FileItem[]>([]);
   const kind = scannerKind();
+
+  function updateItemsState(updater: (prev: FileItem[]) => FileItem[]) {
+    setItems((prev) => {
+      const next = updater(prev);
+      itemsRef.current = next;
+      return next;
+    });
+  }
 
   // On mount: refresh the configured-state from the active scanner backend
   // (FS Access handle in IDB for web, localStorage path for native) and run a
@@ -359,7 +364,7 @@ export function BulkScreenshotUploader() {
   }, []);
 
   function reset() {
-    setItems([]);
+    updateItemsState(() => []);
     setFolderStats(null);
     setLastSyncCount(null);
     // La plateforme n'est pas détectée par screenshot — un seul sélecteur
@@ -429,7 +434,7 @@ export function BulkScreenshotUploader() {
         message: oversize ? `Trop gros (${(file.size / 1024 / 1024).toFixed(1)} MB > 10 MB)` : undefined,
       };
     });
-    setItems(newItems);
+    updateItemsState(() => newItems);
 
     // Auto-trigger: a folder scan (manual pick, rescan, or the silent
     // auto-scan on mount) no longer waits on a "Lancer le batch" click —
@@ -449,7 +454,7 @@ export function BulkScreenshotUploader() {
   }
 
   function updateItem(id: string, patch: Partial<FileItem>) {
-    setItems((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+    updateItemsState((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
   }
 
   async function processOne(item: FileItem): Promise<void> {
@@ -492,7 +497,6 @@ export function BulkScreenshotUploader() {
         source: 'bulk',
         analysisResult: analysis,
       });
-      newUploadsRef.current += 1;
 
       const earnings = analysis?.extracted_data?.earnings;
       const summaryBits: string[] = [];
@@ -516,13 +520,16 @@ export function BulkScreenshotUploader() {
     }
   }
 
-  // After a batch lands new (non-duplicate) screenshots, kick the zone
-  // scoring recalculation so the learning loop reflects them right away
-  // instead of waiting for the next cron tick. Best-effort: a failure here
-  // doesn't affect what's already uploaded, just delays the score refresh.
-  async function triggerRetrain(newCount: number): Promise<void> {
-    if (newCount <= 0) return;
-    const toastId = toast.loading(`Recalcul des zones (${newCount} nouveau(x))…`);
+  // After trips are saved, kick the zone scoring recalculation so the
+  // learning loop (EMA/Bayesian + TrendAgent/RushHourAgent) reflects them
+  // right away instead of waiting for the next cron tick. Best-effort: a
+  // failure here doesn't affect what's already saved, just delays the score
+  // refresh. Keyed on trips actually saved, not screenshots uploaded — a
+  // batch that uploaded 40 screenshots but extracted 0 fares has nothing new
+  // for score-calculator to recompute.
+  async function triggerRetrain(savedCount: number): Promise<void> {
+    if (savedCount <= 0) return;
+    const toastId = toast.loading(`Recalcul des zones (${savedCount} nouvelle(s) course(s))…`);
     try {
       await supabase.functions.invoke('score-calculator');
       toast.success('Scores de zones mis à jour', { id: toastId });
@@ -532,9 +539,30 @@ export function BulkScreenshotUploader() {
     }
   }
 
+  // Shared zero-touch tail: auto-save every analyzed screenshot that carries
+  // a fare, refresh every query the learning loop reads from, then retrain.
+  // See src/lib/bulkImportPipeline.ts — one implementation, every batch
+  // completion (manual run, silent auto-scan, upload-retry queue) routes
+  // through it so none of them can drift out of sync with each other.
+  async function runPostBatchPipeline(freshItems: FileItem[]): Promise<void> {
+    setSavingTrips(true);
+    try {
+      await runAutoPipeline(freshItems, {
+        saveTrips: persistTrips,
+        invalidate: (key) => qc.invalidateQueries({ queryKey: [key] }),
+        retrain: triggerRetrain,
+      });
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : 'Échec de la sauvegarde automatique des courses',
+      );
+    } finally {
+      setSavingTrips(false);
+    }
+  }
+
   async function runBatchFor(list: FileItem[]): Promise<void> {
     setRunning(true);
-    newUploadsRef.current = 0;
     try {
       for (const item of list) {
         if (item.status === 'skipped') continue;
@@ -542,9 +570,7 @@ export function BulkScreenshotUploader() {
         // eslint-disable-next-line no-await-in-loop
         await processOne(item);
       }
-      qc.invalidateQueries({ queryKey: ['trips-feed'] });
-      qc.invalidateQueries({ queryKey: ['trip-history'] });
-      await triggerRetrain(newUploadsRef.current);
+      await runPostBatchPipeline(itemsRef.current);
     } finally {
       setRunning(false);
     }
@@ -595,18 +621,15 @@ export function BulkScreenshotUploader() {
       file: q.file,
       status: 'pending',
     }));
-    setItems((prev) => [...prev, ...newItems]);
+    updateItemsState((prev) => [...prev, ...newItems]);
     toast.info(
       `${newItems.length} import(s) en attente repris automatiquement`,
     );
 
-    newUploadsRef.current = 0;
     for (const item of newItems) {
       await processOne(item);
     }
-    qc.invalidateQueries({ queryKey: ['trips-feed'] });
-    qc.invalidateQueries({ queryKey: ['trip-history'] });
-    await triggerRetrain(newUploadsRef.current);
+    await runPostBatchPipeline(itemsRef.current);
   }
 
   useEffect(() => {
@@ -621,49 +644,29 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A screenshot is eligible once it carries a completed analysis with
-  // earnings — either 'done' (analyzed this run) or 'duplicate' (analyzed in
-  // a PRIOR session, e.g. before duration_minutes extraction existed, or
-  // before an earlier save attempt failed and was never retried — processOne
-  // now backfills `analysis` from the stored screenshot_uploads row for
-  // those). handleSaveAllAsTrips separately checks this user's existing
-  // trips by filename before inserting, so a screenshot already turned into
-  // a trip in an earlier session can't be double-counted here.
-  function isSavableAsTrip(it: FileItem): boolean {
-    return (
-      (it.status === 'done' || it.status === 'duplicate') &&
-      !it.tripSaved &&
-      hasTripEarnings(it.analysis)
-    );
-  }
-
-  // Persist every analyzed screenshot that carries a fare as a row in `trips`,
-  // so a bulk backlog actually feeds the zone-suggestion learning loop (the
+  // Persist a batch of already-screened savable candidates as `trips` rows,
+  // so they actually feed the zone-suggestion learning loop (the
   // per-screenshot analysis alone only archives). Zone comes from the
-  // screenshot itself (AI-matched → pickup → dropoff); no GPS, since these are
-  // historical. Items with no fare or no resolvable zone are skipped and
-  // reported. tripSaved guards against double-inserting on a repeat click.
-  async function handleSaveAllAsTrips() {
-    const candidates = items.filter(isSavableAsTrip);
-    if (!candidates.length) {
-      toast.info('Aucune course à sauvegarder (aucun revenu détecté)');
-      return;
-    }
-
+  // screenshot itself (AI-matched → pickup → dropoff); no GPS, since these
+  // are historical. Items with no resolvable zone, or already saved in a
+  // prior session, are skipped and reported. Returns how many rows actually
+  // landed — the number the post-batch pipeline uses to decide whether a
+  // retrain is warranted. Shared by the manual "Tout sauvegarder" button and
+  // the automatic post-batch pipeline (runPostBatchPipeline) — exactly one
+  // insert path either way.
+  async function persistTrips(candidates: FileItem[]): Promise<number> {
     // RLS on trips requires user_id = auth.uid() on insert — every row
     // needs it explicitly, the client can't leave it to a column default.
     const { data: authData } = await supabase.auth.getUser();
     const userId = authData.user?.id;
     if (!userId) {
       toast.error('Session expirée — reconnecte-toi avant de sauvegarder');
-      return;
+      return 0;
     }
 
-    // Now that 'duplicate' items (already-uploaded screenshots from a prior
-    // session) are savable too, guard against re-inserting a trip for one
-    // that already has a trips row — one query up front, matched by the
-    // exact notes string this same code writes below, rather than a
-    // per-file round trip.
+    // Guard against re-inserting a trip for a screenshot that already has a
+    // trips row — one query up front, matched by the exact notes string
+    // this same code writes below, rather than a per-file round trip.
     const { data: existingNotesRows } = await supabase
       .from('trips')
       .select('notes')
@@ -673,85 +676,82 @@ export function BulkScreenshotUploader() {
       (existingNotesRows ?? []).map((r) => r.notes).filter((n): n is string => !!n),
     );
 
-    setSavingTrips(true);
-    try {
-      const rows: { id: string; row: TablesInsert<'trips'> }[] = [];
-      let skippedNoZone = 0;
-      let skippedAlreadySaved = 0;
-      for (const it of candidates) {
-        const a = it.analysis;
-        if (!a) continue;
-        const notes = `Import bulk — ${it.file.name}`.slice(0, 500);
-        if (alreadySavedNotes.has(notes)) {
-          skippedAlreadySaved += 1;
-          continue;
-        }
-        const zoneId = resolveZoneIdFromAnalysis(a);
-        if (!zoneId) {
-          skippedNoZone += 1;
-          continue;
-        }
-        const d = a.extracted_data ?? {};
-        const startedAt = normalizeStartedAt(d.date);
-        const durationMinutes = resolveDurationMinutes(d);
-        rows.push({
-          id: it.id,
-          row: {
-            user_id: userId,
-            zone_id: zoneId,
-            started_at: startedAt,
-            earnings: d.earnings ?? null,
-            tips: d.tips ?? null,
-            distance_km: d.distance_km ?? null,
-            duration_minutes: durationMinutes,
-            ended_at: computeEndedAt(startedAt, durationMinutes),
-            platform,
-            notes,
-          },
-        });
+    const rows: { id: string; row: TablesInsert<'trips'> }[] = [];
+    let skippedNoZone = 0;
+    let skippedAlreadySaved = 0;
+    for (const it of candidates) {
+      const a = it.analysis;
+      if (!a) continue;
+      const notes = `Import bulk — ${it.file.name}`.slice(0, 500);
+      if (alreadySavedNotes.has(notes)) {
+        skippedAlreadySaved += 1;
+        continue;
       }
-
-      if (!rows.length) {
-        if (skippedAlreadySaved > 0 && skippedNoZone === 0) {
-          toast.info(`${skippedAlreadySaved} course(s) déjà sauvegardée(s) précédemment — rien à faire`);
-        } else {
-          toast.warning(
-            `Aucune zone identifiable sur ${skippedNoZone} course(s) — rien sauvegardé`,
-          );
-        }
-        return;
+      const zoneId = resolveZoneIdFromAnalysis(a);
+      if (!zoneId) {
+        skippedNoZone += 1;
+        continue;
       }
-
-      const { savedIds, failedCount } = await insertTripsResilient(
-        rows,
-        async (rowsArr) => supabase.from('trips').insert(rowsArr),
-        async (row) => supabase.from('trips').insert(row),
-      );
-
-      setItems((prev) =>
-        prev.map((it) =>
-          savedIds.has(it.id) ? { ...it, tripSaved: true } : it,
-        ),
-      );
-      qc.invalidateQueries({ queryKey: ['trips-feed'] });
-      qc.invalidateQueries({ queryKey: ['trip-history'] });
-
-      const parts = [`${savedIds.size} course(s) sauvegardée(s)`];
-      if (skippedAlreadySaved) parts.push(`${skippedAlreadySaved} déjà sauvegardée(s)`);
-      if (skippedNoZone) parts.push(`${skippedNoZone} sans zone ignorée(s)`);
-      if (failedCount) parts.push(`${failedCount} rejetée(s) par la base`);
-      if (failedCount) {
-        toast.warning(`${parts.join(' · ')} — le reste a été sauvegardé quand même`);
-      } else {
-        toast.success(`${parts.join(' · ')} — le moteur va apprendre`);
-      }
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : 'Échec de la sauvegarde des courses',
-      );
-    } finally {
-      setSavingTrips(false);
+      const d = a.extracted_data ?? {};
+      const startedAt = normalizeStartedAt(d.date);
+      const durationMinutes = resolveDurationMinutes(d);
+      rows.push({
+        id: it.id,
+        row: {
+          user_id: userId,
+          zone_id: zoneId,
+          started_at: startedAt,
+          earnings: d.earnings ?? null,
+          tips: d.tips ?? null,
+          distance_km: d.distance_km ?? null,
+          duration_minutes: durationMinutes,
+          ended_at: computeEndedAt(startedAt, durationMinutes),
+          platform,
+          notes,
+        },
+      });
     }
+
+    if (!rows.length) {
+      if (skippedAlreadySaved > 0 && skippedNoZone === 0) {
+        toast.info(`${skippedAlreadySaved} course(s) déjà sauvegardée(s) précédemment — rien à faire`);
+      } else if (skippedNoZone > 0) {
+        toast.warning(`Aucune zone identifiable sur ${skippedNoZone} course(s) — rien sauvegardé`);
+      }
+      return 0;
+    }
+
+    const { savedIds, failedCount } = await insertTripsResilient(
+      rows,
+      async (rowsArr) => supabase.from('trips').insert(rowsArr),
+      async (row) => supabase.from('trips').insert(row),
+    );
+
+    updateItemsState((prev) =>
+      prev.map((it) => (savedIds.has(it.id) ? { ...it, tripSaved: true } : it)),
+    );
+
+    const parts = [`${savedIds.size} course(s) sauvegardée(s)`];
+    if (skippedAlreadySaved) parts.push(`${skippedAlreadySaved} déjà sauvegardée(s)`);
+    if (skippedNoZone) parts.push(`${skippedNoZone} sans zone ignorée(s)`);
+    if (failedCount) parts.push(`${failedCount} rejetée(s) par la base`);
+    if (failedCount) {
+      toast.warning(`${parts.join(' · ')} — le reste a été sauvegardé quand même`);
+    } else {
+      toast.success(`${parts.join(' · ')} — le moteur va apprendre`);
+    }
+    return savedIds.size;
+  }
+
+  // Manual fallback button — in the normal zero-touch flow, runPostBatchPipeline
+  // already auto-saves everything the moment a batch finishes, so this is only
+  // needed if the driver reopens the app on a batch left half-saved.
+  async function handleSaveAllAsTrips() {
+    if (!items.some(isSavableAsTrip)) {
+      toast.info('Aucune course à sauvegarder (aucun revenu détecté)');
+      return;
+    }
+    await runPostBatchPipeline(items);
   }
 
   // How many analyzed items are still eligible to be saved as trips.
