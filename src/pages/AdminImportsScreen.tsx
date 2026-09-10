@@ -4,7 +4,7 @@ import { MaxymoCsvImporter } from '@/components/MaxymoCsvImporter';
 import { ScreenshotAnalyzer } from '@/components/ScreenshotAnalyzer';
 import { AdminPageShell } from '@/components/admin/AdminPageShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Brain, Camera, FileSpreadsheet, FolderUp } from 'lucide-react';
+import { Battery, Brain, Camera, FileSpreadsheet, FolderUp } from 'lucide-react';
 
 export default function AdminImportsScreen() {
   return (
@@ -35,6 +35,49 @@ export default function AdminImportsScreen() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Guide config Samsung — le bouton overlay Maxymo gèle après 2-3
+          captures si l'OS tue le service d'accessibilité MacroDroid/Maxymo
+          en arrière-plan (One UI Battery/App Standby). Réglages une fois,
+          pas de re-config à chaque redémarrage. */}
+      <details className="rounded-lg border border-amber-500/30 bg-amber-500/10">
+        <summary className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-amber-100 cursor-pointer">
+          <Battery className="w-4 h-4 shrink-0" /> Le bouton Screenshot Maxymo gèle après 2 captures ? Config Samsung ici
+        </summary>
+        <div className="px-3 pb-3 text-[11px] text-amber-100/90 space-y-2">
+          <p>
+            Cause probable : One UI met en veille le service d'accessibilité de Maxymo/MacroDroid
+            (App Standby) — sans lui, le bouton overlay ne peut plus déclencher de capture. Trois
+            réglages à faire <span className="font-semibold">une seule fois</span> :
+          </p>
+          <ol className="list-decimal list-inside space-y-1.5">
+            <li>
+              <span className="font-semibold">Batterie non restreinte</span> — Paramètres →
+              Applications → Maxymo (et MacroDroid) → Batterie → « Non restreint ». Aussi :
+              Paramètres → Soins de la batterie → Batterie → Limites d'utilisation en arrière-plan
+              → Applications non surveillées → ajouter Maxymo + MacroDroid.
+            </li>
+            <li>
+              <span className="font-semibold">Apparaître au-dessus des autres applis</span> —
+              Paramètres → Applications → Maxymo (et MacroDroid) → Autorisations avancées →
+              « Apparaître au-dessus » → activer. Permanent, pas besoin de le refaire.
+            </li>
+            <li>
+              <span className="font-semibold">Verrouiller dans les récentes</span> — ouvre la vue
+              Récents, appui long sur la vignette Maxymo (et MacroDroid) → icône cadenas
+              « Verrouiller cette appli » pour empêcher le swipe-to-close accidentel de les tuer.
+            </li>
+          </ol>
+          <p>
+            Si ça gèle encore après ces 3 réglages, c'est probablement une limite Android elle-même
+            (l'API de capture d'écran se bloque après quelques appels rapprochés, indépendamment de
+            la batterie) — dans ce cas, compte sur l'auto-scan Delivroom ci-dessous : il détecte
+            tout nouveau screenshot dans Pictures/Screenshots, Pictures/Lyft <em>et</em>{' '}
+            Pictures/Maxymo, peu importe comment il a été pris (overlay, Vol-Down+Power, geste
+            paume).
+          </p>
+        </div>
+      </details>
 
       {/* Section 1 — Import bulk Maxymo (plusieurs screenshots d'un coup) */}
       <div>

@@ -164,19 +164,26 @@ export async function setSeenKeys(keys: Set<string>): Promise<void> {
   }
 }
 
-/**
- * Walk the directory shallowly (no recursion into subfolders — Maxymo writes
- * flat) and return every file whose name contains the filter substring.
- */
-export async function scanFolder(
-  handle: FileSystemDirectoryHandle,
-  nameFilter: string,
-): Promise<File[]> {
+// Standard Android/app screenshot folder names. Recursing into these (and
+// only these) lets a driver pick the parent "Pictures" folder ONCE and have
+// every capture method covered — the physical Vol-Down+Power / palm-swipe
+// gesture writes to .../Screenshots regardless of which app is foregrounded,
+// not necessarily wherever the overlay button's own output folder is.
+const RECURSE_INTO_NAMES = new Set(['screenshots', 'maxymo', 'lyft']);
+
+export function shouldRecurseInto(dirName: string): boolean {
+  return RECURSE_INTO_NAMES.has(dirName.trim().toLowerCase());
+}
+
+type WalkableHandle = { values(): AsyncIterable<FileSystemHandle> };
+
+async function collectImages(handle: FileSystemDirectoryHandle, needle: string): Promise<File[]> {
   const out: File[] = [];
-  const needle = nameFilter.trim().toLowerCase();
-  for await (const entry of (handle as unknown as {
-    values(): AsyncIterable<FileSystemHandle>;
-  }).values()) {
+  for await (const entry of (handle as unknown as WalkableHandle).values()) {
+    if (entry.kind === 'directory' && shouldRecurseInto(entry.name)) {
+      out.push(...(await collectImages(entry as FileSystemDirectoryHandle, needle)));
+      continue;
+    }
     if (entry.kind !== 'file') continue;
     if (needle && !entry.name.toLowerCase().includes(needle)) continue;
     try {
@@ -187,6 +194,21 @@ export async function scanFolder(
       console.warn('[maxymoScanner] could not read', entry.name, err);
     }
   }
+  return out;
+}
+
+/**
+ * Walk the directory and return every file whose name contains the filter
+ * substring — plus, one level deep, any subfolder named like a known
+ * screenshot location (Screenshots/Maxymo/Lyft), so picking the parent
+ * "Pictures" folder covers every capture method in one grant.
+ */
+export async function scanFolder(
+  handle: FileSystemDirectoryHandle,
+  nameFilter: string,
+): Promise<File[]> {
+  const needle = nameFilter.trim().toLowerCase();
+  const out = await collectImages(handle, needle);
   // Newest first — typically what the user wants to import
   out.sort((a, b) => b.lastModified - a.lastModified);
   return out;

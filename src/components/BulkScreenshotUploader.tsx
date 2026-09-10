@@ -902,8 +902,10 @@ export function BulkScreenshotUploader() {
               </Button>
             )}
             <p className="text-[10px] text-muted-foreground">
-              Une fois configuré, l'app scanne automatiquement ton dossier Maxymo à chaque ouverture
-              et te propose les nouveaux fichiers à importer — sans redemander la permission.
+              Une fois configuré, l'app scanne automatiquement ton dossier Maxymo <em>et</em> les
+              dossiers de captures standards (Screenshots, Lyft) à chaque ouverture — peu importe
+              la méthode de capture (bouton overlay, Vol-Down+Power, geste paume) — et te propose
+              les nouveaux fichiers à importer, sans redemander la permission.
             </p>
           </div>
         )}

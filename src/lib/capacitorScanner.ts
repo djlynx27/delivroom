@@ -87,59 +87,80 @@ interface ListedFile {
   size: number;
   mtime: number;
   uri: string;
+  /** Folder this file was found in — readFile needs the full `path/name`. */
+  dir: string;
+}
+
+// Where Android actually drops a screenshot depends on the capture method,
+// not on the driver's own choice: the physical Vol-Down+Power / palm-swipe
+// gesture always lands in Pictures/Screenshots regardless of which app is in
+// the foreground, while a Lyft in-app share can land in Pictures/Lyft. The
+// configured path (whatever the driver picked for the overlay-button output,
+// typically Pictures/Maxymo) is scanned too, on top of these — not instead.
+const DEFAULT_SCAN_PATHS = ['Pictures/Screenshots', 'Pictures/Lyft', 'Pictures/Maxymo', 'DCIM/Screenshots'];
+
+/** Every folder a scan should check: the configured one (if any) plus the
+ * standard OS/app screenshot locations, deduplicated. Exported standalone so
+ * the folder-selection logic is testable without a device filesystem. */
+export function getScanPaths(configuredPath: string | null): string[] {
+  const all = configuredPath ? [configuredPath, ...DEFAULT_SCAN_PATHS] : DEFAULT_SCAN_PATHS;
+  return Array.from(new Set(all));
+}
+
+/** A missing/inaccessible folder (not every device has Pictures/Lyft, say)
+ * is not an error — it just contributes nothing to the scan. */
+async function readdirSafe(path: string): Promise<ListedFile[]> {
+  try {
+    const result = await Filesystem.readdir({ path, directory: Directory.ExternalStorage });
+    return result.files
+      .filter((e) => e.name && /\.(jpe?g|png|webp)$/i.test(e.name))
+      .map((e) => ({
+        name: e.name,
+        size: e.size ?? 0,
+        mtime: e.mtime ?? 0,
+        uri: e.uri ?? `${path}/${e.name}`,
+        dir: path,
+      }));
+  } catch (err) {
+    console.warn('[capacitorScanner] readdir skipped for', path, err);
+    return [];
+  }
+}
+
+async function loadFile(c: ListedFile): Promise<File | null> {
+  try {
+    const read = await Filesystem.readFile({
+      path: `${c.dir}/${c.name}`,
+      directory: Directory.ExternalStorage,
+    });
+    const dataUrl = `data:${mimeFromName(c.name)};base64,${read.data}`;
+    const blob = await (await fetch(dataUrl)).blob();
+    return new File([blob], c.name, { type: blob.type, lastModified: c.mtime || Date.now() });
+  } catch (err) {
+    console.warn('[capacitorScanner] could not load', c.name, err);
+    return null;
+  }
 }
 
 /**
- * Walk the configured folder shallowly and return its image files (filtered
- * by name substring). Files are loaded into memory as File objects so the
- * existing bulk uploader pipeline can consume them unchanged.
+ * Walk every scan folder (configured + standard screenshot locations)
+ * shallowly and return their image files (filtered by name substring).
+ * Files are loaded into memory as File objects so the existing bulk
+ * uploader pipeline can consume them unchanged.
  */
 export async function nativeScan(nameFilter: string): Promise<File[]> {
   if (!isNative()) return [];
-  const path = getConfiguredPath();
-  if (!path) return [];
-
-  let entries: { name: string; size?: number; mtime?: number; uri?: string }[];
-  try {
-    const result = await Filesystem.readdir({
-      path,
-      directory: Directory.ExternalStorage,
-    });
-    entries = result.files;
-  } catch (err) {
-    console.error('[capacitorScanner] readdir failed', err);
-    return [];
-  }
+  const paths = getScanPaths(getConfiguredPath());
 
   const needle = nameFilter.trim().toLowerCase();
-  const candidates: ListedFile[] = entries
-    .filter((e) => e.name && /\.(jpe?g|png|webp)$/i.test(e.name))
+  const perFolder = await Promise.all(paths.map(readdirSafe));
+  const candidates = perFolder
+    .flat()
     .filter((e) => !needle || e.name.toLowerCase().includes(needle))
-    .map((e) => ({
-      name: e.name,
-      size: e.size ?? 0,
-      mtime: e.mtime ?? 0,
-      uri: e.uri ?? `${path}/${e.name}`,
-    }));
+    .sort((a, b) => b.mtime - a.mtime);
 
-  // Newest first
-  candidates.sort((a, b) => b.mtime - a.mtime);
-
-  const out: File[] = [];
-  for (const c of candidates) {
-    try {
-      const read = await Filesystem.readFile({
-        path: `${path}/${c.name}`,
-        directory: Directory.ExternalStorage,
-      });
-      const dataUrl = `data:${mimeFromName(c.name)};base64,${read.data}`;
-      const blob = await (await fetch(dataUrl)).blob();
-      out.push(new File([blob], c.name, { type: blob.type, lastModified: c.mtime || Date.now() }));
-    } catch (err) {
-      console.warn('[capacitorScanner] could not load', c.name, err);
-    }
-  }
-  return out;
+  const loaded = await Promise.all(candidates.map(loadFile));
+  return loaded.filter((f): f is File => f !== null);
 }
 
 function mimeFromName(name: string): string {
