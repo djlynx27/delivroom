@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
 import {
   decidePush,
   formatSurgeMessage,
@@ -62,7 +63,7 @@ function computeSurgeFast(
   now: Date
 ): { surgeMultiplier: number; surgeClass: SurgeClass } {
   const safeBaseline = baselineScore > 0 ? baselineScore : currentScore * 0.85;
-  const dow = now.getDay();
+  const dow = montrealDayOfWeek(now);
   const month = now.getMonth();
 
   const dowFactor = DOW_BASELINE[dow] ?? 0.88;
@@ -89,8 +90,10 @@ function buildContextVector(
   currentScore: number,
   surgeMultiplier: number
 ): number[] {
-  const hour = now.getHours() + now.getMinutes() / 60;
-  const dow = now.getDay();
+  // Minutes don't need timezone conversion — America/Toronto's offset from
+  // UTC is always a whole number of hours, DST included.
+  const hour = montrealHour(now) + now.getMinutes() / 60;
+  const dow = montrealDayOfWeek(now);
   const month = now.getMonth();
 
   return [
@@ -193,8 +196,8 @@ serve(async (req: Request) => {
       if (zone.current_score == null) continue;
 
       // 2. Get 4-week rolling baseline for this zone/slot
-      const hour = now.getHours();
-      const dow = now.getDay();
+      const hour = montrealHour(now);
+      const dow = montrealDayOfWeek(now);
 
       // get_surge_baseline(p_zone_id, p_hour_slot, p_dow) returns a bare
       // numeric (see 20260320000001_pgvector_context.sql) — not a row set,

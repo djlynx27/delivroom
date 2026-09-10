@@ -10,3 +10,18 @@ export function montrealHour(now: Date): number {
     }).format(now)
   ) % 24;
 }
+
+const WEEKDAY_INDEX: Record<string, number> = {
+  Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6,
+};
+
+// America/Toronto local day-of-week (0=Sun..6=Sat), DST-correct. Deno Edge
+// Functions run in UTC — now.getUTCDay()/getDay() attribute a 4-6h window
+// near midnight Montreal time to the wrong calendar day every single day.
+export function montrealDayOfWeek(now: Date): number {
+  const weekday = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Toronto',
+    weekday: 'short',
+  }).format(now);
+  return WEEKDAY_INDEX[weekday] ?? now.getUTCDay();
+}

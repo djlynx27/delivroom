@@ -27,7 +27,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
-import { montrealHour } from '../_shared/time.ts';
+import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -119,7 +119,7 @@ function getTimeDayFactors(now: Date): {
   dayFactor: number;
 } {
   const localHour = montrealHour(now);
-  const localDow = now.getUTCDay(); // close enough for day-of-week
+  const localDow = montrealDayOfWeek(now);
 
   const timeFactor =
     localHour <= 2
@@ -142,6 +142,31 @@ function getTimeDayFactors(now: Date): {
   const dayFactor = dayFactors[localDow] ?? 1.0;
 
   return { timeFactor, dayFactor };
+}
+
+// Closed-hours veto for named hubs with known posted hours — mirrors
+// ZONE_PROFILES[...].isClosed in src/lib/scoringEngine.ts. Duplicated here
+// (not imported) because that file pulls in Vite path-alias/React deps that
+// don't resolve under Deno. Keep the zone name and hours in sync with the
+// client copy — a stale key here silently disables the veto for that zone
+// (see the incident this whole fix addresses: 'Carrefour Laval' scored and
+// suggested by this Edge Function at 3:44 AM because the veto only existed
+// client-side).
+const ZONE_CLOSED_HOURS: Record<string, (hour: number, dayOfWeek: number) => boolean> = {
+  'Carrefour Laval': (h, d) => {
+    const closesAt = d === 0 || d === 6 ? 17 : 21;
+    return h < 9 || h >= closesAt;
+  },
+};
+
+// Safety net for commercial zones with no ZONE_CLOSED_HOURS entry — mirrors
+// isOffPeakHour/OFF_PEAK_COMMERCIAL_PENALTY in scoringEngine.ts.
+const OFF_PEAK_START_HOUR = 22;
+const OFF_PEAK_END_HOUR = 6;
+const OFF_PEAK_COMMERCIAL_PENALTY = 0.1;
+
+function isOffPeakHour(hour: number): boolean {
+  return hour >= OFF_PEAK_START_HOUR || hour < OFF_PEAK_END_HOUR;
 }
 
 function computeEventBoost(zone: Zone, activeEvents: Event[]): number {
@@ -346,7 +371,7 @@ async function geminiEnhanceScores(
     'Vendredi',
     'Samedi',
   ];
-  const dayName = dayNames[now.getUTCDay()];
+  const dayName = dayNames[montrealDayOfWeek(now)];
 
   const zoneList = zones
     .map(
@@ -486,7 +511,25 @@ serve(async (req) => {
     const computedScores = new Map<string, number>();
     const scoreRows: ScoreRow[] = [];
 
+    const localHour = montrealHour(now);
+    const localDow = montrealDayOfWeek(now);
+
     for (const zone of zones as Zone[]) {
+      // Hard veto: a hub whose real doors are closed must never surface as a
+      // "best zone" no matter how the other factors compute (see comment on
+      // ZONE_CLOSED_HOURS above).
+      if (ZONE_CLOSED_HOURS[zone.name]?.(localHour, localDow)) {
+        computedScores.set(zone.id, 0);
+        scoreRows.push({
+          zone_id: zone.id,
+          score: 0,
+          weather_boost: 0,
+          event_boost: 0,
+          final_score: 0,
+        });
+        continue;
+      }
+
       const zoneWeather =
         (zone.city_id && weatherByCity.get(zone.city_id)) || fallbackCityWeather;
       const baseWeatherBoost = computeWeatherBoost(zoneWeather);
@@ -494,7 +537,10 @@ serve(async (req) => {
       const weatherBoostVal = Math.round(baseWeatherBoost * typeMultiplier);
 
       const baseScore = zone.base_score ?? 50;
-      const rawScore = baseScore * timeFactor * dayFactor;
+      let rawScore = baseScore * timeFactor * dayFactor;
+      if (zone.type === 'commercial' && isOffPeakHour(localHour)) {
+        rawScore *= OFF_PEAK_COMMERCIAL_PENALTY;
+      }
       const clampedScore = Math.min(
         100,
         Math.max(0, Math.round(rawScore * 100) / 100)
