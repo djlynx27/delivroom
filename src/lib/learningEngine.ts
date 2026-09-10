@@ -487,21 +487,57 @@ function isWithinSlotWindow(
   return circularDiff <= windowHours * SLOTS_PER_HOUR;
 }
 
-function buildTopLearnedZones(emaMap: Map<string, EmaPattern>, now?: Date) {
+// A zone's own EMA (used everywhere else — ShiftOptimizer's blend, etc.)
+// intentionally starts at the first observation with no shrinkage, so it
+// reacts fast to real signal. But that same property let a single lucky
+// sample rank ahead of zones with many stable observations. A blended
+// (Bayesian-average) smoothing toward the regional mean can't fix this: an
+// above-mean thin sample mathematically always stays above a below-mean
+// thick sample no matter the blend weight (shrinkage moves a value toward
+// the mean, never across it) — the only case it reorders correctly is two
+// entries on the SAME side of the mean, which isn't the failure mode here.
+// A hard minimum-sample gate is what "Station Concorde" actually needs:
+// don't rank a zone's observed rate at all until there's enough of it.
+// Each EmaPattern is bucketed per (zone, day-of-week, 15-min slot) — a
+// specific slot only recurs once a week, so this can't reuse tripAnalytics'
+// coarser MIN_RATE_TRIPS (3, tuned for 30-day zone/platform aggregates).
+// 2 matches the trust floor ShiftOptimizer's own EMA blend already uses
+// for an exact-slot match (see getLearningAdjustedEarningsPerHour).
+const MIN_OBSERVATIONS_FOR_LEADERBOARD = 2;
+const TOP_ZONES_MAX_MULTIPLIER = 2.5; // dynamic ceiling relative to the driver's own market
+
+function buildTopLearnedZones(
+  emaMap: Map<string, EmaPattern>,
+  now: Date | undefined,
+  regionalAvgEarningsPerHour: number
+) {
   const referenceSlotIndex = now ? getSlotIndex(now) : null;
   const patterns = [...emaMap.values()].filter(
     (entry) =>
-      referenceSlotIndex === null ||
-      isWithinSlotWindow(entry.slotIndex, referenceSlotIndex, TOP_ZONES_TIME_WINDOW_HOURS)
+      entry.observationCount >= MIN_OBSERVATIONS_FOR_LEADERBOARD &&
+      (referenceSlotIndex === null ||
+        isWithinSlotWindow(entry.slotIndex, referenceSlotIndex, TOP_ZONES_TIME_WINDOW_HOURS))
   );
 
   return patterns
-    .sort((left, right) => right.emaEarningsPerHour - left.emaEarningsPerHour)
+    .map((entry) => {
+      // Dynamic ceiling relative to the driver's own market, not a
+      // hardcoded number — catches an implausible rate even once a zone
+      // clears the minimum-sample gate above. No regional baseline (no
+      // real trips at all) → nothing to clamp against, use the raw EMA.
+      const displayEarningsPerHour =
+        regionalAvgEarningsPerHour > 0
+          ? Math.min(entry.emaEarningsPerHour, regionalAvgEarningsPerHour * TOP_ZONES_MAX_MULTIPLIER)
+          : entry.emaEarningsPerHour;
+
+      return { entry, displayEarningsPerHour: round(displayEarningsPerHour) };
+    })
+    .sort((left, right) => right.displayEarningsPerHour - left.displayEarningsPerHour)
     .slice(0, 5)
-    .map((entry) => ({
+    .map(({ entry, displayEarningsPerHour }) => ({
       zoneId: entry.zoneId,
       zoneName: entry.zoneName,
-      emaEarningsPerHour: entry.emaEarningsPerHour,
+      emaEarningsPerHour: displayEarningsPerHour,
       observationCount: entry.observationCount,
     }));
 }
@@ -556,7 +592,22 @@ export function deriveLearningInsights(
     sampleCount,
     recentBias
   );
-  const topLearnedZones = buildTopLearnedZones(emaMap, now);
+  // Regional baseline for the shrinkage/clamp in buildTopLearnedZones —
+  // real trips only, matching getRealAvgEarningsPerHour's own semantics
+  // (never trust seedSyntheticTrips.ts rows for a "real market" baseline).
+  const realSortedTrips = sortedTrips.filter((trip) => trip.source === 'real');
+  const regionalRevenue = realSortedTrips.reduce(
+    (sum, trip) => sum + getTripRevenue(trip),
+    0
+  );
+  const regionalHours = realSortedTrips.reduce(
+    (sum, trip) => sum + getTripHours(trip),
+    0
+  );
+  const regionalAvgEarningsPerHour =
+    regionalHours > 0 ? regionalRevenue / regionalHours : 0;
+
+  const topLearnedZones = buildTopLearnedZones(emaMap, now, regionalAvgEarningsPerHour);
 
   return {
     emaPatterns: [...emaMap.values()],

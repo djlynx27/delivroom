@@ -66,7 +66,10 @@ describe('learning engine', () => {
 
     expect(insights.emaPatterns.length).toBeGreaterThan(0);
     expect(insights.predictions).toHaveLength(3);
-    expect(insights.topLearnedZones[0]?.zoneName).toBe('Centre Bell');
+    // Neither zone clears MIN_RATE_TRIPS (2 and 1 observations) — the
+    // minimum-sample gate on topLearnedZones correctly excludes both rather
+    // than ranking a thin sample as if it were trustworthy.
+    expect(insights.topLearnedZones).toHaveLength(0);
   });
 
   it('produces normalized suggested weights', () => {
@@ -387,13 +390,16 @@ describe('deriveLearningInsights — time-of-day window on topLearnedZones', () 
   }
 
   // Carrefour Laval's only history is a Sunday afternoon shopping rush —
-  // great EMA, wrong time of day for a 3:45 AM query.
+  // great EMA, wrong time of day for a 3:45 AM query. Stepped by 7 days
+  // (not 1) so every trip lands in the SAME day-of-week/slot EmaPattern
+  // bucket — repeats within a bucket are what the min-observations gate on
+  // topLearnedZones (see learningEngine.ts) actually requires.
   const afternoonMallTrips = Array.from({ length: 3 }, (_, i) =>
-    makeTimedTrip(`mall-${i}`, `2026-03-${15 + i}T14:30:00.000Z`, 'lvl-cl', 'Carrefour Laval')
+    makeTimedTrip(`mall-${i}`, `2026-03-${15 + i * 7}T14:30:00.000Z`, 'lvl-cl', 'Carrefour Laval')
   );
   // Station Montmorency has real overnight history, closer to 3:45 AM.
   const nightZoneTrips = Array.from({ length: 3 }, (_, i) =>
-    makeTimedTrip(`night-${i}`, `2026-03-${15 + i}T03:30:00.000Z`, 'lvl-sm', 'Station Montmorency')
+    makeTimedTrip(`night-${i}`, `2026-03-${15 + i * 7}T03:30:00.000Z`, 'lvl-sm', 'Station Montmorency')
   );
   const allTrips = [...afternoonMallTrips, ...nightZoneTrips];
 
@@ -412,5 +418,85 @@ describe('deriveLearningInsights — time-of-day window on topLearnedZones', () 
     const names = insights.topLearnedZones.map((z) => z.zoneName);
     expect(names).toContain('Carrefour Laval');
     expect(names).toContain('Station Montmorency');
+  });
+});
+
+// Regression for the "Station Concorde 80$/h" bug: a single lucky trip
+// (20$ in 15 min → 80$/h) must not outrank a zone with many stable,
+// moderate observations just because its lone sample happened to be high.
+describe('deriveLearningInsights — topLearnedZones Bayesian smoothing', () => {
+  // weekOffset (not dayOffset): stepping by whole weeks keeps every trip on
+  // the same day-of-week and time-of-day, so repeats land in the SAME
+  // EmaPattern (zone, dayOfWeek, slot) bucket instead of each creating its
+  // own single-observation bucket.
+  function makeEarningsTrip(
+    id: string,
+    weekOffset: number,
+    zoneId: string,
+    zoneName: string,
+    earnings: number,
+    durationMin: number
+  ): TripWithZone {
+    const startedAt = new Date(Date.UTC(2026, 2, 10, 12, 0, 0));
+    startedAt.setUTCDate(startedAt.getUTCDate() + weekOffset * 7);
+    const endedAt = new Date(startedAt.getTime() + durationMin * 60_000);
+    return {
+      id,
+      created_at: startedAt.toISOString(),
+      distance_km: 8,
+      earnings,
+      ended_at: endedAt.toISOString(),
+      experiment: false,
+      notes: null,
+      started_at: startedAt.toISOString(),
+      tips: 0,
+      zone_id: zoneId,
+      zone_score: 50,
+      platform: null,
+      source: 'real',
+      user_id: null,
+      zones: { name: zoneName, current_score: 50 },
+    };
+  }
+
+  // One-off lucky sample: 20$/15min = 80$/h (capped to MAX_EARNINGS_PER_HOUR
+  // = 40 before it ever reaches the EMA — see getTripLearningContext) — a
+  // single observation.
+  const luckyTrip = [
+    makeEarningsTrip('lucky-1', 0, 'lvl-concorde', 'Station Concorde', 20, 15),
+  ];
+  // Well-sampled, stable zone at a realistic 30$/h across 10 trips.
+  const stableTrips = Array.from({ length: 10 }, (_, i) =>
+    makeEarningsTrip(`stable-${i}`, i, 'mtl-stable', 'Zone Stable', 30, 60)
+  );
+  const trips = [...luckyTrip, ...stableTrips];
+
+  it('excludes a single-observation zone from the leaderboard entirely, however high its EMA', () => {
+    const insights = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
+    const names = insights.topLearnedZones.map((z) => z.zoneName);
+
+    expect(names).not.toContain('Station Concorde');
+    expect(names).toContain('Zone Stable');
+    expect(insights.topLearnedZones[0]?.zoneName).toBe('Zone Stable');
+  });
+
+  it('does not distort a well-sampled zone sitting well under the dynamic clamp', () => {
+    const insights = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
+    const stable = insights.topLearnedZones.find((z) => z.zoneName === 'Zone Stable');
+
+    expect(stable).toBeDefined();
+    expect(stable!.emaEarningsPerHour).toBe(30);
+  });
+
+  it('lets a zone back onto the leaderboard once it clears the minimum-observations gate', () => {
+    const twoObservations = [
+      makeEarningsTrip('concorde-1', 0, 'lvl-concorde', 'Station Concorde', 20, 15),
+      makeEarningsTrip('concorde-2', 1, 'lvl-concorde', 'Station Concorde', 22, 15),
+    ];
+    const insights = deriveLearningInsights(twoObservations, DEFAULT_WEIGHTS);
+
+    expect(insights.topLearnedZones.map((z) => z.zoneName)).toContain(
+      'Station Concorde'
+    );
   });
 });
