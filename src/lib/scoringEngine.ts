@@ -527,7 +527,7 @@ function computeTimePatternBase(
   return Math.min(100, baseScore);
 }
 
-function computeEventBoostPoints(
+export function computeEventBoostPoints(
   zone: { type: string; latitude?: number; longitude?: number },
   eventBoosts?: ActiveEventBoost[]
 ): number {
@@ -548,16 +548,19 @@ function computeEventBoostPoints(
       eventBoost.latitude,
       eventBoost.longitude
     );
-    if (dist > eventBoost.boost_radius_km) continue;
-
     const typeMatch =
       eventBoost.boost_zone_types.length === 0 ||
       eventBoost.boost_zone_types.includes(zone.type);
     if (!typeMatch) continue;
 
-    const proximity = 1 - dist / Math.max(eventBoost.boost_radius_km, 0.25);
+    // Gaussian falloff (sigma = boost_radius_km / 2) — same formula as
+    // supabase/functions/score-calculator/eventBoost.ts's gaussianDecay,
+    // duplicated here across the Vite/Deno boundary the same way
+    // haversineKm/haversineMeters already are elsewhere in this codebase.
+    const sigma = Math.max(eventBoost.boost_radius_km, 0.25) / 2;
+    const decay = Math.exp(-(dist ** 2) / (2 * sigma ** 2));
     const scaled = Math.round(
-      Math.max(0, (eventBoost.boost_multiplier - 1) * 18 * proximity)
+      Math.max(0, (eventBoost.boost_multiplier - 1) * 18 * decay)
     );
     if (scaled > eventBoostPoints) {
       eventBoostPoints = Math.min(30, scaled);

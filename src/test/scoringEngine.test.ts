@@ -4,6 +4,7 @@ import {
   calculateDemandFactors,
   calculateWeightedDemandScore,
   computeDemandScore,
+  computeEventBoostPoints,
   DEFAULT_WEIGHTS,
   getWeatherMultiplier,
   reweightZonesByDriverMode,
@@ -1198,5 +1199,68 @@ describe('computeDemandScore — 3:45 AM search from Chomedey (Laval)', () => {
 
     expect(top3Ids).not.toContain('lvl-cl');
     expect(scores.get('lvl-cl')).toBe(0);
+  });
+});
+
+describe('computeEventBoostPoints — Gaussian decay', () => {
+  const zone = { type: 'commercial', latitude: 45.5, longitude: -73.5 };
+
+  it('gives the maximum boost at zero distance', () => {
+    const points = computeEventBoostPoints(zone, [
+      {
+        latitude: 45.5,
+        longitude: -73.5,
+        boost_multiplier: 2.0,
+        boost_radius_km: 2,
+        boost_zone_types: [],
+      },
+    ]);
+    expect(points).toBeGreaterThan(0);
+  });
+
+  it('decays smoothly instead of stopping abruptly beyond the nominal radius', () => {
+    // boost_radius_km: 4, multiplier: 3.0 — chosen (and hand-verified
+    // against the gaussianDecay formula) so BOTH points below survive
+    // computeEventBoostPoints' Math.round without flooring to 0: near
+    // (~1.56 km, well inside the 4km radius) rounds to ~27; far (~4.68 km,
+    // just past the radius) rounds to ~2 — small but nonzero, which the
+    // OLD binary cutoff would have floored to exactly 0.
+    const nearEvent = [
+      {
+        latitude: 45.5,
+        longitude: -73.5 - 0.02, // ~1.56 km away
+        boost_multiplier: 3.0,
+        boost_radius_km: 4,
+        boost_zone_types: [],
+      },
+    ];
+    const farEvent = [
+      {
+        latitude: 45.5,
+        longitude: -73.5 - 0.06, // ~4.68 km away
+        boost_multiplier: 3.0,
+        boost_radius_km: 4,
+        boost_zone_types: [],
+      },
+    ];
+    const nearPoints = computeEventBoostPoints(zone, nearEvent);
+    const farPoints = computeEventBoostPoints(zone, farEvent);
+    // Old binary cutoff would make farPoints exactly 0; Gaussian keeps it
+    // positive but smaller than the near-event case.
+    expect(farPoints).toBeGreaterThan(0);
+    expect(farPoints).toBeLessThan(nearPoints);
+  });
+
+  it('returns 0 for an event whose distance makes the Gaussian term negligible', () => {
+    const points = computeEventBoostPoints(zone, [
+      {
+        latitude: 46.5, // ~111 km away
+        longitude: -73.5,
+        boost_multiplier: 2.0,
+        boost_radius_km: 2,
+        boost_zone_types: [],
+      },
+    ]);
+    expect(points).toBe(0);
   });
 });
