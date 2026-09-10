@@ -19,12 +19,10 @@ import { getDemandClass } from '@/lib/demandUtils';
 import { deriveLearningInsights } from '@/lib/learningEngine';
 import { computeDemandScore, type WeatherCondition } from '@/lib/scoringEngine';
 import {
-  blend,
+  getLearningAdjustedEarningsPerHour,
   getRealAvgEarningsPerHour,
   MAX_EARNINGS_PER_HOUR,
-  REAL_AVG_FULL_TRUST_AT_TRIPS,
   sanitizeTargetRevenueInput,
-  scoreToEarningsPerH,
   type RealEarningsAverage,
 } from '@/lib/shiftEarnings';
 import { cn } from '@/lib/utils';
@@ -104,55 +102,6 @@ function buildWeatherCondition(weather: ReturnType<typeof useWeather>['data']) {
   } satisfies WeatherCondition;
 }
 
-function getLearningAdjustedEarningsPerHour({
-  bestScore,
-  block,
-  bestZoneId,
-  learningInsights,
-  jsDay,
-  realAvg,
-}: {
-  bestScore: number;
-  block: (typeof PRIME_BLOCKS)[number];
-  bestZoneId: string;
-  learningInsights: ReturnType<typeof deriveLearningInsights> | null;
-  jsDay: number;
-  realAvg: RealEarningsAverage | null;
-}) {
-  const conservativeDefault = scoreToEarningsPerH(bestScore);
-
-  // Overall real average takes priority over the theoretical default once
-  // there's enough logged history — trust scales with sample size so a
-  // handful of trips doesn't fully override the conservative floor.
-  const baseline = realAvg
-    ? blend(
-        realAvg.perHour,
-        conservativeDefault,
-        Math.min(1, realAvg.tripCount / REAL_AVG_FULL_TRUST_AT_TRIPS)
-      )
-    : conservativeDefault;
-
-  if (!learningInsights) {
-    return baseline;
-  }
-
-  const slotIdx = block.startHour * 4;
-  const emaPattern = learningInsights.emaPatterns.find(
-    (pattern) =>
-      pattern.dayOfWeek === jsDay &&
-      Math.abs(pattern.slotIndex - slotIdx) < 8 &&
-      pattern.zoneId === bestZoneId
-  );
-
-  if (!emaPattern || emaPattern.observationCount < 2) {
-    return baseline;
-  }
-
-  // Most granular real signal available (this exact zone/day/slot) —
-  // outranks both the overall average and the theoretical default.
-  const emaTrust = Math.min(0.85, emaPattern.observationCount * 0.1);
-  return blend(emaPattern.emaEarningsPerHour, baseline, emaTrust);
-}
 
 function getBlockReason(startHour: number, dayIndex: number) {
   if (startHour >= 20) {
