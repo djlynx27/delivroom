@@ -5,9 +5,14 @@
 // inside-radius-or-nothing cutoff — ~13.5% of the max boost remains at
 // dist = boost_radius_km instead of dropping to zero. The client copy of
 // this same formula lives in src/lib/scoringEngine.ts's
-// computeEventBoostPoints; haversineKm is duplicated across the Vite/Deno
-// boundary the same way src/scripts/lib/geo.ts's haversineMeters already
-// is elsewhere in this codebase.
+// computeEventBoostPoints, with one deliberate divergence: this file
+// guards sigma <= 0 explicitly, while the client instead floors the
+// radius at Math.max(boost_radius_km, 0.25) before halving it — both
+// exist only to avoid a 0/0 NaN for a degenerate zero-radius event, and
+// only disagree in that unreachable-in-practice edge case (radius < 0.5
+// km). haversineKm is duplicated across the Vite/Deno boundary the same
+// way src/scripts/lib/geo.ts's haversineMeters already is elsewhere in
+// this codebase.
 
 export function haversineKm(
   lat1: number,
