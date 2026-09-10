@@ -1,4 +1,5 @@
 import {
+  buildAcceptedTripInsert,
   buildTripsRawInsert,
   parseMaxymoCsv,
   parseMaxymoDistanceKm,
@@ -119,5 +120,50 @@ describe('buildTripsRawInsert', () => {
       pickup_distance_km: 1.6,
       trip_distance_km: null,
     });
+  });
+
+  it('uses each row own Date column when present instead of the fallback', () => {
+    const csv =
+      'Date,Pickup Distance,Pickup Time,Trip Distance,Drive Time,Status,Fare\n' +
+      '2026-03-20T08:00:00.000Z,2.3 mi,3 min,4.1 mi,12 min,Completed,18.50\n';
+    const rows = parseMaxymoCsv(csv);
+
+    const inserts = buildTripsRawInsert(rows, '2026-01-01T00:00:00.000Z');
+
+    expect(inserts[0]?.started_at).toBe('2026-03-20T08:00:00.000Z');
+  });
+});
+
+describe('buildAcceptedTripInsert', () => {
+  const csv =
+    'Pickup Distance,Pickup Time,Trip Distance,Drive Time,Status,Fare\n' +
+    '2.3 mi,3 min,4.1 mi,12 min,Completed,18.50\n' +
+    '1 mi,2 min,,,Declined,\n';
+  const [accepted, rejected] = parseMaxymoCsv(csv);
+
+  it('builds a trips insert row for an accepted offer', () => {
+    const insert = buildAcceptedTripInsert(
+      accepted!,
+      'user-1',
+      '2026-03-20T10:00:00.000Z'
+    );
+
+    expect(insert).toMatchObject({
+      user_id: 'user-1',
+      platform: 'maxymo',
+      earnings: 18.5,
+      distance_km: 6.6,
+      pickup_distance_km: 3.7,
+      trip_distance_km: 6.6,
+      drive_time_min: 12,
+    });
+    expect(insert?.started_at).toBe('2026-03-20T10:00:00.000Z');
+    expect(insert?.ended_at).toBe('2026-03-20T10:15:00.000Z');
+  });
+
+  it('returns null for a rejected offer — those only feed trips_raw', () => {
+    expect(
+      buildAcceptedTripInsert(rejected!, 'user-1', '2026-03-20T10:00:00.000Z')
+    ).toBeNull();
   });
 });

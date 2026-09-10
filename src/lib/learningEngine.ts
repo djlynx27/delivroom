@@ -74,7 +74,7 @@ export interface PostShiftSummary {
 // Deadhead = distance driven empty to reach the pickup. Zones that
 // consistently require a long approach eat into the driver's effective $/h
 // even though the ride itself pays well, so their EMA gets discounted.
-const DEADHEAD_PENALTY_KM_THRESHOLD = 4;
+export const DEADHEAD_PENALTY_KM_THRESHOLD = 4;
 const DEADHEAD_PENALTY_FACTOR = 0.85;
 
 const MAX_EXPECTED_EARNINGS_PER_HOUR = 60;

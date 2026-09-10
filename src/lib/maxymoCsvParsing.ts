@@ -1,7 +1,20 @@
 import { parseCsvRecords } from '@/lib/csv';
 import { parseOptionalCurrencyValue } from '@/lib/csvTripParsing';
+import {
+  computeEndedAt,
+  normalizeStartedAt,
+  resolveDurationMinutes,
+} from '@/lib/tripSave';
 
 const MILES_TO_KM = 1.60934;
+const DATE_COLUMN_CANDIDATES = [
+  'date',
+  'started_at',
+  'request_time',
+  'pickup_date',
+  'trip_date',
+  'timestamp',
+];
 
 export type MaxymoOfferStatus = 'accepted' | 'rejected';
 
@@ -12,6 +25,9 @@ export interface MaxymoCsvRecord {
   driveTimeMin: number | null;
   offerStatus: MaxymoOfferStatus;
   fareCad: number | null;
+  /** Raw value of whichever date-ish column the row carried, if any — see
+   * DATE_COLUMN_CANDIDATES. Resolved against a fallback via normalizeStartedAt. */
+  rawDate: string;
   raw: Record<string, string>;
 }
 
@@ -24,6 +40,20 @@ export interface MaxymoTripsRawInsert {
   trip_distance_km: number | null;
   drive_time_min: number | null;
   fare_cad: number | null;
+}
+
+export interface MaxymoTripInsert {
+  user_id: string;
+  platform: 'maxymo';
+  started_at: string;
+  ended_at: string | null;
+  earnings: number | null;
+  distance_km: number | null;
+  pickup_distance_km: number | null;
+  pickup_time_min: number | null;
+  trip_distance_km: number | null;
+  drive_time_min: number | null;
+  notes: string;
 }
 
 export function parseMaxymoDistanceKm(value: string): number | null {
@@ -72,6 +102,13 @@ export function parseMaxymoOfferStatus(value: string): MaxymoOfferStatus {
   return isRejected ? 'rejected' : 'accepted';
 }
 
+function findRawDate(row: Record<string, string>): string {
+  for (const key of DATE_COLUMN_CANDIDATES) {
+    if (row[key]) return row[key]!;
+  }
+  return '';
+}
+
 export function parseMaxymoCsvRow(row: Record<string, string>): MaxymoCsvRecord {
   const offerStatus = parseMaxymoOfferStatus(row.status ?? '');
 
@@ -82,6 +119,7 @@ export function parseMaxymoCsvRow(row: Record<string, string>): MaxymoCsvRecord 
     driveTimeMin: parseMaxymoDurationMin(row.drive_time ?? ''),
     offerStatus,
     fareCad: parseOptionalCurrencyValue(row.fare ?? '') || null,
+    rawDate: findRawDate(row),
     raw: row,
   };
 }
@@ -92,16 +130,47 @@ export function parseMaxymoCsv(text: string): MaxymoCsvRecord[] {
 
 export function buildTripsRawInsert(
   records: MaxymoCsvRecord[],
-  startedAtIso: string
+  fallbackIso: string
 ): MaxymoTripsRawInsert[] {
+  const fallback = new Date(fallbackIso);
   return records.map((record) => ({
     platform: 'maxymo',
     offer_status: record.offerStatus,
-    started_at: startedAtIso,
+    started_at: normalizeStartedAt(record.rawDate, fallback),
     pickup_distance_km: record.pickupDistanceKm,
     pickup_time_min: record.pickupTimeMin,
     trip_distance_km: record.tripDistanceKm,
     drive_time_min: record.driveTimeMin,
     fare_cad: record.fareCad,
   }));
+}
+
+/** Only accepted offers become `trips` rows — rejected ones have no ride to
+ * log, they exist purely as trips_raw market history. */
+export function buildAcceptedTripInsert(
+  record: MaxymoCsvRecord,
+  userId: string,
+  fallbackIso: string
+): MaxymoTripInsert | null {
+  if (record.offerStatus !== 'accepted') return null;
+
+  const startedAt = normalizeStartedAt(record.rawDate, new Date(fallbackIso));
+  const durationMinutes = resolveDurationMinutes({
+    pickup_time_minutes: record.pickupTimeMin,
+    ride_time_minutes: record.driveTimeMin,
+  });
+
+  return {
+    user_id: userId,
+    platform: 'maxymo',
+    started_at: startedAt,
+    ended_at: computeEndedAt(startedAt, durationMinutes),
+    earnings: record.fareCad,
+    distance_km: record.tripDistanceKm,
+    pickup_distance_km: record.pickupDistanceKm,
+    pickup_time_min: record.pickupTimeMin,
+    trip_distance_km: record.tripDistanceKm,
+    drive_time_min: record.driveTimeMin,
+    notes: 'Import CSV Maxymo',
+  };
 }

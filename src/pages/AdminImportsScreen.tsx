@@ -1,5 +1,6 @@
 import { BulkScreenshotUploader } from '@/components/BulkScreenshotUploader';
 import { CsvImporter } from '@/components/CsvImporter';
+import { MaxymoCsvImporter } from '@/components/MaxymoCsvImporter';
 import { ScreenshotAnalyzer } from '@/components/ScreenshotAnalyzer';
 import { AdminPageShell } from '@/components/admin/AdminPageShell';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -66,6 +67,17 @@ export default function AdminImportsScreen() {
           </h2>
         </div>
         <CsvImporter />
+      </div>
+
+      {/* Section 4 — CSV Maxymo (offres acceptées + refusées) */}
+      <div>
+        <div className="flex items-center gap-2 mb-2 px-1">
+          <FileSpreadsheet className="w-4 h-4 text-primary" />
+          <h2 className="text-sm font-display font-bold uppercase tracking-wide text-muted-foreground">
+            Fichier CSV (Maxymo Export)
+          </h2>
+        </div>
+        <MaxymoCsvImporter />
       </div>
 
       {/* Note de prudence */}
