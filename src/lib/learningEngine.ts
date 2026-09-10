@@ -11,6 +11,8 @@ export interface EmaPattern {
   emaEarningsPerHour: number;
   emaRideCount: number;
   observationCount: number;
+  avgDeadheadKm: number;
+  deadheadPenaltyApplied: boolean;
 }
 
 export interface ZoneBelief {
@@ -69,6 +71,12 @@ export interface PostShiftSummary {
   suggestedFocus: string;
 }
 
+// Deadhead = distance driven empty to reach the pickup. Zones that
+// consistently require a long approach eat into the driver's effective $/h
+// even though the ride itself pays well, so their EMA gets discounted.
+const DEADHEAD_PENALTY_KM_THRESHOLD = 4;
+const DEADHEAD_PENALTY_FACTOR = 0.85;
+
 const MAX_EXPECTED_EARNINGS_PER_HOUR = 60;
 const DEFAULT_PRIOR_MEAN = 25;
 const DEFAULT_PRIOR_VARIANCE = 100;
@@ -88,6 +96,19 @@ function getObservationVariance(source: TripWithZone['source']) {
 function round(value: number, digits = 2) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+/**
+ * Share of the trip's total distance that was driven empty to reach the
+ * pickup. total = pickup + paid ride distance (falls back to legacy
+ * distance_km when trip_distance_km wasn't captured).
+ */
+export function getDeadheadRatio(
+  pickupDistanceKm: number,
+  tripDistanceKm: number
+): number {
+  const totalDistanceKm = pickupDistanceKm + tripDistanceKm;
+  return totalDistanceKm > 0 ? round(pickupDistanceKm / totalDistanceKm, 3) : 0;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -150,6 +171,15 @@ function getSortedTrips(trips: TripWithZone[]) {
     );
 }
 
+function getTripDeadheadContext(trip: TripWithZone) {
+  const deadheadKm = trip.pickup_distance_km ?? 0;
+  const deadheadRatio = getDeadheadRatio(
+    deadheadKm,
+    trip.trip_distance_km ?? trip.distance_km ?? 0
+  );
+  return { deadheadKm, deadheadRatio };
+}
+
 function getTripLearningContext(trip: TripWithZone) {
   const startedAt = new Date(trip.started_at);
   const hours = getTripHours(trip);
@@ -168,6 +198,8 @@ function getTripLearningContext(trip: TripWithZone) {
     (trip as { zone_score?: number | null }).zone_score ??
     trip.zones?.current_score;
 
+  const { deadheadKm, deadheadRatio } = getTripDeadheadContext(trip);
+
   return {
     startedAt,
     hours,
@@ -179,7 +211,51 @@ function getTripLearningContext(trip: TripWithZone) {
     dayOfWeek: startedAt.getDay(),
     slotIndex: getSlotIndex(startedAt),
     source: trip.source ?? 'real',
+    deadheadKm,
+    deadheadRatio,
   };
+}
+
+function getZoneDeadheadAverages(
+  trips: TripWithZone[]
+): Map<string, number> {
+  const totals = new Map<string, { sum: number; count: number }>();
+
+  for (const trip of trips) {
+    if (trip.source === 'synthetic') continue;
+    const deadheadKm = trip.pickup_distance_km;
+    if (!deadheadKm || deadheadKm <= 0) continue;
+
+    const zoneId = trip.zone_id ?? 'unknown';
+    const entry = totals.get(zoneId) ?? { sum: 0, count: 0 };
+    entry.sum += deadheadKm;
+    entry.count += 1;
+    totals.set(zoneId, entry);
+  }
+
+  const averages = new Map<string, number>();
+  for (const [zoneId, { sum, count }] of totals) {
+    averages.set(zoneId, round(sum / count));
+  }
+  return averages;
+}
+
+function applyDeadheadPenalty(
+  emaMap: Map<string, EmaPattern>,
+  zoneDeadheadAverages: Map<string, number>
+) {
+  for (const pattern of emaMap.values()) {
+    const avgDeadheadKm = zoneDeadheadAverages.get(pattern.zoneId) ?? 0;
+    const deadheadPenaltyApplied = avgDeadheadKm > DEADHEAD_PENALTY_KM_THRESHOLD;
+
+    pattern.avgDeadheadKm = avgDeadheadKm;
+    pattern.deadheadPenaltyApplied = deadheadPenaltyApplied;
+    if (deadheadPenaltyApplied) {
+      pattern.emaEarningsPerHour = round(
+        pattern.emaEarningsPerHour * DEADHEAD_PENALTY_FACTOR
+      );
+    }
+  }
 }
 
 function buildEmaPattern(
@@ -199,6 +275,8 @@ function buildEmaPattern(
     emaEarningsPerHour: round(nextEmaValue),
     emaRideCount: round(updateEma(previousEma?.emaRideCount ?? 1, 1), 2),
     observationCount: (previousEma?.observationCount ?? 0) + 1,
+    avgDeadheadKm: 0,
+    deadheadPenaltyApplied: false,
   };
 }
 
@@ -432,6 +510,8 @@ export function deriveLearningInsights(
       predictions.push(prediction);
     }
   }
+
+  applyDeadheadPenalty(emaMap, getZoneDeadheadAverages(sortedTrips));
 
   const { meanAbsoluteError, accuracyPercent, sampleCount, recentBias } =
     getPredictionStats(predictions);

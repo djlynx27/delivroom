@@ -291,3 +291,71 @@ describe('deriveLearningInsights — recentBias < -12 branch', () => {
     expect(insights.meanAbsoluteError).toBeGreaterThan(50);
   });
 });
+
+// ── Deadhead (approach distance) penalty ────────────────────────────────────
+
+function makeDeadheadTrip(
+  id: string,
+  date: string,
+  zoneId: string,
+  pickupDistanceKm: number,
+  tripDistanceKm: number
+): TripWithZone {
+  const startedAt = new Date(date);
+  const endedAt = new Date(startedAt.getTime() + 3_600_000);
+  return {
+    id,
+    created_at: date,
+    distance_km: tripDistanceKm,
+    pickup_distance_km: pickupDistanceKm,
+    trip_distance_km: tripDistanceKm,
+    earnings: 30,
+    ended_at: endedAt.toISOString(),
+    experiment: false,
+    notes: null,
+    started_at: startedAt.toISOString(),
+    tips: 0,
+    zone_id: zoneId,
+    zone_score: 50,
+    platform: null,
+    source: 'real',
+    user_id: null,
+    zones: { name: zoneId, current_score: 50 },
+  };
+}
+
+describe('deriveLearningInsights — deadhead penalty', () => {
+  it('penalizes emaEarningsPerHour for a zone with high average approach distance', () => {
+    const highDeadheadTrips = Array.from({ length: 4 }, (_, i) =>
+      makeDeadheadTrip('hd-' + i, `2026-03-${10 + i}T10:00:00Z`, 'far-zone', 6, 10)
+    );
+    const lowDeadheadTrips = Array.from({ length: 4 }, (_, i) =>
+      makeDeadheadTrip('ld-' + i, `2026-03-${10 + i}T10:00:00Z`, 'near-zone', 1, 10)
+    );
+
+    const insights = deriveLearningInsights(
+      [...highDeadheadTrips, ...lowDeadheadTrips],
+      DEFAULT_WEIGHTS
+    );
+
+    const farZone = insights.emaPatterns.find((p) => p.zoneId === 'far-zone');
+    const nearZone = insights.emaPatterns.find((p) => p.zoneId === 'near-zone');
+
+    expect(farZone?.avgDeadheadKm).toBeGreaterThan(4);
+    expect(farZone?.deadheadPenaltyApplied).toBe(true);
+    expect(nearZone?.deadheadPenaltyApplied).toBe(false);
+    // Same raw earnings/hour for both — the penalty must make the far zone's
+    // EMA strictly lower than the near zone's.
+    expect(farZone!.emaEarningsPerHour).toBeLessThan(
+      nearZone!.emaEarningsPerHour
+    );
+  });
+
+  it('does not penalize trips with no pickup distance recorded', () => {
+    const insights = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
+    const pattern = insights.emaPatterns.find((p) => p.zoneId === 'mtl-cb');
+
+    expect(pattern?.avgDeadheadKm).toBe(0);
+    expect(pattern?.deadheadPenaltyApplied).toBe(false);
+  });
+});

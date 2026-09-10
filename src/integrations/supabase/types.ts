@@ -958,6 +958,7 @@ export type Database = {
         Row: {
           created_at: string
           distance_km: number | null
+          drive_time_min: number | null
           duration_minutes: number | null
           earnings: number | null
           ended_at: string | null
@@ -965,10 +966,13 @@ export type Database = {
           id: string
           is_synthetic: boolean | null
           notes: string | null
+          pickup_distance_km: number | null
+          pickup_time_min: number | null
           platform: string | null
           source: string
           started_at: string
           tips: number | null
+          trip_distance_km: number | null
           user_id: string | null
           zone_id: string | null
           zone_score: number | null
@@ -976,6 +980,7 @@ export type Database = {
         Insert: {
           created_at?: string
           distance_km?: number | null
+          drive_time_min?: number | null
           duration_minutes?: number | null
           earnings?: number | null
           ended_at?: string | null
@@ -983,10 +988,13 @@ export type Database = {
           id?: string
           is_synthetic?: boolean | null
           notes?: string | null
+          pickup_distance_km?: number | null
+          pickup_time_min?: number | null
           platform?: string | null
           source?: string
           started_at?: string
           tips?: number | null
+          trip_distance_km?: number | null
           user_id?: string | null
           zone_id?: string | null
           zone_score?: number | null
@@ -994,6 +1002,7 @@ export type Database = {
         Update: {
           created_at?: string
           distance_km?: number | null
+          drive_time_min?: number | null
           duration_minutes?: number | null
           earnings?: number | null
           ended_at?: string | null
@@ -1001,10 +1010,13 @@ export type Database = {
           id?: string
           is_synthetic?: boolean | null
           notes?: string | null
+          pickup_distance_km?: number | null
+          pickup_time_min?: number | null
           platform?: string | null
           source?: string
           started_at?: string
           tips?: number | null
+          trip_distance_km?: number | null
           user_id?: string | null
           zone_id?: string | null
           zone_score?: number | null
@@ -1024,18 +1036,23 @@ export type Database = {
           bonus_cad: number | null
           created_at: string | null
           distance_km: number | null
+          drive_time_min: number | null
           driver_id: string | null
           dropoff_lat: number | null
           dropoff_lng: number | null
           duration_min: number | null
           fare_cad: number | null
           id: string
+          offer_status: string
+          pickup_distance_km: number | null
           pickup_lat: number | null
           pickup_lng: number | null
+          pickup_time_min: number | null
           platform: string | null
           raw_data: Json | null
           started_at: string
           tip_cad: number | null
+          trip_distance_km: number | null
           wait_min: number | null
           zone_id: string | null
         }
@@ -1043,18 +1060,23 @@ export type Database = {
           bonus_cad?: number | null
           created_at?: string | null
           distance_km?: number | null
+          drive_time_min?: number | null
           driver_id?: string | null
           dropoff_lat?: number | null
           dropoff_lng?: number | null
           duration_min?: number | null
           fare_cad?: number | null
           id?: string
+          offer_status?: string
+          pickup_distance_km?: number | null
           pickup_lat?: number | null
           pickup_lng?: number | null
+          pickup_time_min?: number | null
           platform?: string | null
           raw_data?: Json | null
           started_at: string
           tip_cad?: number | null
+          trip_distance_km?: number | null
           wait_min?: number | null
           zone_id?: string | null
         }
@@ -1062,18 +1084,23 @@ export type Database = {
           bonus_cad?: number | null
           created_at?: string | null
           distance_km?: number | null
+          drive_time_min?: number | null
           driver_id?: string | null
           dropoff_lat?: number | null
           dropoff_lng?: number | null
           duration_min?: number | null
           fare_cad?: number | null
           id?: string
+          offer_status?: string
+          pickup_distance_km?: number | null
           pickup_lat?: number | null
           pickup_lng?: number | null
+          pickup_time_min?: number | null
           platform?: string | null
           raw_data?: Json | null
           started_at?: string
           tip_cad?: number | null
+          trip_distance_km?: number | null
           wait_min?: number | null
           zone_id?: string | null
         }
