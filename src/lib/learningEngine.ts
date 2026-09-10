@@ -231,8 +231,16 @@ function updateMapsWithTrip(
 ) {
   const key = `${context.zoneId}:${context.dayOfWeek}:${context.slotIndex}`;
 
-  const previousEma = emaMap.get(key);
-  emaMap.set(key, buildEmaPattern(previousEma, context));
+  // EMA ("Top zones apprises" / personalized suggestions) now runs on real
+  // trips only, strictly — unlike the Bayesian belief below, which still
+  // folds in the synthetic seed at a wider observation variance as a
+  // cold-start prior. The EMA has no such down-weighting mechanism (every
+  // observation gets the same alpha), so the only way to guarantee zero
+  // synthetic influence on it is to skip the update entirely.
+  if (context.source !== 'synthetic') {
+    const previousEma = emaMap.get(key);
+    emaMap.set(key, buildEmaPattern(previousEma, context));
+  }
 
   const previousBelief = beliefMap.get(key);
   beliefMap.set(key, buildZoneBelief(previousBelief, context));

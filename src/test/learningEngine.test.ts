@@ -124,6 +124,33 @@ describe('learning engine', () => {
     ).toBeUndefined();
   });
 
+  it('excludes synthetic trips from the EMA entirely, even in a bucket a real trip also touches', () => {
+    const baseline = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
+    const centreBellBefore = baseline.emaPatterns.find(
+      (p) => p.zoneName === 'Centre Bell'
+    );
+
+    const withSyntheticInjected = deriveLearningInsights(
+      [
+        ...trips,
+        {
+          ...trips[0]!,
+          id: 'synthetic-1',
+          source: 'synthetic',
+          earnings: 999,
+          tips: 0,
+        },
+      ],
+      DEFAULT_WEIGHTS
+    );
+    const centreBellAfter = withSyntheticInjected.emaPatterns.find(
+      (p) => p.zoneName === 'Centre Bell'
+    );
+
+    expect(centreBellAfter?.emaEarningsPerHour).toBe(centreBellBefore?.emaEarningsPerHour);
+    expect(centreBellAfter?.observationCount).toBe(centreBellBefore?.observationCount);
+  });
+
   it('skips predictions when no zone score baseline exists', () => {
     const insights = deriveLearningInsights(
       [
