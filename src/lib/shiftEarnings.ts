@@ -3,6 +3,7 @@
 // react-refresh "only export components" lint rule on a .tsx file).
 
 import type { TripWithZone } from '@/hooks/useTrips';
+import { calculateSmoothedHourlyRate } from '@/lib/hourlyRateSmoothing';
 import {
   DEADHEAD_PENALTY_FACTOR,
   type LearningInsights,
@@ -146,9 +147,19 @@ export function getLearningAdjustedEarningsPerHour({
   }
 
   // Most granular real signal available (this exact zone/day/slot) —
-  // outranks both the overall average and the theoretical default.
+  // outranks both the overall average and the theoretical default. Shrunk
+  // toward the driver's own market average first (hourlyRateSmoothing.ts):
+  // the emaTrust blend below already de-weights a thin sample, but it blends
+  // toward a *score-derived* baseline, so a 2-observation EMA at $80/h still
+  // dragged the projection well past anything achievable. The cap here is
+  // MAX_EARNINGS_PER_HOUR, not the module's looser observation ceiling —
+  // this value feeds a forward projection a driver plans a shift around.
+  const smoothedEma = calculateSmoothedHourlyRate(
+    { hourlyRate: emaPattern.emaEarningsPerHour, sampleCount: emaPattern.observationCount },
+    { priorRate: realAvg?.perHour, maxRate: MAX_EARNINGS_PER_HOUR }
+  );
   const emaTrust = Math.min(0.85, emaPattern.observationCount * 0.1);
-  return blend(emaPattern.emaEarningsPerHour, deadheadAdjustedBaseline, emaTrust);
+  return blend(smoothedEma, deadheadAdjustedBaseline, emaTrust);
 }
 
 // Strips non-digits and leading zeros ("02100" -> "2100", "00" -> "0",

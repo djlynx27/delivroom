@@ -480,12 +480,62 @@ describe('deriveLearningInsights — topLearnedZones Bayesian smoothing', () => 
     expect(insights.topLearnedZones[0]?.zoneName).toBe('Zone Stable');
   });
 
-  it('does not distort a well-sampled zone sitting well under the dynamic clamp', () => {
+  it('barely moves a well-sampled zone sitting near the regional average', () => {
     const insights = deriveLearningInsights(trips, DEFAULT_WEIGHTS);
     const stable = insights.topLearnedZones.find((z) => z.zoneName === 'Zone Stable');
 
+    // Shrinkage always moves the number a little — it is a weighted average,
+    // not a conditional correction — but when the zone already sits near the
+    // prior (regional average here is ~31.2$/h, driven up by the lucky
+    // Concorde trip's capped 40$/h) the move is fractions of a dollar:
+    // (5 × 31.22 + 10 × 30) / 15 = 30.41. What matters is that a 10-
+    // observation zone is not dragged to the prior, unlike the 1-observation
+    // case covered by the gate test above.
     expect(stable).toBeDefined();
-    expect(stable!.emaEarningsPerHour).toBe(30);
+    expect(stable!.emaEarningsPerHour).toBeGreaterThan(30);
+    expect(stable!.emaEarningsPerHour).toBeLessThan(30.5);
+  });
+
+  it('shrinks a thin-sample zone toward the regional average before displaying it', () => {
+    // Two observations is the bare minimum the leaderboard gate allows, so
+    // the prior still carries 5/7 of the displayed rate. Concorde's raw EMA
+    // is the capped 40$/h (20$ and 22$ over 15 min each, both clamped to
+    // MAX_EARNINGS_PER_HOUR upstream) — against a ~32.6$/h regional baseline
+    // from the stable zone's 10 hour-long trips, it must print well under 40
+    // while staying above that baseline (shrinkage moves toward the prior,
+    // never across it).
+    const concordeTwice = [
+      ...stableTrips,
+      makeEarningsTrip('concorde-1', 0, 'lvl-concorde', 'Station Concorde', 20, 15),
+      makeEarningsTrip('concorde-2', 1, 'lvl-concorde', 'Station Concorde', 22, 15),
+    ];
+    const insights = deriveLearningInsights(concordeTwice, DEFAULT_WEIGHTS);
+    const concorde = insights.topLearnedZones.find(
+      (z) => z.zoneName === 'Station Concorde'
+    );
+
+    expect(concorde).toBeDefined();
+    expect(concorde!.emaEarningsPerHour).toBeLessThan(36);
+    expect(concorde!.emaEarningsPerHour).toBeGreaterThan(32);
+    expect(concorde!.observationCount).toBe(2);
+  });
+
+  it('never lets a micro-duration-only history inflate a zone above the market ceiling', () => {
+    // Pathological history: every trip is a 15-minute quick-log, so the raw
+    // regional average is ~84$/h. Unbounded, that prior would shrink a zone
+    // UPWARD past anything achievable; capped at MAX_EARNINGS_PER_HOUR it
+    // cannot.
+    const microOnly = [
+      makeEarningsTrip('micro-1', 0, 'lvl-concorde', 'Station Concorde', 20, 15),
+      makeEarningsTrip('micro-2', 1, 'lvl-concorde', 'Station Concorde', 22, 15),
+    ];
+    const insights = deriveLearningInsights(microOnly, DEFAULT_WEIGHTS);
+    const concorde = insights.topLearnedZones.find(
+      (z) => z.zoneName === 'Station Concorde'
+    );
+
+    expect(concorde).toBeDefined();
+    expect(concorde!.emaEarningsPerHour).toBeLessThanOrEqual(40);
   });
 
   it('lets a zone back onto the leaderboard once it clears the minimum-observations gate', () => {

@@ -1,4 +1,5 @@
 import type { TripWithZone } from '@/hooks/useTrips';
+import { calculateSmoothedHourlyRate } from '@/lib/hourlyRateSmoothing';
 import type { Tables } from '@/integrations/supabase/types';
 
 type SessionRow = Tables<'sessions'>;
@@ -223,9 +224,20 @@ function buildRankedSeries(
       ...entry,
       revenue: round(entry.revenue, 2),
       hours: round(entry.hours, 1),
+      // Past the sample gate the ratio is publishable but still noisy, so
+      // the published number is shrunk toward the market prior in proportion
+      // to how thin the sample is (hourlyRateSmoothing.ts) and winsorized —
+      // a 3-trip bucket at $78/h prints closer to the prior, a 40-trip one
+      // barely moves.
       revenuePerHour:
         entry.rides >= MIN_RATE_TRIPS && entry.hours >= MIN_RATE_HOURS
-          ? round(entry.revenue / entry.hours, 2)
+          ? round(
+              calculateSmoothedHourlyRate({
+                hourlyRate: entry.revenue / entry.hours,
+                sampleCount: entry.rides,
+              }),
+              2
+            )
           : null,
     }))
     .sort((left, right) => right.revenue - left.revenue)

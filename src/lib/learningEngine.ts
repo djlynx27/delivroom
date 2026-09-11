@@ -1,6 +1,7 @@
 import type { TripWithZone } from '@/hooks/useTrips';
 import { MAX_EARNINGS_PER_HOUR } from '@/lib/shiftEarnings';
 import { DEFAULT_WEIGHTS, type WeightConfig } from '@/lib/scoringEngine';
+import { calculateSmoothedHourlyRate } from '@/lib/hourlyRateSmoothing';
 import { getTripHours, getTripRevenue } from '@/lib/tripAnalytics';
 
 export interface EmaPattern {
@@ -521,14 +522,27 @@ function buildTopLearnedZones(
 
   return patterns
     .map((entry) => {
-      // Dynamic ceiling relative to the driver's own market, not a
-      // hardcoded number — catches an implausible rate even once a zone
-      // clears the minimum-sample gate above. No regional baseline (no
-      // real trips at all) → nothing to clamp against, use the raw EMA.
+      // Two independent corrections, both needed:
+      //   1. Bayesian shrinkage toward the prior (hourlyRateSmoothing.ts),
+      //      weighted by this pattern's own observationCount — a zone that
+      //      just cleared the 2-observation gate still can't print its raw
+      //      EMA. The prior is the driver's own measured market average when
+      //      there is one, so the correction tracks their reality instead of
+      //      a hardcoded constant.
+      //   2. Dynamic ceiling relative to that same market average — catches
+      //      an implausible rate that shrinkage alone leaves above the cap
+      //      (shrinkage moves toward the mean, it doesn't bound anything).
+      // No regional baseline (no real trips at all) → nothing to clamp
+      // against, so shrinkage falls back to the module's own global prior and
+      // the multiplier ceiling is skipped.
+      const smoothedEarningsPerHour = calculateSmoothedHourlyRate(
+        { hourlyRate: entry.emaEarningsPerHour, sampleCount: entry.observationCount },
+        regionalAvgEarningsPerHour > 0 ? { priorRate: regionalAvgEarningsPerHour } : {}
+      );
       const displayEarningsPerHour =
         regionalAvgEarningsPerHour > 0
-          ? Math.min(entry.emaEarningsPerHour, regionalAvgEarningsPerHour * TOP_ZONES_MAX_MULTIPLIER)
-          : entry.emaEarningsPerHour;
+          ? Math.min(smoothedEarningsPerHour, regionalAvgEarningsPerHour * TOP_ZONES_MAX_MULTIPLIER)
+          : smoothedEarningsPerHour;
 
       return { entry, displayEarningsPerHour: round(displayEarningsPerHour) };
     })
@@ -604,8 +618,17 @@ export function deriveLearningInsights(
     (sum, trip) => sum + getTripHours(trip),
     0
   );
+  // Capped at the same market ceiling every individual trip rate already
+  // passes through (getTripLearningContext) — this aggregate divides raw
+  // revenue by raw hours, so a history made only of micro-duration rides
+  // (a few quick-log trips with started_at === ended_at + 15 min) can itself
+  // average $80/h. Feeding that in unbounded as the shrinkage prior would
+  // *inflate* a zone's displayed rate instead of damping it, which is the
+  // exact opposite of the point.
   const regionalAvgEarningsPerHour =
-    regionalHours > 0 ? regionalRevenue / regionalHours : 0;
+    regionalHours > 0
+      ? Math.min(regionalRevenue / regionalHours, MAX_EARNINGS_PER_HOUR)
+      : 0;
 
   const topLearnedZones = buildTopLearnedZones(emaMap, now, regionalAvgEarningsPerHour);
 
