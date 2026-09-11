@@ -12,6 +12,15 @@
 // POST body: { action: 'START'|'STOP'|'HEARTBEAT'|'ADD_EARNINGS'|'STATUS',
 //               lat?, lng?, amount?, platform? }
 //
+// MacroDroid alternative: send `event` with the raw Lyft Driver notification
+// text instead of `action` and this resolves the verb itself (see
+// resolveShiftAction in shiftLogic.ts), so the macro needs exactly one HTTP
+// action for every trigger:
+//   { "event": "{notification_text}", "timestamp": "{system_time_iso}" }
+// "You're online" → START, "You're offline" → STOP, the 12-hour-limit
+// notification → STOP recorded with stop_reason HOURS_LIMIT. An explicit
+// `action` always wins over `event`.
+//
 // Auth (either one) — this is a *gate*, not a per-caller partition key (see
 // "single-tenant bucket" below):
 //   1. Header  Authorization: Bearer <SHIFT_TRACKER_API_KEY>  — the
@@ -51,11 +60,12 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import {
   elapsedSeconds,
-  isShiftAction,
   nearestZoneId,
   parseAmount,
   parseCoordinates,
+  resolveShiftAction,
   resolveZoneTransition,
+  type StopReason,
   type ZoneRow,
 } from './shiftLogic.ts';
 
@@ -74,6 +84,9 @@ function json(data: unknown, status = 200): Response {
 
 interface RequestBody {
   action?: string;
+  /** Raw Android notification text from MacroDroid, mapped to an action by
+   * resolveShiftAction when `action` is absent. */
+  event?: unknown;
   lat?: unknown;
   lng?: unknown;
   amount?: unknown;
@@ -92,6 +105,21 @@ interface SessionRow {
   last_lat: number | null;
   last_lng: number | null;
   active_zone_id: string | null;
+  notes: string | null;
+}
+
+/** Records WHY a shift ended in sessions.notes (a free-text column that
+ * already exists — no migration needed for one enum-ish marker, and keeping
+ * it parseable means a later migration can promote it to a real column
+ * without losing the history). A 12h-limit cutoff is operationally different
+ * from the driver choosing to go offline: Lyft forces it, so the next shift
+ * can't simply be resumed, and the weekly planner should treat that block as
+ * capped rather than as a short day. */
+function stopNote(existing: string | null, reason: StopReason | undefined): string | null {
+  if (!reason) return existing;
+  const marker = `stop_reason=${reason}`;
+  if (existing?.includes(marker)) return existing;
+  return existing ? `${existing} | ${marker}` : marker;
 }
 
 /** Authorization gate only — NOT a per-caller partition key. Every request
@@ -201,15 +229,24 @@ serve(async (req: Request) => {
     }
 
     const body: RequestBody = await req.json().catch(() => ({}));
-    if (!isShiftAction(body.action)) {
-      return json({ error: 'action requis: START | STOP | HEARTBEAT | ADD_EARNINGS | STATUS' }, 400);
+    const resolved = resolveShiftAction(body);
+    if (!resolved) {
+      return json(
+        {
+          error:
+            'action requis: START | STOP | HEARTBEAT | ADD_EARNINGS | STATUS ' +
+            '(ou event = texte de notification Lyft reconnaissable)',
+        },
+        400
+      );
     }
+    const action = resolved.action;
 
     const now = new Date();
     const nowIso = now.toISOString();
     const coords = parseCoordinates(body);
 
-    if (body.action === 'STATUS') {
+    if (action === 'STATUS') {
       const active = await findActiveSession(client);
       return json({
         ok: true,
@@ -218,7 +255,7 @@ serve(async (req: Request) => {
       });
     }
 
-    if (body.action === 'START') {
+    if (action === 'START') {
       const existing = await findActiveSession(client);
       if (existing) {
         return json({ ok: true, alreadyActive: true, session: existing, elapsedSeconds: elapsedSeconds(existing.started_at, now.getTime()) });
@@ -242,7 +279,7 @@ serve(async (req: Request) => {
     // one defensively (a MacroDroid automation added mid-drive, or one that
     // only wires the heartbeat trigger, shouldn't just silently no-op).
     let session = await findActiveSession(client);
-    if (!session && body.action === 'HEARTBEAT') {
+    if (!session && action === 'HEARTBEAT') {
       const { data, error } = await client
         .from('sessions')
         .insert({ user_id: null, started_at: nowIso, last_heartbeat_at: nowIso })
@@ -252,7 +289,7 @@ serve(async (req: Request) => {
       session = data as SessionRow;
     }
 
-    if (body.action === 'ADD_EARNINGS') {
+    if (action === 'ADD_EARNINGS') {
       const amount = parseAmount(body.amount);
       if (amount === null) return json({ error: 'amount requis (nombre positif)' }, 400);
       const platform =
@@ -295,7 +332,7 @@ serve(async (req: Request) => {
       return json({ ok: true, message: 'Aucun shift actif' });
     }
 
-    if (body.action === 'HEARTBEAT') {
+    if (action === 'HEARTBEAT') {
       const { data: zones, error: zonesErr } = await client
         .from('zones')
         .select('id, city_id, latitude, longitude');
@@ -345,13 +382,19 @@ serve(async (req: Request) => {
         total_hours: totalHours,
         total_earnings: totalEarnings,
         total_rides: totalRides,
+        notes: stopNote(session.notes, resolved.stopReason),
       })
       .eq('id', session.id)
       .select('*')
       .single();
     if (endErr) throw new Error(`session end failed: ${endErr.message}`);
 
-    return json({ ok: true, session: ended, elapsedSeconds: elapsedSeconds(session.started_at, now.getTime()) });
+    return json({
+      ok: true,
+      session: ended,
+      stopReason: resolved.stopReason ?? null,
+      elapsedSeconds: elapsedSeconds(session.started_at, now.getTime()),
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[shift-tracker]', message);

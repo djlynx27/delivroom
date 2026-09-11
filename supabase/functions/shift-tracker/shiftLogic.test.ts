@@ -8,6 +8,7 @@ import {
   nearestZoneId,
   parseAmount,
   parseCoordinates,
+  resolveShiftAction,
   resolveZoneTransition,
   type ZoneRow,
 } from './shiftLogic.ts';
@@ -80,4 +81,63 @@ Deno.test('parseAmount: rejects zero, negative, and non-numeric', () => {
   assertEquals(parseAmount(-5), null);
   assertEquals(parseAmount('abc'), null);
   assertEquals(parseAmount(undefined), null);
+});
+
+
+// ── resolveShiftAction (MacroDroid notification text) ────────────────────────
+
+Deno.test('resolveShiftAction: an explicit action always wins over event text', () => {
+  assertEquals(resolveShiftAction({ action: 'STATUS', event: "You're offline" }), {
+    action: 'STATUS',
+  });
+});
+
+Deno.test('resolveShiftAction: Lyft online wording maps to START (EN + FR)', () => {
+  assertEquals(resolveShiftAction({ event: "You're online" }), { action: 'START' });
+  assertEquals(resolveShiftAction({ event: 'Vous êtes en ligne' }), { action: 'START' });
+  assertEquals(resolveShiftAction({ event: 'Started driving' }), { action: 'START' });
+});
+
+Deno.test('resolveShiftAction: Lyft offline wording maps to STOP/OFFLINE (EN + FR)', () => {
+  assertEquals(resolveShiftAction({ event: "You're offline" }), {
+    action: 'STOP',
+    stopReason: 'OFFLINE',
+  });
+  assertEquals(resolveShiftAction({ event: 'Vous êtes hors ligne' }), {
+    action: 'STOP',
+    stopReason: 'OFFLINE',
+  });
+});
+
+Deno.test('resolveShiftAction: the 12h-limit wording wins over the offline wording it contains', () => {
+  // Lyft's own cutoff notification mentions both — it must not be recorded as
+  // a plain voluntary offline.
+  for (const text of [
+    "You've reached the 12-hour limit — you're now offline",
+    '12 hour driving limit reached',
+    'Tu as atteint la limite de 12 h, tu es hors ligne',
+    'limite de 12h atteinte',
+  ]) {
+    assertEquals(
+      resolveShiftAction({ event: text }),
+      { action: 'STOP', stopReason: 'HOURS_LIMIT' },
+      text
+    );
+  }
+});
+
+Deno.test('resolveShiftAction: accepts a bare verb sent through event', () => {
+  assertEquals(resolveShiftAction({ event: 'heartbeat' }), { action: 'HEARTBEAT' });
+  assertEquals(resolveShiftAction({ event: 'STATUS' }), { action: 'STATUS' });
+  assertEquals(resolveShiftAction({ event: '  status  ' }), { action: 'STATUS' });
+});
+
+Deno.test('resolveShiftAction: unrecognized text resolves to null, never a default START', () => {
+  // A promo push ("Earn $12 more with 3 rides!") must not open a phantom shift.
+  assertEquals(resolveShiftAction({ event: 'Earn $12 more with 3 rides!' }), null);
+  assertEquals(resolveShiftAction({ event: '' }), null);
+  assertEquals(resolveShiftAction({ event: '   ' }), null);
+  assertEquals(resolveShiftAction({}), null);
+  assertEquals(resolveShiftAction({ action: 'DELETE' }), null);
+  assertEquals(resolveShiftAction({ event: 42 }), null);
 });

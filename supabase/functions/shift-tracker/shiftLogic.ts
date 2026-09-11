@@ -71,3 +71,82 @@ export function parseAmount(value: unknown): number | null {
   const amount = Number(value);
   return Number.isFinite(amount) && amount > 0 ? amount : null;
 }
+
+// ── MacroDroid notification-text → action ────────────────────────────────────
+// MacroDroid's natural trigger on Android is "Notification Received" on
+// com.lyft.android.driver, and what it can forward is the notification's own
+// text — not a normalized verb. Requiring the macro to send
+// action: 'START' means hand-authoring one HTTP action per trigger and keeping
+// the mapping in the macro (where it is invisible to this repo, untestable,
+// and silently breaks when Lyft rewords a string). Accepting the raw text here
+// instead keeps a single MacroDroid HTTP action —
+//   { "event": "{notification_text}", "timestamp": "{system_time_iso}" }
+// — and puts the wording-to-verb mapping under test in this file.
+//
+// Lyft Driver ships both locales on a QC device depending on the app language,
+// so each pattern carries its FR wording too.
+
+/** Why a shift ended, when the caller told us. Recorded on the session so a
+ * 12h-limit cutoff is distinguishable from the driver simply going offline. */
+export const STOP_REASONS = ['OFFLINE', 'HOURS_LIMIT'] as const;
+export type StopReason = (typeof STOP_REASONS)[number];
+
+export interface ResolvedAction {
+  action: ShiftAction;
+  /** Only meaningful for STOP. */
+  stopReason?: StopReason;
+}
+
+// Order matters: the first match wins, and the 12h-limit wording is checked
+// before the generic offline patterns because Lyft's own cutoff notification
+// ("You've reached the 12-hour limit — you're now offline") contains both.
+const EVENT_PATTERNS: readonly { pattern: RegExp; resolved: ResolvedAction }[] = [
+  // "12-hour limit", "12 hour driving limit", "limite de 12 h", "limite de 12h"
+  {
+    pattern: /\b12\s*[-\s]?\s*(hour|heures?|h)\b|limite\s+de\s+12/i,
+    resolved: { action: 'STOP', stopReason: 'HOURS_LIMIT' },
+  },
+  // Checked before /online/ so "You're offline" can't be read as online —
+  // substring-wise it cannot, but "hors ligne" vs "en ligne" both contain
+  // "ligne", so the FR pair genuinely needs the ordering.
+  {
+    pattern: /\boffline\b|hors\s+ligne|\bstopped\s+driving\b/i,
+    resolved: { action: 'STOP', stopReason: 'OFFLINE' },
+  },
+  {
+    pattern: /\bonline\b|en\s+ligne|\bstart(ed)?\s+driving\b/i,
+    resolved: { action: 'START' },
+  },
+  // Lyft has no "heartbeat" notification; this covers a macro wired to a
+  // periodic timer trigger posting its own keyword instead of a notification.
+  { pattern: /\bheartbeat\b|\bping\b/i, resolved: { action: 'HEARTBEAT' } },
+];
+
+/**
+ * Resolves the action for a request body that may carry either an explicit
+ * `action` (the PWA, or a macro authored the verbose way) or a raw `event`
+ * string lifted from an Android notification. An explicit action always wins
+ * — never second-guess a caller that already said what it wants.
+ *
+ * Returns null when neither yields a known action, so the caller can answer
+ * 400 rather than guessing (a silent default of START on an unrecognized
+ * notification would open phantom shifts every time Lyft pushes a promo).
+ */
+export function resolveShiftAction(body: {
+  action?: unknown;
+  event?: unknown;
+}): ResolvedAction | null {
+  if (isShiftAction(body.action)) return { action: body.action };
+
+  const text = typeof body.event === 'string' ? body.event : '';
+  if (!text.trim()) return null;
+
+  // A macro may also be wired to send the verb through `event` directly.
+  const upper = text.trim().toUpperCase();
+  if (isShiftAction(upper)) return { action: upper };
+
+  for (const { pattern, resolved } of EVENT_PATTERNS) {
+    if (pattern.test(text)) return resolved;
+  }
+  return null;
+}
