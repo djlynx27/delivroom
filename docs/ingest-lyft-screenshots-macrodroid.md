@@ -177,7 +177,7 @@ vérifié champ par champ (jamais deviné) :
 |---|---|---|
 | **Lyft Overlay Show** | Application Launched → `com.lyft.android.driver` + Intent Received → `com.delivroom.SHOW_OVERLAY` | **Enable macro** "Lyft Overlay Button" |
 | **Lyft Overlay Hide** | Application Closed → `com.lyft.android.driver` | **Disable macro** "Lyft Overlay Button" |
-| **Lyft Overlay Button** (désactivée par défaut, `m_enabled: false`) | Floating Button (icône/position par défaut) | Launch App → `app.delivroom.driver` (TWA package) |
+| **Lyft Overlay Button** (désactivée par défaut, `m_enabled: false`) | Floating Button (icône/position par défaut) | Send Intent `ACTION_VIEW` → `https://delivroom.vercel.app/drive` (voir §9.2 — remplace l'ancien Launch App sur `app.delivroom.driver`, paquet **non installé** sur le device) |
 
 Schéma JSON maintenant vérifié pour de bon (utile pour la prochaine fois) :
 - `ApplicationLaunchedTrigger` sert aussi pour "Application Closed" —
@@ -424,3 +424,91 @@ action manuelle pendant un shift.
 
 Le bridge, `scrape_lyft_metrics.py` et `ingest-lyft-screenshots` restent
 exactement les mêmes qu'en §7 — seul le trigger MacroDroid change.
+
+## 9. Diagnostic overlay / "Nearby drivers ne s'est pas déclenché" (2026-09-11)
+
+Trois confusions fréquentes à éliminer avant tout diagnostic terrain — les
+deux premières sont des faits vérifiables dans ce repo, la troisième dans
+`CLAUDE.md` :
+
+1. **Le bouton flottant MacroDroid ne déclenche PAS la capture Nearby
+   drivers.** `Lyft Overlay Button` a une seule action : ouvrir Delivroom
+   (§9.2). La capture Nearby drivers vient de la macro *Lyft 3 Functions*
+   (tap (75,1038) → sheet "Maximise your earnings" → attente 3.5s →
+   screenshot → GPS → POST vers `ingest-lyft-screenshots`), ou du bridge PC
+   (§7). Aucun lien entre les deux.
+2. **Rien ne surveille le dossier Screenshots.** Il n'existe aucune
+   ingestion par watch-folder dans ce repo : `ingest-lyft-screenshots` est
+   un webhook HTTP, point. Prendre un screenshot Android standard (paume /
+   Volume-bas+Power) pendant l'écran Nearby drivers **ne produit aucune
+   ingestion**. Aucune intégration AutoBoy n'existe non plus.
+3. **La caméra noire et l'icône bleue `m` de la pile de droite sont des
+   overlays Maxymo** (`com.tech.gm.pegasusdriver`, nom de paquet trompeur —
+   voir `CLAUDE.md`), pas MacroDroid.
+
+### 9.1 Pourquoi aucun bouton MacroDroid n'apparaît sur l'écran Lyft
+
+`Lyft Overlay Button` est livrée `m_enabled: false` **par design** : le
+bouton n'existe que si `Lyft Overlay Show` l'active. Or ce trigger
+`Application Launched` passe par le Service d'Accessibilité MacroDroid —
+exactement le service qu'Android révoque silencieusement via "Restricted
+Settings" (root cause documentée le 2026-09-04 plus haut). Chaîne de
+défaillance : accessibilité révoquée → `Application Launched` ne fire jamais
+→ `Lyft Overlay Button` reste désactivée → **aucun bouton, et aucune erreur
+visible nulle part**.
+
+Ordre de vérification (ne pas inverser) :
+
+| # | Vérification | Piège |
+|---|---|---|
+| 1 | Écran réel `Paramètres → Accessibilité → Installed apps → MacroDroid` : les **deux** toggles (`MacroDroid` + `MacroDroid UI Interaction`) sur On | `settings get secure enabled_accessibility_services` et `dumpsys accessibility` (`Enabled services`) mentent — seul `Bound services` / l'écran réel comptent. Ré-activation = vrai doigt requis (anti-tapjacking) |
+| 2 | `Lyft Overlay Show` et `Lyft Overlay Hide` : toggle macro vert | — |
+| 3 | `Lyft Overlay Button` : attendue **grise** hors Lyft, verte avec Lyft au premier plan | verte en permanence = `Lyft Overlay Hide` cassée ; grise avec Lyft ouvert = étape 1 |
+| 4 | Draw over other apps autorisé pour MacroDroid | — |
+| 5 | Position du bouton : `xLocation: 0 / yLocation: 0` = coin haut-gauche, sous la status bar | peut être jugé "absent" alors qu'il est simplement derrière l'UI Lyft. Le déplacer une fois suffit, MacroDroid persiste la position |
+
+**Ne jamais `adb shell am force-stop com.arlosoft.macrodroid`** : ça tue le
+process hôte des services d'accessibilité et Android les redésactive — on
+retombe à l'étape 1.
+
+### 9.2 Bug corrigé : le bouton lançait un paquet non installé
+
+`Lyft Overlay Button` utilisait `LaunchActivityAction` →
+`launchByPackageName: "app.delivroom.driver"`. Ce paquet TWA **n'est pas
+installé** sur le S23 Ultra : Delivroom y tourne en WebAPK Chrome
+(`org.chromium.webapk.a723e1524e8ac6908_v2`, voir `CLAUDE.md`). Le bouton,
+même visible et activé, était donc un no-op silencieux.
+
+Remplacé par un `SendIntentAction` (schéma repris tel quel de l'export
+device-vérifié `scripts/Lyft_GPS_Google_Maps.macro`, aucun champ deviné) :
+`ACTION_VIEW` sur `https://delivroom.vercel.app/drive`, `m_packageName`
+laissé vide. Le host est celui du `assetlinks.json` / `twa-manifest.json`
+vérifié, donc le app-link route directement vers l'app installée sans
+sélecteur (même mécanisme que §1 de `docs/navigate-deeplink-macrodroid.md`).
+Ne **pas** hardcoder le paquet WebAPK à la place : son suffixe est dérivé du
+hash du manifest et change à chaque modif de `public/manifest.json`.
+
+⚠️ **Application sur le device : édition live obligatoire.** L'import du
+`.macro` corrigé ne remplacera pas la macro existante — MacroDroid matche par
+`m_GUID` et rouvre l'originale (limite documentée plus haut). Et changer le
+`m_GUID` du fichier casserait les références de `Lyft Overlay Show`/`Hide`
+(`getByName: false` → match par GUID). Donc : ouvrir `Lyft Overlay Button`
+dans l'éditeur, supprimer l'action Launch App, ajouter Send Intent avec les
+valeurs ci-dessus, puis ré-exporter et vérifier `m_isDisabled` sur chaque
+action/trigger avant de considérer le fix terminé.
+
+### 9.3 Récupération automatique déjà en place
+
+`scripts/server.py` (heartbeat) poll `dumpsys window` : Lyft au premier plan
++ aucune fenêtre `com.arlosoft.macrodroid` → broadcast
+`com.delivroom.SHOW_OVERLAY`, qui est un vrai trigger `Intent Received` sur
+`Lyft Overlay Show`. Ça ne marche que si `server.py` tourne sur le PC et que
+l'appareil est joignable en ADB. Ça ne répare pas l'accessibilité révoquée
+(étape 1) — seulement un overlay tombé alors que le service tourne encore.
+
+### 9.4 Si la capture Nearby drivers ne remonte rien
+
+Le blocker connu est côté facturation, pas côté device : crédits prépayés
+Gemini épuisés → `429 RESOURCE_EXHAUSTED` → `502` renvoyé à MacroDroid
+(section "Bloqueur restant" plus haut). Vérifier les `function_logs` de
+`ingest-lyft-screenshots` avant de toucher à la macro.
