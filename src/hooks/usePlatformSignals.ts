@@ -8,6 +8,7 @@ export type Platform =
   | 'doordash'
   | 'skipthedishes'
   | 'hypra'
+  | 'imoove'
   | 'uber'
   | 'other';
 
@@ -42,6 +43,7 @@ export const PLATFORM_META: Record<
     color: 'text-orange-400',
   },
   hypra: { label: 'Hypra Pro S', emoji: '🔵', color: 'text-blue-400' },
+  imoove: { label: 'Imoove', emoji: '🟢', color: 'text-emerald-400' },
   uber: { label: 'Uber', emoji: '⚫', color: 'text-zinc-300' },
   other: { label: 'Autre', emoji: '⚪', color: 'text-muted-foreground' },
 };
@@ -135,6 +137,13 @@ const HOURLY_BIAS: Record<Platform, number[]> = {
     1.0, 1.2, 1.5, 0.5, 0.2, 0.3, 0.5, 0.8, 1.0, 1.0, 1.0, 0.9, 0.9, 1.0, 1.1,
     1.2, 1.4, 1.5, 1.4, 1.3, 1.3, 1.5, 1.7, 1.3,
   ],
+  // No measured Imoove data yet -- cloned from hypra (same traditional taxi
+  // dispatch pattern), mirrors platform-signal-collector/index.ts's server
+  // side fallback. Revisit once real signals accumulate.
+  imoove: [
+    1.0, 1.2, 1.5, 0.5, 0.2, 0.3, 0.5, 0.8, 1.0, 1.0, 1.0, 0.9, 0.9, 1.0, 1.1,
+    1.2, 1.4, 1.5, 1.4, 1.3, 1.3, 1.5, 1.7, 1.3,
+  ],
   uber: [
     1.1, 1.3, 1.5, 0.5, 0.2, 0.3, 0.6, 0.9, 1.1, 1.0, 1.0, 0.9, 0.9, 1.0, 1.0,
     1.1, 1.3, 1.4, 1.3, 1.2, 1.2, 1.3, 1.5, 1.3,
@@ -150,6 +159,7 @@ const SURGE_THRESHOLD: Record<Platform, number> = {
   doordash: 8.65,
   skipthedishes: 8.95,
   hypra: 8.18,
+  imoove: 8.18,
   uber: 8.0,
   other: 9.0,
 };
@@ -158,7 +168,13 @@ export function inferPlatformSignalsClientSide(
   zoneScore: number,
   nowHour: number
 ): PlatformSignal[] {
-  const platforms: Platform[] = ['lyft', 'doordash', 'skipthedishes', 'hypra'];
+  const platforms: Platform[] = [
+    'lyft',
+    'doordash',
+    'skipthedishes',
+    'hypra',
+    'imoove',
+  ];
   return platforms
     .map((platform) => {
       const bias = (HOURLY_BIAS[platform] ?? [])[nowHour] ?? 1.0;

@@ -89,6 +89,19 @@ const PLATFORM_PROFILES: Record<
     ],
     surgePropensity: 0.6,
   },
+  // No measured Imoove signal data yet -- cloned from hypra (traditional
+  // taxi dispatch, closer to Imoove than the Lyft rideshare pattern) as a
+  // starting estimate. Revisit once real screenshots/signals accumulate.
+  imoove: {
+    label: 'Imoove',
+    hourlyBias: [
+      // 00  01  02  03  04  05  06  07  08  09  10  11
+      1.0, 1.2, 1.5, 0.5, 0.2, 0.3, 0.5, 0.8, 1.0, 1.0, 1.0, 0.9,
+      // 12  13  14  15  16  17  18  19  20  21  22  23
+      0.9, 1.0, 1.1, 1.2, 1.4, 1.5, 1.4, 1.3, 1.3, 1.5, 1.7, 1.3,
+    ],
+    surgePropensity: 0.6,
+  },
 };
 
 const SUPPORTED_PLATFORMS = Object.keys(PLATFORM_PROFILES);
