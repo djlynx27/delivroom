@@ -353,7 +353,7 @@ async function geminiEnhanceScores(
 Heure: ${hour}h (${dayName})
 Météo: ${weather.description}, ${weather.temp}°C, précipitations=${weather.precip}mm
 
-Zones à scorer (40 zones):
+Zones à scorer (${zones.length} zones):
 ${zoneList}
 
 Pour CHAQUE zone, ajuste le score en tenant compte de:
@@ -374,8 +374,9 @@ Réponds UNIQUEMENT avec un JSON valide sans markdown, format exact:
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.2,
-            maxOutputTokens: 2048,
+            maxOutputTokens: 4096,
             responseMimeType: 'application/json',
+            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
       }
