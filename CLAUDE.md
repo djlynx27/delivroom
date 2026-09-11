@@ -16,7 +16,27 @@ Ce fichier est lu automatiquement par Claude Code à chaque session.
 
 ### Territoires
 
-Montréal, Laval, Longueuil/Rive-Sud — 61 zones actives
+Montréal, Laval, Longueuil/Rive-Sud, Rive-Nord (Terrebonne, Blainville,
+Repentigny/Rosemère, Sainte-Thérèse), Boucherville — **70 zones** en DB
+(vérifié 2026-09-11 via `list_tables`/`execute_sql`, corrige l'ancien
+chiffre de 61 qui datait). Répartition : mtl 28, lvl 14, lng 13, trb 5,
+blv/rsm/sth 3 chacune, bsb 1 (Boucherville — un seul point pour toute la
+ville, densité la plus faible du dataset avec Longueuil qui a le plus
+grand écart moyen entre zones, ~2.9km).
+
+**Architecture spatiale — pas de PostGIS.** `zones` n'a que
+`latitude`/`longitude` (un point par zone), aucune colonne géométrie et
+l'extension `postgis` n'est pas installée sur le projet Supabase (visible
+dans `list_extensions`, `installed_version: null`). La résolution
+"quelle zone" se fait **côté client**, par plus-proche-voisin (Haversine),
+voir `haversineKm`/`haversineMeters` dans `useUserLocation.ts` et
+`scripts/lib/geo.ts`. Conséquence : pas de "trou de geofence" possible au
+sens polygone — chaque point du globe a toujours une zone "la plus
+proche" — donc tout lookup nearest-neighbor doit avoir un plafond de
+distance explicite pour éviter un faux match lointain (`MAX_GPS_ZONE_KM`
+dans `tripSave.ts` = 25km, réutilisé par `findNearestZone` dans
+`useNotifications.ts`). N'importe quel futur nearest-neighbor sur `zones`
+doit suivre ce pattern plutôt que ré-introduire un lookup sans plafond.
 
 ### Plateformes chauffeur
 
