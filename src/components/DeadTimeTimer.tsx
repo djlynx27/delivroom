@@ -1,4 +1,5 @@
 import { useActivityDetection } from '@/hooks/useActivityDetection';
+import { triggerZoneIdlePush } from '@/lib/zoneIdlePush';
 import { AlertTriangle, Pause, Timer } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
@@ -6,6 +7,11 @@ import { useEffect, useRef, useState } from 'react';
 // state transition) rather than a real dead-time streak — clamp to 00:00
 // instead of showing a five-figure minute count.
 const MAX_DEAD_TIME_MS = 24 * 60 * 60 * 1000;
+
+// Separate, higher bar than the in-app yellow warning (10 min) — a push
+// notification reaches the driver even with Delivroom backgrounded, so it
+// warrants more certainty that this isn't just a red light or a quick stop.
+const PUSH_ALERT_THRESHOLD_MINS = 15;
 
 interface TimerState {
   startedAt: number | null;
@@ -78,6 +84,10 @@ export function DeadTimeTimer({ nearestZoneName, libreMode = true }: Props) {
   const [elapsed, setElapsed] = useState(0);
   const { activity } = useActivityDetection();
   const prevLibreRef = useRef(libreMode);
+  // Tracks whether the push already fired for the CURRENT dead-time streak —
+  // cleared alongside state so a fresh streak (new libre period) can alert
+  // again, but a single long streak never spams more than one push.
+  const pushSentRef = useRef(false);
 
   // Reset to exactly 0 the instant libreMode flips true; hide (and drop any
   // running segment) the instant it flips false — no cross-status carryover.
@@ -85,6 +95,7 @@ export function DeadTimeTimer({ nearestZoneName, libreMode = true }: Props) {
     if (libreMode === prevLibreRef.current) return;
     prevLibreRef.current = libreMode;
     setState(initialState(libreMode));
+    pushSentRef.current = false;
   }, [libreMode]);
 
   // Pause or resume based on detected movement, only while actually libre —
@@ -122,6 +133,18 @@ export function DeadTimeTimer({ nearestZoneName, libreMode = true }: Props) {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [state, libreMode]);
+
+  // Fires the background-reachable push once per streak, the instant this
+  // tab is foregrounded and observes the threshold crossed — it can't detect
+  // the crossing while itself backgrounded (Chrome throttles timers in a
+  // hidden tab), so this covers "glanced away, comes back 5 min later" not
+  // "never reopened the app during the idle window."
+  useEffect(() => {
+    if (!libreMode || state.paused || pushSentRef.current) return;
+    if (formatMinutes(elapsed).mins < PUSH_ALERT_THRESHOLD_MINS) return;
+    pushSentRef.current = true;
+    void triggerZoneIdlePush(nearestZoneName ?? null);
+  }, [elapsed, libreMode, state.paused, nearestZoneName]);
 
   if (!libreMode) return null;
 

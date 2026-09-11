@@ -18,7 +18,13 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from 'react';
-import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
+import {
+  BrowserRouter,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from 'react-router-dom';
 import { toast } from 'sonner';
 
 const DriveScreen = lazy(() => import('@/pages/DriveScreen'));
@@ -171,8 +177,32 @@ class AppErrorBoundary extends Component<
   }
 }
 
+const COLD_START_KEY = 'delivroom-cold-start-redirected';
+
+// Chrome/the WebAPK often resumes a backgrounded PWA on whatever URL was
+// last visited rather than start_url ("/") -- normal browser behavior, but
+// a driver glancing at the app mid-shift wants zones/scoring, not wherever
+// they left off. Redirects once per fresh JS context (sessionStorage flag,
+// not persisted) so it never fights the driver's own in-app navigation
+// afterward.
+function useColdStartRedirect(pathname: string) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    if (typeof sessionStorage === 'undefined') return;
+    if (sessionStorage.getItem(COLD_START_KEY)) return;
+    sessionStorage.setItem(COLD_START_KEY, '1');
+    if (pathname !== '/' && pathname !== '/drive') {
+      navigate('/drive', { replace: true });
+    }
+    // Intentionally runs once per session only -- pathname is read from the
+    // closure at that first mount, not tracked as a dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
 function AppContent() {
   const location = useLocation();
+  useColdStartRedirect(location.pathname);
   const { status: authStatus, error: authError } = useAnonAuth();
   // Hide NearestHotspot on Today screen since hero card already shows best zone + distance
   const showNearestHotspot =
