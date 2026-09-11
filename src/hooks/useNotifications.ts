@@ -1,6 +1,7 @@
 import type { useDemandScores } from '@/hooks/useDemandScores';
 import type { Zone } from '@/hooks/useSupabase';
 import { haversineKm, type UserLocationResult } from '@/hooks/useUserLocation';
+import { MAX_GPS_ZONE_KM } from '@/lib/tripSave';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const NOTIF_COOLDOWN_MS = 15 * 60_000; // 15 min per notification type
@@ -175,6 +176,11 @@ async function sendNotification(title: string, body: string, url?: string) {
   new Notification(title, { body, icon: '/pwa-icon-192.png' });
 }
 
+// No cap == a mis-geocoded event (or one genuinely outside the Delivroom
+// territory) would still resolve to whatever zone is technically closest,
+// and the "positionne-toi près de X" push notification would send a driver
+// toward a zone that's actually 100+ km away. Same MAX_GPS_ZONE_KM sanity
+// radius tripSave.ts already uses for GPS-fix zone matching.
 export function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone | null {
   let best: Zone | null = null;
   let bestDist = Infinity;
@@ -185,7 +191,7 @@ export function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone |
       best = z;
     }
   }
-  return best;
+  return bestDist <= MAX_GPS_ZONE_KM ? best : null;
 }
 
 type DemandScoresResult = ReturnType<typeof useDemandScores>;
