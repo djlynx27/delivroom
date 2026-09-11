@@ -28,6 +28,7 @@ import { SurgeIndicator } from '@/components/SurgeIndicator';
 import { TacticalSpotBadge } from '@/components/TacticalSpotBadge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { OfflineBadge } from '@/components/OfflineBadge';
 import { WeeklyGoalDisplay } from '@/components/WeeklyGoal';
 import { useI18n } from '@/contexts/I18nContext';
 import { useActivityDetection } from '@/hooks/useActivityDetection';
@@ -574,6 +575,7 @@ export default function DriveScreen() {
               : undefined
           }
         />
+        <OfflineBadge className="mt-2" />
       </div>
 
       {/* Shift tally — running $/h based on actual fares logged today */}
