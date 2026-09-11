@@ -19,7 +19,19 @@ export const DEPRECIATION_PER_KM = 0.08; // CRA class 10 declining-balance appro
 
 // Below this net $/h, a shift is losing money against the effort — flagged
 // in the UI rather than baked into a "good/bad" verdict.
-export const MIN_VIABLE_NET_PER_HOUR = 29;
+export const MIN_VIABLE_NET_PER_HOUR = 22;
+// Above this net $/h, the shift is comfortably profitable — the gap between
+// this and MIN_VIABLE_NET_PER_HOUR is the "covering costs but not great" zone.
+export const GOOD_NET_PER_HOUR = 28;
+
+export type NetRateStatus = 'good' | 'warn' | 'bad';
+
+export function getNetRateStatus(netHourlyRate: number | null): NetRateStatus {
+  if (netHourlyRate == null) return 'warn';
+  if (netHourlyRate >= GOOD_NET_PER_HOUR) return 'good';
+  if (netHourlyRate >= MIN_VIABLE_NET_PER_HOUR) return 'warn';
+  return 'bad';
+}
 
 export function readShiftTarget(): number {
   if (typeof localStorage === 'undefined') return DEFAULT_SHIFT_TARGET;
@@ -122,6 +134,10 @@ export interface ShiftStats {
   netHourlyRate: number | null;
   /** Net $/km = netFare / totalKm. */
   netPerKm: number | null;
+  /** % of wall time NOT spent on a paying ride (positioning/waiting/deadhead).
+   * 100 * (1 - activeHours / wallHours). Null before there's enough wall
+   * time to make the ratio meaningful. */
+  deadTimePct: number | null;
 }
 
 export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
@@ -140,6 +156,7 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
       netFare: 0,
       netHourlyRate: null,
       netPerKm: null,
+      deadTimePct: null,
     };
   }
 
@@ -162,5 +179,9 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
     netFare,
     netHourlyRate: wallHours > 0.05 ? netFare / wallHours : null,
     netPerKm: totalKm > 0 ? netFare / totalKm : null,
+    deadTimePct:
+      wallHours > 0.05
+        ? Math.max(0, Math.min(100, 100 * (1 - activeHours / wallHours)))
+        : null,
   };
 }

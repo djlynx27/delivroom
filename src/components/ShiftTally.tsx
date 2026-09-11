@@ -3,13 +3,14 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import {
   computeStats,
+  getNetRateStatus,
   loadShift,
-  MIN_VIABLE_NET_PER_HOUR,
+  type NetRateStatus,
   readShiftTarget,
   resetShift,
   writeShiftTarget,
 } from '@/lib/shiftTracker';
-import { Clock, DollarSign, MapPin, RotateCcw, TrendingUp } from 'lucide-react';
+import { Clock, DollarSign, Gauge, MapPin, RotateCcw, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 /**
@@ -43,9 +44,9 @@ export function ShiftTally() {
     return null; // Don't take up screen space before the first ride
   }
 
-  const netLow =
-    stats.netHourlyRate != null && stats.netHourlyRate < MIN_VIABLE_NET_PER_HOUR;
-  const pacingPct = target > 0 ? Math.min(100, (stats.netFare / target) * 100) : 0;
+  const netRateStatus =
+    stats.netHourlyRate != null ? getNetRateStatus(stats.netHourlyRate) : 'good';
+  const deadheadHigh = stats.deadTimePct != null && stats.deadTimePct >= 40;
 
   return (
     <Card className="bg-card border-border">
@@ -92,55 +93,101 @@ export function ShiftTally() {
             value={stats.wallHours.toFixed(1)}
           />
         </div>
-        <div className="grid grid-cols-2 gap-1 text-center">
+        <div className="grid grid-cols-3 gap-1 text-center">
           <Stat
             icon={<TrendingUp className="w-3 h-3" />}
             label="$/h net"
             value={stats.netHourlyRate != null ? `$${stats.netHourlyRate.toFixed(0)}` : '—'}
             emphasis
-            warn={netLow}
+            status={stats.netHourlyRate != null ? netRateStatus : undefined}
           />
           <Stat
             icon={<MapPin className="w-3 h-3" />}
             label="$/km net"
             value={stats.netPerKm != null ? `$${stats.netPerKm.toFixed(2)}` : '—'}
           />
+          <Stat
+            icon={<Gauge className="w-3 h-3" />}
+            label="Temps mort"
+            value={stats.deadTimePct != null ? `${stats.deadTimePct.toFixed(0)}%` : '—'}
+            emphasis={deadheadHigh}
+            status={deadheadHigh ? 'bad' : undefined}
+          />
         </div>
-        <div className="flex items-center gap-2 pt-1">
-          <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-            <div
-              className={`h-full rounded-full ${netLow ? 'bg-destructive' : 'bg-green-400'}`}
-              style={{ width: `${pacingPct}%` }}
-            />
-          </div>
-          {editingTarget ? (
-            <input
-              autoFocus
-              type="number"
-              inputMode="numeric"
-              defaultValue={target}
-              className="w-14 h-5 text-[10px] font-mono bg-white/5 border border-border rounded px-1 text-right"
-              onBlur={(e) => {
-                const next = Number(e.target.value);
-                if (Number.isFinite(next) && next > 0) {
-                  setTarget(next);
-                  writeShiftTarget(next);
-                }
-                setEditingTarget(false);
-              }}
-            />
-          ) : (
-            <button
-              className="text-[10px] font-mono text-muted-foreground whitespace-nowrap"
-              onClick={() => setEditingTarget(true)}
-              title="Modifier l'objectif"
-            >
-              ${stats.netFare.toFixed(0)}/${target.toFixed(0)}
-            </button>
-          )}
-        </div>
+        <TargetPacingBar
+          netFare={stats.netFare}
+          target={target}
+          netRateStatus={netRateStatus}
+          editingTarget={editingTarget}
+          setEditingTarget={setEditingTarget}
+          onTargetChange={(next) => {
+            setTarget(next);
+            writeShiftTarget(next);
+          }}
+        />
       </CardContent>
     </Card>
+  );
+}
+
+const PACING_BAR_COLOR: Record<NetRateStatus, string> = {
+  good: 'bg-green-400',
+  warn: 'bg-amber-400',
+  bad: 'bg-destructive',
+};
+
+interface TargetPacingBarProps {
+  netFare: number;
+  target: number;
+  netRateStatus: NetRateStatus;
+  editingTarget: boolean;
+  setEditingTarget: (editing: boolean) => void;
+  onTargetChange: (next: number) => void;
+}
+
+function TargetPacingBar({
+  netFare,
+  target,
+  netRateStatus,
+  editingTarget,
+  setEditingTarget,
+  onTargetChange,
+}: TargetPacingBarProps) {
+  const pacingPct = target > 0 ? Math.min(100, (netFare / target) * 100) : 0;
+
+  return (
+    <div className="flex items-center gap-2 pt-1">
+      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+        <div
+          className={`h-full rounded-full ${PACING_BAR_COLOR[netRateStatus]}`}
+          style={{ width: `${pacingPct}%` }}
+        />
+      </div>
+      {editingTarget ? (
+        <input
+          autoFocus
+          type="number"
+          inputMode="numeric"
+          defaultValue={target}
+          className="w-14 h-5 text-[10px] font-mono bg-white/5 border border-border rounded px-1 text-right"
+          onBlur={(e) => {
+            const next = Number(e.target.value);
+            if (Number.isFinite(next) && next > 0) {
+              onTargetChange(next);
+            }
+            setEditingTarget(false);
+          }}
+        />
+      ) : (
+        <button
+          className="text-[10px] font-mono text-muted-foreground whitespace-nowrap"
+          onClick={() => setEditingTarget(true)}
+          title="Modifier l'objectif"
+        >
+          ${netFare.toFixed(0)}/${target.toFixed(0)}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -149,18 +196,24 @@ interface StatProps {
   label: string;
   value: string;
   emphasis?: boolean;
-  warn?: boolean;
+  status?: NetRateStatus;
 }
 
-function Stat({ icon, label, value, emphasis, warn }: StatProps) {
-  const color = warn ? 'text-destructive' : emphasis ? 'text-green-400' : '';
+const STATUS_COLOR: Record<NetRateStatus, string> = {
+  good: 'text-green-400',
+  warn: 'text-amber-400',
+  bad: 'text-destructive',
+};
+
+function Stat({ icon, label, value, emphasis, status }: StatProps) {
+  const color = status ? STATUS_COLOR[status] : emphasis ? 'text-green-400' : '';
   return (
     <div className="space-y-0.5">
       <div className="flex items-center justify-center gap-0.5 text-muted-foreground">
         {icon}
         <span className="text-[9px] uppercase tracking-tight">{label}</span>
       </div>
-      <p className={`font-mono font-bold ${emphasis || warn ? 'text-base' : 'text-sm'} ${color}`}>
+      <p className={`font-mono font-bold ${emphasis || status ? 'text-base' : 'text-sm'} ${color}`}>
         {value}
       </p>
     </div>
