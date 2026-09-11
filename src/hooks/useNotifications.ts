@@ -21,7 +21,7 @@ function base64UrlToUint8Array(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
-function bufferToBase64Url(buffer: ArrayBuffer): string {
+export function bufferToBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (const byte of bytes) {

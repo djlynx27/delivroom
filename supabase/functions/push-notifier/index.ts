@@ -15,6 +15,19 @@ interface PushNotificationPayload {
   body: string;
   url?: string;
   driver_id?: string;
+  /** Exact push_subscriptions.endpoint match — scopes delivery to a single
+   * device instead of every matching row. Used by callers (e.g.
+   * zone-idle-alert) that proxy a client-triggered alert and must never let
+   * that client fan out to every registered driver. */
+  endpoint?: string;
+  /** Must accompany `endpoint`: the subscription's own auth secret
+   * (base64url, from PushSubscription.getKey('auth')) — an endpoint URL
+   * alone isn't provably secret (could leak via logs, a shared device,
+   * etc.), but `auth` is only ever known to the legitimate subscribing
+   * browser and whoever validly registered it, so requiring both proves
+   * the caller actually owns this subscription rather than just having
+   * seen its endpoint somewhere. */
+  auth?: string;
   tag?: string;
 }
 
@@ -84,6 +97,19 @@ serve(async (req) => {
 
     if (payload.driver_id) {
       query = query.eq('driver_id', payload.driver_id);
+    }
+    if (payload.endpoint) {
+      query = query.eq('endpoint', payload.endpoint);
+      // endpoint-scoped calls MUST also prove the auth secret -- see the
+      // field comment above. Without this, an endpoint alone (URL, not
+      // provably secret) would be enough to target a specific device.
+      if (!payload.auth) {
+        return new Response(
+          JSON.stringify({ error: 'auth required alongside endpoint' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      query = query.eq('auth', payload.auth);
     }
 
     const { data, error } = await query;
