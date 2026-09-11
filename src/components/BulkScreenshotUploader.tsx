@@ -910,6 +910,28 @@ export function BulkScreenshotUploader() {
           </div>
         )}
 
+        {/* PWA-on-Android reality check: Chrome for Android ships no File
+            System Access API (no showDirectoryPicker), so there is no handle
+            to persist and no background folder scan to offer — scannerKind()
+            returns 'unsupported' on the very device this app runs on as a
+            WebAPK. Saying so explicitly beats silently hiding the auto-scan
+            block and leaving the driver wondering where it went; the manual
+            import below is the supported path there, and the native APK
+            (Capacitor) is the one that gets true background scanning. */}
+        {kind === 'unsupported' && (
+          <div className="flex items-start gap-2 bg-muted/40 border border-border rounded-md p-2">
+            <AlertCircle className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
+            <div className="text-[10px] text-muted-foreground">
+              <p className="text-foreground font-medium text-xs">Import manuel sur cette plateforme</p>
+              <p>
+                Ce navigateur n'expose pas d'accès dossier persistant — l'auto-scan en arrière-plan
+                n'est disponible que dans l'APK Android. Utilise l'import ci-dessous, ou le partage
+                Android (share sheet) depuis la galerie.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Manual pickers: "Dossier entier" is the raw browser folder picker
             (no handle to persist, no way around the native prompt every
             time — a fundamentally different, one-shot API from the FS
