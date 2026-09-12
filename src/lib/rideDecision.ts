@@ -42,6 +42,21 @@ export interface RideOfferContext {
   /** True during a peak/high-demand window (rush hour, weekend nightlife,
    * an active event) — raises the elastic $/h floor's base. */
   isPeakHour?: boolean;
+  /** Overrides for the dynamic $/km floor below (gas price, consumption,
+   * wear, safety margin) — omit any field to keep its Santa Fe 2018 default. */
+  vehicleCost?: VehicleCostConfig;
+}
+
+export interface VehicleCostConfig {
+  /** CAD per litre of regular gas. Default $1.70. */
+  gasPriceCAD?: number;
+  /** L/100km, city/mixed driving. Default 11.5 (Santa Fe 2018). */
+  consumptionL100km?: number;
+  /** CAD/km for tires, brakes, oil, depreciation. Default $0.12. */
+  wearCostPerKm?: number;
+  /** Multiplier applied to the computed break-even cost to get the strict
+   * floor. Default 2 — see DEFAULT_SAFETY_MARGIN_MULTIPLIER. */
+  safetyMarginMultiplier?: number;
 }
 
 export type Verdict = 'take' | 'skip' | 'meh';
@@ -104,10 +119,32 @@ export function computeElasticHourlyFloor(isPeakHour: boolean, idleMinutes: numb
 // Strict $/km floor (rideshare only) — never crossed regardless of how good
 // $/h looks or how long the driver has been idle: a short, fast, cheap ride
 // can post a great effective hourly rate while still under-compensating the
-// vehicle's real per-km cost (fuel/wear). $0.70/km is deliberately above the
-// Santa Fe 2018's measured ~$0.55-0.60/mi operating cost — a safety margin,
-// not just a break-even line.
-const STRICT_PER_KM_FLOOR_RIDESHARE = 0.7;
+// vehicle's real per-km cost (fuel/wear). Computed dynamically from gas
+// price/consumption/wear (see computeVehicleCostPerKm) rather than a fixed
+// $0.70/km, so a gas price swing moves the floor instead of leaving it stale.
+const DEFAULT_GAS_PRICE_CAD = 1.7;
+const DEFAULT_CONSUMPTION_L_100KM = 11.5; // Santa Fe 2018, ville/mixte
+const DEFAULT_WEAR_COST_PER_KM = 0.12; // pneus, freins, huile, dépréciation
+// The old fixed $0.70/km floor was deliberately ~2x the Santa Fe 2018's
+// measured break-even cost (~$0.32-0.37/km) — a real safety margin, not just
+// a break-even line. Keep that same margin now that the break-even side is
+// computed dynamically, so a gas price drop doesn't silently lower the bar.
+const DEFAULT_SAFETY_MARGIN_MULTIPLIER = 2;
+
+/** Break-even vehicle cost per km: fuel (gasPriceCAD × consumptionL100km ÷ 100) + wear. */
+export function computeVehicleCostPerKm(config: VehicleCostConfig = {}): number {
+  const gasPriceCAD = config.gasPriceCAD ?? DEFAULT_GAS_PRICE_CAD;
+  const consumptionL100km = config.consumptionL100km ?? DEFAULT_CONSUMPTION_L_100KM;
+  const wearCostPerKm = config.wearCostPerKm ?? DEFAULT_WEAR_COST_PER_KM;
+  const fuelCostPerKm = (gasPriceCAD * consumptionL100km) / 100;
+  return round2(fuelCostPerKm + wearCostPerKm);
+}
+
+/** Strict $/km floor: break-even cost × safety margin. */
+export function computeStrictPerKmFloor(config: VehicleCostConfig = {}): number {
+  const margin = config.safetyMarginMultiplier ?? DEFAULT_SAFETY_MARGIN_MULTIPLIER;
+  return round2(computeVehicleCostPerKm(config) * margin);
+}
 
 type ForcedFloorMetrics = { dollarsPerKm: number | null; effectiveHourlyRate: number | null };
 
@@ -131,8 +168,9 @@ function checkForcedFloorSkip(
   // Rideshare: two independent, unconditional floors — either one alone
   // forces a skip, since a great number on the other metric doesn't
   // compensate for undercutting vehicle cost or wasting idle time.
-  if (dpk !== null && dpk < STRICT_PER_KM_FLOOR_RIDESHARE) {
-    return `$/km sous le plancher strict : $${dpk.toFixed(2)}/km < $${STRICT_PER_KM_FLOOR_RIDESHARE.toFixed(2)}/km — coûts véhicule non couverts`;
+  const strictPerKmFloor = computeStrictPerKmFloor(ctx.vehicleCost);
+  if (dpk !== null && dpk < strictPerKmFloor) {
+    return `$/km sous le plancher strict : $${dpk.toFixed(2)}/km < $${strictPerKmFloor.toFixed(2)}/km — coûts véhicule non couverts`;
   }
   const elasticFloor = computeElasticHourlyFloor(ctx.isPeakHour ?? false, ctx.idleMinutes);
   if (eff !== null && eff < elasticFloor) {

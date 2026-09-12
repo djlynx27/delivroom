@@ -1,4 +1,9 @@
-import { computeElasticHourlyFloor, decideRideOffer } from '@/lib/rideDecision';
+import {
+  computeElasticHourlyFloor,
+  computeStrictPerKmFloor,
+  computeVehicleCostPerKm,
+  decideRideOffer,
+} from '@/lib/rideDecision';
 import { describe, expect, it } from 'vitest';
 
 describe('decideRideOffer — floors rideshare (strict $/km + $/hr élastique)', () => {
@@ -79,6 +84,51 @@ describe('decideRideOffer — floors rideshare (strict $/km + $/hr élastique)',
     });
     expect(rideshare.verdict).not.toBe('skip');
     expect(delivery.verdict).toBe('skip');
+  });
+});
+
+describe('computeVehicleCostPerKm / computeStrictPerKmFloor', () => {
+  it('defaults to the Santa Fe 2018 break-even cost ($1.70/L, 11.5L/100km, $0.12/km wear)', () => {
+    expect(computeVehicleCostPerKm()).toBeCloseTo(0.32, 2);
+    expect(computeStrictPerKmFloor()).toBeCloseTo(0.64, 2);
+  });
+
+  it('rises when gas price rises', () => {
+    const cheap = computeVehicleCostPerKm({ gasPriceCAD: 1.5 });
+    const expensive = computeVehicleCostPerKm({ gasPriceCAD: 2.0 });
+    expect(expensive).toBeGreaterThan(cheap);
+  });
+
+  it('applies a custom safety margin multiplier', () => {
+    const floor = computeStrictPerKmFloor({
+      gasPriceCAD: 1.7,
+      consumptionL100km: 11.5,
+      wearCostPerKm: 0.12,
+      safetyMarginMultiplier: 3,
+    });
+    expect(floor).toBeCloseTo(0.32 * 3, 2);
+  });
+});
+
+describe('decideRideOffer with a custom vehicleCost', () => {
+  it('a higher gas price raises the strict $/km floor and can force a skip a default config would accept', () => {
+    // $0.60/km clears the default floor (~$0.63... actually let's pick a
+    // value that clears default but not the expensive-gas floor)
+    const ctx = {
+      earnings: 9,
+      pickupTimeMin: 0,
+      pickupDistKm: 0,
+      rideTimeMin: 10,
+      rideDistKm: 15, // $0.60/km, $54/h
+    };
+    const cheapGas = decideRideOffer({ ...ctx, vehicleCost: { gasPriceCAD: 1.5 } });
+    const expensiveGas = decideRideOffer({
+      ...ctx,
+      vehicleCost: { gasPriceCAD: 3.5, consumptionL100km: 15 },
+    });
+    expect(cheapGas.verdict).not.toBe('skip');
+    expect(expensiveGas.verdict).toBe('skip');
+    expect(expensiveGas.reasoning.join(' ')).toMatch(/plancher strict/);
   });
 });
 
