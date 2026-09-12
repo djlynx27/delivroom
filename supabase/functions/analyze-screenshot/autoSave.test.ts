@@ -4,6 +4,7 @@
 import { assertEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 import {
   autoSaveNotesTag,
+  buildOfferSignalInsert,
   computeEndedAt,
   extractUserIdFromStorageUrl,
   hasAutoSaveConfidence,
@@ -100,4 +101,48 @@ Deno.test('resolveDurationMinutes: sums pickup + ride legs when both are present
 
 Deno.test('computeEndedAt: null when duration is unknown', () => {
   assertEquals(computeEndedAt('2026-09-12T12:00:00Z', null), null);
+});
+
+const OFFER_CARD: AnalysisResult = {
+  matched_zone_id: 'mtl-anjou',
+  extracted_data: {
+    earnings: 14.5,
+    pickup_time_minutes: 3,
+    pickup_distance_km: 1.2,
+    ride_time_minutes: 12,
+    ride_distance_km: 6,
+  },
+};
+
+Deno.test('buildOfferSignalInsert: archives a pre-accept offer card as unknown market signal', () => {
+  const row = buildOfferSignalInsert(OFFER_CARD, 'abc123', 'user-1');
+  assertEquals(row?.driver_id, 'user-1');
+  assertEquals(row?.platform, 'lyft');
+  assertEquals(row?.offer_status, 'unknown');
+  assertEquals(row?.zone_id, 'mtl-anjou');
+  assertEquals(row?.fare_cad, 14.5);
+  assertEquals(row?.pickup_time_min, 3);
+  assertEquals(row?.drive_time_min, 12);
+  assertEquals(row?.content_hash, 'abc123');
+});
+
+Deno.test('buildOfferSignalInsert: null without a content hash to dedup on', () => {
+  assertEquals(buildOfferSignalInsert(OFFER_CARD, undefined, 'user-1'), null);
+});
+
+Deno.test('buildOfferSignalInsert: null without an authenticated caller', () => {
+  assertEquals(buildOfferSignalInsert(OFFER_CARD, 'abc123', null), null);
+});
+
+Deno.test('buildOfferSignalInsert: null when the zone was never catalog-matched', () => {
+  const analysis: AnalysisResult = { extracted_data: OFFER_CARD.extracted_data };
+  assertEquals(buildOfferSignalInsert(analysis, 'abc123', 'user-1'), null);
+});
+
+Deno.test('buildOfferSignalInsert: null for a screenshot with no offer-decomposition fields (not an offer card)', () => {
+  const shiftSummary: AnalysisResult = {
+    matched_zone_id: 'mtl-anjou',
+    extracted_data: { earnings: 40, trips_count: 6 },
+  };
+  assertEquals(buildOfferSignalInsert(shiftSummary, 'abc123', 'user-1'), null);
 });

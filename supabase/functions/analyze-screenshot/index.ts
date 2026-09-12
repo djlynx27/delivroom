@@ -5,6 +5,7 @@ import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
 import {
   autoSaveNotesTag,
+  buildOfferSignalInsert,
   computeEndedAt,
   extractUserIdFromStorageUrl,
   hasAutoSaveConfidence,
@@ -95,6 +96,10 @@ interface RequestBody {
   zone_name?: string;
   auto_zone?: boolean;
   mode?: string;
+  // SHA-256 of the screenshot's bytes, computed client-side (hashFile in
+  // screenshotDedup.ts) — lets recordOfferSignal dedup trips_raw offer rows
+  // the same way the Maxymo CSV importer dedups its own content_hash.
+  content_hash?: string;
 }
 
 interface ZoneRow {
@@ -218,7 +223,36 @@ async function handleRequest(req: Request): Promise<Response> {
     client,
     authUserId
   );
+  await recordOfferSignal(geminiResult.analysis, body.content_hash, client, authUserId);
   return jsonResponse({ analysis: geminiResult.analysis, auto_saved: autoSaved });
+}
+
+/**
+ * Archives every pre-accept offer card as trips_raw market history, whether
+ * or not it was confident enough to also auto-save as a `trips` row above —
+ * see buildOfferSignalInsert's docstring. Best-effort: a failure here must
+ * never surface to the caller, this is pure business intelligence, not the
+ * driver's actual earnings.
+ */
+async function recordOfferSignal(
+  analysis: AnalysisResult,
+  contentHash: string | undefined,
+  client: SupabaseClient | null,
+  authUserId: string | null,
+): Promise<void> {
+  const row = buildOfferSignalInsert(analysis, contentHash, authUserId);
+  if (!client || !row) return;
+  // A plain insert, not upsert: trips_raw_driver_content_hash_unique is a
+  // PARTIAL index (WHERE content_hash IS NOT NULL) — PostgREST's onConflict
+  // can't target a partial index (same reason MaxymoCsvImporter pre-filters
+  // existing hashes itself instead of upserting). A re-analyzed duplicate
+  // screenshot just hits the unique violation (23505), which we swallow here
+  // — that also means we never clobber a status the bulk-import correlation
+  // already flipped to 'accepted' back down to 'unknown'.
+  const { error } = await client.from('trips_raw').insert(row);
+  if (error && error.code !== '23505') {
+    console.error('analyze-screenshot: offer signal insert failed', error);
+  }
 }
 
 /** Same JWT-verification pattern as promote-discovery/index.ts: forward the

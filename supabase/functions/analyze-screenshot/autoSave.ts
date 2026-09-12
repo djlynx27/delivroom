@@ -72,3 +72,65 @@ export function autoSaveNotesTag(imageUrl: string): string {
   const objectPath = imageUrl.split('/driver-screenshots/')[1]?.split('?')[0] ?? imageUrl;
   return `Import auto — ${objectPath}`.slice(0, 500);
 }
+
+// Same test hasAutoSaveConfidence's docstring above uses to spot a bare
+// pre-accept offer card: the pickup/ride time+distance decomposition
+// rideDecision.ts's accept/skip agent reads, absent from shift summaries and
+// from confirmed-ride screenshots (Maxymo Trip Tracking overlay).
+function looksLikeOfferCard(d: ExtractedData): boolean {
+  return d.pickup_time_minutes != null || d.ride_time_minutes != null;
+}
+
+export interface TripsRawOfferInsert {
+  driver_id: string;
+  platform: 'lyft';
+  offer_status: 'unknown';
+  started_at: string;
+  zone_id: string;
+  pickup_distance_km: number | null;
+  pickup_time_min: number | null;
+  trip_distance_km: number | null;
+  drive_time_min: number | null;
+  fare_cad: number | null;
+  content_hash: string;
+}
+
+/**
+ * A pre-accept offer card is real-time market intelligence (demand/pricing
+ * signal in this zone, right now) whether the driver went on to accept it or
+ * not — see trips_raw's existing offer_status column, so far only fed by the
+ * Maxymo CSV importer (buildTripsRawInsert in maxymoCsvParsing.ts). This
+ * mirrors that same "raw market history" concept for screenshot-sourced Lyft
+ * offers: every offer card gets archived here as 'unknown' regardless of
+ * hasAutoSaveConfidence, and the bulk-import correlation flips it to
+ * 'accepted' client-side once a corroborating confirmed-ride screenshot shows
+ * up in the same batch (see isSavableAsTrip in bulkImportPipeline.ts). Offers
+ * that never get corroborated simply stay 'unknown' — never guessed as
+ * 'rejected', since a screenshot alone can't distinguish a decline from a
+ * ride confirmed in a separate, not-yet-scanned batch.
+ *
+ * Returns null when this isn't an offer card, or the caller didn't supply
+ * enough to record one (no verified zone, no content hash to dedup on).
+ */
+export function buildOfferSignalInsert(
+  analysis: AnalysisResult,
+  contentHash: string | null | undefined,
+  authUserId: string | null,
+): TripsRawOfferInsert | null {
+  const d = analysis.extracted_data;
+  if (!authUserId || !contentHash || !analysis.matched_zone_id || !d) return null;
+  if (!looksLikeOfferCard(d)) return null;
+  return {
+    driver_id: authUserId,
+    platform: 'lyft',
+    offer_status: 'unknown',
+    started_at: normalizeStartedAt(d.date),
+    zone_id: analysis.matched_zone_id,
+    pickup_distance_km: d.pickup_distance_km ?? null,
+    pickup_time_min: d.pickup_time_minutes ?? null,
+    trip_distance_km: d.ride_distance_km ?? null,
+    drive_time_min: d.ride_time_minutes ?? null,
+    fare_cad: d.earnings ?? null,
+    content_hash: contentHash,
+  };
+}

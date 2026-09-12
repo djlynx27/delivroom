@@ -167,9 +167,9 @@ async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: s
   return { signedUrl: signed.signedUrl, objectPath };
 }
 
-async function analyzeOne(signedUrl: string): Promise<AnalysisResultMinimal | null> {
+async function analyzeOne(signedUrl: string, contentHash: string): Promise<AnalysisResultMinimal | null> {
   const { data, error } = await supabase.functions.invoke('analyze-screenshot', {
-    body: { image_url: signedUrl, auto_zone: true },
+    body: { image_url: signedUrl, auto_zone: true, content_hash: contentHash },
   });
   if (error) throw error;
   return (data as { analysis?: AnalysisResultMinimal })?.analysis ?? null;
@@ -493,7 +493,7 @@ export function BulkScreenshotUploader() {
       updateItem(item.id, { filePath: uploaded.objectPath });
 
       updateItem(item.id, { status: 'analyzing' });
-      const analysis = await analyzeOne(uploaded.signedUrl);
+      const analysis = await analyzeOne(uploaded.signedUrl, contentHash);
 
       await recordUpload({
         contentHash,
@@ -738,6 +738,27 @@ export function BulkScreenshotUploader() {
     updateItemsState((prev) =>
       prev.map((it) => (savedIds.has(it.id) ? { ...it, tripSaved: true } : it)),
     );
+
+    // A saved trip that started life as an offer card (pickup/ride time
+    // decomposition present) has a matching trips_raw 'unknown' row from
+    // analyze-screenshot's recordOfferSignal — flip it to 'accepted' now that
+    // the correlation confirmed it. Best-effort BI bookkeeping: never blocks
+    // or fails the actual trip save above.
+    const acceptedOfferHashes = candidates
+      .filter((it) => savedIds.has(it.id) && it.hash)
+      .filter((it) => {
+        const d = it.analysis?.extracted_data;
+        return d?.pickup_time_minutes != null || d?.ride_time_minutes != null;
+      })
+      .map((it) => it.hash!);
+    if (acceptedOfferHashes.length) {
+      const { error: offerErr } = await supabase
+        .from('trips_raw')
+        .update({ offer_status: 'accepted' })
+        .eq('driver_id', userId)
+        .in('content_hash', acceptedOfferHashes);
+      if (offerErr) console.error('[persistTrips] offer_status update failed:', offerErr);
+    }
 
     const parts = [`${savedIds.size} course(s) sauvegardée(s)`];
     if (skippedAlreadySaved) parts.push(`${skippedAlreadySaved} déjà sauvegardée(s)`);
