@@ -207,8 +207,36 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   await resolveZoneIfNeeded(geminiResult.analysis, body, client, zones);
-  const autoSaved = await autoSaveTripIfConfident(geminiResult.analysis, body.image_url, client);
+  // user_id for auto-save MUST come from the caller's own JWT, never from the
+  // request-supplied image_url — that field is client-controlled and would
+  // let anyone with a valid signed URL for someone else's screenshot (e.g. a
+  // leaked link) attribute an auto-saved trip to that other account (IDOR).
+  const authUserId = await getAuthenticatedUserId(req, env);
+  const autoSaved = await autoSaveTripIfConfident(
+    geminiResult.analysis,
+    body.image_url,
+    client,
+    authUserId
+  );
   return jsonResponse({ analysis: geminiResult.analysis, auto_saved: autoSaved });
+}
+
+/** Same JWT-verification pattern as promote-discovery/index.ts: forward the
+ * caller's own Authorization header to an anon-key client and ask it who
+ * that token belongs to, rather than trusting anything the request body
+ * claims about identity. */
+async function getAuthenticatedUserId(req: Request, env: EnvConfig): Promise<string | null> {
+  if (!env.supabaseUrl) return null;
+  const authHeader = req.headers.get('Authorization') ?? '';
+  if (!authHeader) return null;
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY') ?? env.supabaseServiceKey;
+  if (!anonKey) return null;
+  const anonClient = createClient(env.supabaseUrl, anonKey, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const { data, error } = await anonClient.auth.getUser();
+  if (error || !data?.user) return null;
+  return data.user.id;
 }
 
 /**
@@ -216,26 +244,38 @@ async function handleRequest(req: Request): Promise<Response> {
  * analyze-screenshot → trips), so a shift's earnings land on "Aujourd'hui"
  * without the driver having to open Bulk Upload and click "Tout sauvegarder"
  * mid-shift. Gated by hasAutoSaveConfidence (see autoSave.ts) — anything less
- * confident still waits for the manual review flow. Returns whether a trip
- * was inserted (false = skipped or nothing to save).
+ * confident still waits for the manual review flow. `authUserId` must come
+ * from the caller's verified JWT (getAuthenticatedUserId), never from the
+ * image_url alone — the URL's userId segment is only used as a
+ * belt-and-suspenders cross-check against it. Returns whether a trip was
+ * inserted (false = skipped or nothing to save).
  */
 async function autoSaveTripIfConfident(
   analysis: AnalysisResult,
   imageUrl: string | undefined,
   client: SupabaseClient | null,
+  authUserId: string | null,
 ): Promise<boolean> {
-  if (!client || !imageUrl || !hasAutoSaveConfidence(analysis)) return false;
+  if (!client || !imageUrl || !authUserId || !hasAutoSaveConfidence(analysis)) return false;
   const d = analysis.extracted_data!;
 
-  const userId = extractUserIdFromStorageUrl(imageUrl);
-  if (!userId) return false;
+  // The storage path's own userId segment must agree with the authenticated
+  // caller — a mismatch means this JWT is being used to auto-save a trip
+  // against a screenshot URL that isn't theirs.
+  const urlUserId = extractUserIdFromStorageUrl(imageUrl);
+  if (urlUserId && urlUserId !== authUserId) {
+    console.error('analyze-screenshot: image_url owner does not match authenticated caller, skipping auto-save');
+    return false;
+  }
 
-  // Idempotency: one auto-saved trip per source screenshot — same "tag the
-  // notes field" dedup pattern BulkScreenshotUploader already uses.
+  // Idempotency: one auto-saved trip per (user, source screenshot) — same
+  // "tag the notes field" dedup pattern BulkScreenshotUploader already uses,
+  // scoped to this user so one driver's tag can't preempt another's.
   const notes = autoSaveNotesTag(imageUrl);
   const { data: existing } = await client
     .from('trips')
     .select('id')
+    .eq('user_id', authUserId)
     .eq('notes', notes)
     .maybeSingle();
   if (existing) return false;
@@ -243,7 +283,7 @@ async function autoSaveTripIfConfident(
   const startedAt = normalizeStartedAt(d.date);
   const durationMinutes = resolveDurationMinutes(d);
   const { error } = await client.from('trips').insert({
-    user_id: userId,
+    user_id: authUserId,
     zone_id: analysis.matched_zone_id,
     started_at: startedAt,
     earnings: d.earnings ?? null,
