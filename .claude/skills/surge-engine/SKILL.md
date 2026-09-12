@@ -1,3 +1,8 @@
+---
+name: surge-engine
+description: "Moteur de détection de surge en temps réel (computeSurge, vecteur de contexte 8D pgvector, recherche de similarité historique) pour les zones taxi/gig Montréal. Référence quand on touche src/lib/surgeEngine.ts, context-embeddings, ou le calcul du multiplicateur de surge."
+---
+
 # SKILL.md — surge-engine
 
 ## Domaine
