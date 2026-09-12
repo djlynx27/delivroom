@@ -12,6 +12,7 @@
  */
 import { haversineKm } from '@/hooks/useUserLocation';
 import type { OpenStatus } from '@/lib/gasHours';
+import { computeVehicleCostPerKm, type VehicleCostConfig } from '@/lib/rideDecision';
 
 export type FuelKind = 'regular' | 'super' | 'diesel';
 
@@ -391,6 +392,62 @@ export function buildGasBoard(params: {
     nearbyRest,
     hasUnknownHours: slots.some((s) => s.status.state === 'unknown'),
   };
+}
+
+export interface GasDetourInput {
+  driverLat: number;
+  driverLng: number;
+  stationLat: number;
+  stationLng: number;
+  /** CAD/L saved at the detour station vs. the price you'd otherwise pay. Positive = cheaper. */
+  priceDiffPerLitreCAD: number;
+  /** Litres you intend to pump — typically the tank's remaining capacity. */
+  fuelTankVolumeL: number;
+  /** Gas price/consumption overrides for the detour's own fuel cost — reuses
+   * rideDecision.ts's Santa Fe 2018 defaults ($1.70/L, 11.5L/100km). Wear
+   * cost is deliberately excluded here (unlike the ride-accept floor): a
+   * detour's cost is the fuel it burns, not vehicle depreciation. */
+  vehicleCost?: Omit<VehicleCostConfig, 'wearCostPerKm' | 'safetyMarginMultiplier'>;
+}
+
+export interface GasDetourResult {
+  /** One-way distance to the station (km). */
+  distanceKm: number;
+  /** Round-trip distance charged against the detour (km). */
+  extraRoundTripKm: number;
+  /** fuelTankVolumeL × priceDiffPerLitreCAD. */
+  grossSavingsCAD: number;
+  /** Fuel burned driving the round-trip detour, at the current gas price. */
+  detourFuelCostCAD: number;
+  /** grossSavingsCAD − detourFuelCostCAD. */
+  netSavingsCAD: number;
+  isProfitable: boolean;
+  /** "Détour rentable (+X.XX$ net)" or "Détour non rentable (Perte de Y.YY$)". */
+  badgeLabel: string;
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
+/**
+ * Whether driving out of the way to a cheaper station actually saves money
+ * once the round-trip's own fuel cost is subtracted — a detour only pays for
+ * itself when the gross savings at the pump beat what getting there burns.
+ */
+export function calculateGasDetourProfitability(input: GasDetourInput): GasDetourResult {
+  const distanceKm = haversineKm(input.driverLat, input.driverLng, input.stationLat, input.stationLng);
+  const extraRoundTripKm = distanceKm * 2;
+  const fuelCostPerKm = computeVehicleCostPerKm({ ...input.vehicleCost, wearCostPerKm: 0 });
+  const detourFuelCostCAD = round2(extraRoundTripKm * fuelCostPerKm);
+  const grossSavingsCAD = round2(input.fuelTankVolumeL * input.priceDiffPerLitreCAD);
+  const netSavingsCAD = round2(grossSavingsCAD - detourFuelCostCAD);
+  const isProfitable = netSavingsCAD > 0;
+  const badgeLabel = isProfitable
+    ? `Détour rentable (+${netSavingsCAD.toFixed(2)}$ net)`
+    : `Détour non rentable (perte de ${Math.abs(netSavingsCAD).toFixed(2)}$)`;
+
+  return { distanceKm, extraRoundTripKm, grossSavingsCAD, detourFuelCostCAD, netSavingsCAD, isProfitable, badgeLabel };
 }
 
 // EQC publishes one snapshot for every station, not a per-station

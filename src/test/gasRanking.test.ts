@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { OpenStatus } from '@/lib/gasHours';
 import {
   buildGasBoard,
+  calculateGasDetourProfitability,
   candidatesNeedingHours,
   cityFromAddress,
   cityKeyOf,
@@ -367,5 +368,84 @@ describe('formatGasPriceFreshness', () => {
     expect(formatGasPriceFreshness(new Date('2026-08-29T16:00:00Z').toISOString(), now)).toBe(
       'il y a 2 h'
     );
+  });
+});
+
+describe('calculateGasDetourProfitability', () => {
+  // Driver in Laval, a station ~2.9km away (haversine) — the CLAUDE.md-noted
+  // average nearest-zone spacing, a realistic short in-city detour.
+  const driverLat = 45.57;
+  const driverLng = -73.72;
+  const nearStationLat = 45.595;
+  const nearStationLng = -73.72;
+
+  it('a cheap, nearby station with a real price gap is profitable', () => {
+    const result = calculateGasDetourProfitability({
+      driverLat,
+      driverLng,
+      stationLat: nearStationLat,
+      stationLng: nearStationLng,
+      priceDiffPerLitreCAD: 0.08,
+      fuelTankVolumeL: 50,
+    });
+    // ~2.78km one-way at the default fuel cost (~$0.20/km, wear excluded) →
+    // round-trip detour cost well under the $4.00 gross savings on 50L.
+    expect(result.distanceKm).toBeCloseTo(2.78, 1);
+    expect(result.grossSavingsCAD).toBe(4);
+    expect(result.detourFuelCostCAD).toBeLessThan(2);
+    expect(result.isProfitable).toBe(true);
+    expect(result.badgeLabel).toMatch(/^Détour rentable \(\+\d+\.\d{2}\$ net\)$/);
+  });
+
+  it('a distant station eats the savings in detour fuel cost — not profitable', () => {
+    const result = calculateGasDetourProfitability({
+      driverLat,
+      driverLng,
+      stationLat: 45.75, // ~20km north of Laval
+      stationLng: -73.72,
+      priceDiffPerLitreCAD: 0.08,
+      fuelTankVolumeL: 50,
+    });
+    expect(result.grossSavingsCAD).toBe(4);
+    expect(result.detourFuelCostCAD).toBeGreaterThan(result.grossSavingsCAD);
+    expect(result.netSavingsCAD).toBeLessThan(0);
+    expect(result.isProfitable).toBe(false);
+    expect(result.badgeLabel).toMatch(/^Détour non rentable \(perte de \d+\.\d{2}\$\)$/);
+  });
+
+  it('a zero price difference is never profitable regardless of distance', () => {
+    const result = calculateGasDetourProfitability({
+      driverLat,
+      driverLng,
+      stationLat: nearStationLat,
+      stationLng: nearStationLng,
+      priceDiffPerLitreCAD: 0,
+      fuelTankVolumeL: 50,
+    });
+    expect(result.grossSavingsCAD).toBe(0);
+    expect(result.isProfitable).toBe(false);
+  });
+
+  it('a higher gas price raises the detour fuel cost, tightening profitability', () => {
+    const cheapGas = calculateGasDetourProfitability({
+      driverLat,
+      driverLng,
+      stationLat: nearStationLat,
+      stationLng: nearStationLng,
+      priceDiffPerLitreCAD: 0.05,
+      fuelTankVolumeL: 40,
+      vehicleCost: { gasPriceCAD: 1.5 },
+    });
+    const expensiveGas = calculateGasDetourProfitability({
+      driverLat,
+      driverLng,
+      stationLat: nearStationLat,
+      stationLng: nearStationLng,
+      priceDiffPerLitreCAD: 0.05,
+      fuelTankVolumeL: 40,
+      vehicleCost: { gasPriceCAD: 3.0 },
+    });
+    expect(expensiveGas.detourFuelCostCAD).toBeGreaterThan(cheapGas.detourFuelCostCAD);
+    expect(expensiveGas.netSavingsCAD).toBeLessThan(cheapGas.netSavingsCAD);
   });
 });
