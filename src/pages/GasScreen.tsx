@@ -7,12 +7,15 @@ import {
   type OpenStatus,
 } from '@/lib/gasHours';
 import {
+  computeDetourBadge,
   formatGasPriceFreshness,
   NEARBY_RADIUS_KM,
   type FuelKind,
+  type GasBoard,
   type GasSlot,
   type RankedStation,
 } from '@/lib/gasRanking';
+import { DetourBadge } from '@/components/DetourBadge';
 import { Clock, Fuel, HelpCircle, MapPin, Navigation, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -34,6 +37,13 @@ function formatUpdated(iso: string, locale: string): string {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(iso));
+}
+
+/** Default pick's price (board.slots[0]) — the reference every other card's
+ * detour badge is judged against. Pulled out of GasScreen to keep the
+ * optional-chaining branches off its own complexity count. */
+function getDefaultPickPrice(board: GasBoard | undefined): number | null {
+  return board?.slots[0]?.station.price ?? null;
 }
 
 function OpenBadge({ status }: { status: OpenStatus }) {
@@ -74,6 +84,7 @@ function StationCard({
   eyebrow,
   updatedAt,
   now,
+  detourBadge,
 }: {
   station: RankedStation;
   status: OpenStatus;
@@ -82,6 +93,7 @@ function StationCard({
   eyebrow?: string;
   updatedAt: string | null;
   now: Date;
+  detourBadge?: { label: string; isProfitable: boolean } | null;
 }) {
   return (
     <a
@@ -111,6 +123,7 @@ function StationCard({
               {station.distance_km.toFixed(1)} km
             </span>
             <OpenBadge status={status} />
+            {detourBadge && <DetourBadge badge={detourBadge} />}
             {updatedAt && (
               <span className="text-[10px] text-muted-foreground/70">
                 Prix {formatGasPriceFreshness(updatedAt, now)}
@@ -163,6 +176,9 @@ export default function GasScreen() {
 
   const { board, updatedAt, isLoading, isFetching, error, hoursUnavailable, refetch } =
     useGasBoard(fuel, location, now);
+  // Reference price for the detour badge: the default pick (slot 0) is
+  // where the driver would go anyway — every other card is judged against it.
+  const defaultPickPrice = getDefaultPickPrice(board);
 
   const onRefresh = async () => {
     await Promise.all([refresh(), refetch()]);
@@ -245,6 +261,11 @@ export default function GasScreen() {
               eyebrow={slotEyebrow(slot)}
               updatedAt={updatedAt}
               now={now}
+              detourBadge={
+                index === 0
+                  ? null
+                  : computeDetourBadge(defaultPickPrice, location, slot.station)
+              }
             />
           ))}
         </section>
@@ -265,6 +286,7 @@ export default function GasScreen() {
                 locale={locale}
                 updatedAt={updatedAt}
                 now={now}
+                detourBadge={computeDetourBadge(defaultPickPrice, location, station)}
               />
             ))}
           </div>

@@ -394,6 +394,10 @@ export function buildGasBoard(params: {
   };
 }
 
+/** Assumed litres pumped when no tank-size input exists yet — a partial
+ * fill, not the Santa Fe Sport 2018's full ~71L tank capacity. */
+export const DEFAULT_FUEL_TANK_VOLUME_L = 50;
+
 export interface GasDetourInput {
   driverLat: number;
   driverLng: number;
@@ -448,6 +452,37 @@ export function calculateGasDetourProfitability(input: GasDetourInput): GasDetou
     : `Détour non rentable (perte de ${Math.abs(netSavingsCAD).toFixed(2)}$)`;
 
   return { distanceKm, extraRoundTripKm, grossSavingsCAD, detourFuelCostCAD, netSavingsCAD, isProfitable, badgeLabel };
+}
+
+export interface DetourBadgeInfo {
+  label: string;
+  isProfitable: boolean;
+}
+
+/**
+ * Whether detouring to `station` beats just going to the driver's default
+ * pick — null when there's nothing to compare against yet (no GPS fix, or
+ * this station's price isn't actually cheaper than `baselinePrice`).
+ * Assumes a `DEFAULT_FUEL_TANK_VOLUME_L` partial fill since there's no
+ * tank-size input in the app yet.
+ */
+export function computeDetourBadge(
+  baselinePrice: number | null,
+  location: { latitude: number; longitude: number } | null,
+  station: RankedStation
+): DetourBadgeInfo | null {
+  if (baselinePrice === null || location === null) return null;
+  const priceDiffPerLitreCAD = baselinePrice - station.price;
+  if (priceDiffPerLitreCAD <= 0) return null;
+  const result = calculateGasDetourProfitability({
+    driverLat: location.latitude,
+    driverLng: location.longitude,
+    stationLat: station.lat,
+    stationLng: station.lng,
+    priceDiffPerLitreCAD,
+    fuelTankVolumeL: DEFAULT_FUEL_TANK_VOLUME_L,
+  });
+  return { label: result.badgeLabel, isProfitable: result.isProfitable };
 }
 
 // EQC publishes one snapshot for every station, not a per-station
