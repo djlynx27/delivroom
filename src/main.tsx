@@ -49,6 +49,24 @@ const updateSW = registerSW({
   },
 });
 
+// Ask Chrome to promote this origin's storage bucket to "persistent" so it's
+// exempt from best-effort eviction under storage pressure/low engagement.
+// Without this, Chrome can silently wipe localStorage (where the Supabase
+// anon-auth session lives) — the driver's identity resets, a brand new
+// auth.users row is minted on next signInAnonymously(), and every trip
+// logged under the old id becomes permanently invisible under the
+// trips_user_isolation RLS policy (auth.uid() = user_id). Best-effort, no-op
+// where unsupported (Safari, some WebViews) — never blocks boot.
+if (navigator.storage?.persist) {
+  void navigator.storage.persist().then((granted) => {
+    if (!granted) {
+      console.warn(
+        '[storage] persistent storage NOT granted — Chrome may still evict localStorage under pressure, resetting the driver identity.'
+      );
+    }
+  });
+}
+
 // After a deploy, an old precached index.html can reference lazy chunk hashes
 // that no longer exist → dynamic import rejects → black screen. Reload ONCE
 // (guarded so we never loop) to fetch the fresh shell.

@@ -1,8 +1,10 @@
+import { TripLogger } from '@/components/TripLogger';
 import { useTrips, type TripWithZone } from '@/hooks/useTrips';
 import { getTripRevenue, summarizeTrips } from '@/lib/tripAnalytics';
 import { getMontrealDayStart } from '@/lib/timezone';
-import { RefreshCw } from 'lucide-react';
-import { useMemo } from 'react';
+import { Plus, RefreshCw } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { toast } from 'sonner';
 
 export function formatMoney(amount: number): string {
   return `${Math.round(amount ?? 0)} $`;
@@ -105,6 +107,18 @@ function TripsSection({
  */
 export default function TodayScreen() {
   const { data: trips, isLoading, isError, refetch, isRefetching } = useTrips({ limit: 200 });
+  const [showManualEntry, setShowManualEntry] = useState(false);
+
+  async function handleSync() {
+    const result = await refetch();
+    if (result.isError) {
+      const message =
+        result.error instanceof Error ? result.error.message : 'Erreur inconnue.';
+      toast.error(`Synchro échouée : ${message}`);
+    } else if ((result.data ?? []).length === 0) {
+      toast.info('0 course trouvée aujourd’hui.');
+    }
+  }
 
   const todayTrips = useMemo(() => {
     const todayStart = getMontrealDayStart();
@@ -139,16 +153,32 @@ export default function TodayScreen() {
 
       <div className="px-4 mt-4 flex-1 space-y-2 overflow-y-auto">
         <TripsSection isLoading={isLoading} isError={isError} trips={todayTrips} />
+        {showManualEntry && (
+          <div className="pt-2">
+            <TripLogger />
+          </div>
+        )}
       </div>
 
-      <div className="px-4 pb-4 pt-2">
+      <div className="px-4 pb-4 pt-2 space-y-2">
         <button
-          onClick={() => void refetch()}
+          onClick={() => void handleSync()}
           disabled={isRefetching}
           className="w-full h-12 rounded-xl bg-primary text-primary-foreground font-display font-bold flex items-center justify-center gap-2 disabled:opacity-60"
         >
           <RefreshCw className={`w-4 h-4 ${isRefetching ? 'animate-spin' : ''}`} />
           {isRefetching ? 'Synchronisation…' : 'Synchroniser'}
+        </button>
+        {/* Fallback manuel : la capture automatique (screenshot/webhook) ne
+            log jamais dans `trips` par elle-même (voir quick-log-trip) — ce
+            bouton reste le seul chemin garanti pour faire apparaître une
+            course ici sans dépendre de l'auto-sync. */}
+        <button
+          onClick={() => setShowManualEntry((v) => !v)}
+          className="w-full h-10 rounded-xl border border-border text-foreground font-body text-[13px] flex items-center justify-center gap-2"
+        >
+          <Plus className="w-3.5 h-3.5" />
+          {showManualEntry ? 'Fermer la saisie manuelle' : 'Ajouter une course manuellement'}
         </button>
       </div>
     </div>
