@@ -31,20 +31,46 @@ Deno.test('hasAutoSaveConfidence: rejects revenue with no catalog-verified zone'
   assertEquals(hasAutoSaveConfidence(analysis), false);
 });
 
-Deno.test('hasAutoSaveConfidence: accepts a matched zone with earnings', () => {
+Deno.test('hasAutoSaveConfidence: rejects a pre-accept offer card (fare shown, but no confirmed-activity signal)', () => {
+  // Exactly the shape of a Lyft ride-offer card: pickup/ride time+distance
+  // for rideDecision.ts's accept/skip agent, plus the offered fare — no
+  // active_trip_payout (not mid-ride yet) and no hours_worked/trips_count
+  // (not a shift summary). Must NOT auto-save just because earnings>0.
   const analysis: AnalysisResult = {
     matched_zone_id: 'mtl-anjou',
-    extracted_data: { earnings: 12.5, tips: 0 },
+    extracted_data: {
+      earnings: 14.5,
+      pickup_time_minutes: 3,
+      pickup_distance_km: 1.2,
+      ride_time_minutes: 12,
+      ride_distance_km: 6,
+    },
+  };
+  assertEquals(hasAutoSaveConfidence(analysis), false);
+});
+
+Deno.test('hasAutoSaveConfidence: accepts a matched zone with earnings + the live Trip Tracking overlay', () => {
+  const analysis: AnalysisResult = {
+    matched_zone_id: 'mtl-anjou',
+    extracted_data: { earnings: 12.5, tips: 0, active_trip_payout: 12.5 },
   };
   assertEquals(hasAutoSaveConfidence(analysis), true);
 });
 
-Deno.test('hasAutoSaveConfidence: accepts a matched zone with tips only', () => {
+Deno.test('hasAutoSaveConfidence: accepts tips-only on a shift summary screen (trips_count present)', () => {
   const analysis: AnalysisResult = {
     matched_zone_id: 'mtl-anjou',
-    extracted_data: { earnings: 0, tips: 3 },
+    extracted_data: { earnings: 0, tips: 3, trips_count: 4 },
   };
   assertEquals(hasAutoSaveConfidence(analysis), true);
+});
+
+Deno.test('hasAutoSaveConfidence: rejects revenue with neither active-trip nor shift-summary signal', () => {
+  const analysis: AnalysisResult = {
+    matched_zone_id: 'mtl-anjou',
+    extracted_data: { earnings: 12.5 },
+  };
+  assertEquals(hasAutoSaveConfidence(analysis), false);
 });
 
 Deno.test('extractUserIdFromStorageUrl: reads the userId path segment', () => {
