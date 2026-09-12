@@ -1,6 +1,14 @@
-import { handleNavigationLaunch } from '@/services/routing';
 import type { RouteCandidateZone } from '@/services/routing/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/integrations/supabase/client', () => ({
+  supabase: {
+    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: null }) },
+    from: vi.fn(),
+  },
+}));
+
+const { handleNavigationLaunch } = await import('@/services/routing');
 
 const destination: RouteCandidateZone = {
   id: 'carrefour-laval',

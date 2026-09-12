@@ -9,6 +9,7 @@ import { type PitStop } from '@/lib/pitStops';
 import {
   buildGoogleMapsProspectingUrl,
   getDriveRoute,
+  logNavEvent,
   type DriveRouteResult,
   type NavigationMode,
   type RouteCandidateZone,
@@ -364,9 +365,10 @@ function ExportProspectionButton({
 }) {
   return (
     <button
-      onClick={() =>
-        window.open(buildGoogleMapsProspectingUrl(origin, destination, waypoints), '_system')
-      }
+      onClick={() => {
+        logNavEvent(origin, destination, 'prospection');
+        window.open(buildGoogleMapsProspectingUrl(origin, destination, waypoints), '_system');
+      }}
       className="mt-3 w-full gap-2.5 flex items-center justify-center text-[15px] font-display font-bold h-12 rounded-xl bg-primary text-primary-foreground"
     >
       <GoogleMapsIcon className="w-5 h-5 flex-shrink-0" />

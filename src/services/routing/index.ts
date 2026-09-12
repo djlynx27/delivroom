@@ -1,5 +1,6 @@
 import { getGoogleMapsNavUrl } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
+import { supabase } from '@/integrations/supabase/client';
 import { fetchOsrmRoute, fetchRoute } from './mapboxDirections';
 import type {
   DriveRouteResult,
@@ -133,6 +134,38 @@ export function buildOneTapNavigationUrl(
 }
 
 /**
+ * Fire-and-forget insert into nav_events — Phase 1 of the Google Maps
+ * trajet ingestion (raw capture only, no matching to trips yet). Never
+ * awaited by callers and errors are swallowed: a logging failure must
+ * never delay or block a driver mid-navigation.
+ */
+export function logNavEvent(
+  origin: RoutePoint | null,
+  destination: RouteCandidateZone,
+  mode: NavigationMode
+): void {
+  supabase.auth
+    .getUser()
+    .then(({ data }) => {
+      const driverId = data.user?.id;
+      if (!driverId) return;
+      return supabase.from('nav_events').insert({
+        driver_id: driverId,
+        mode,
+        origin_lat: origin?.lat ?? null,
+        origin_lng: origin?.lng ?? null,
+        dest_lat: destination.latitude,
+        dest_lng: destination.longitude,
+        dest_zone_id: destination.id === 'navigate-target' ? null : destination.id,
+        dest_label: destination.name,
+      });
+    })
+    .catch(() => {
+      // Best-effort telemetry — never surface to the driver.
+    });
+}
+
+/**
  * Single entry point for both navigation modes: `'direct'` is a pure
  * origin→destination Google Maps link (no corridor waypoints, ever —
  * `candidateZones` is ignored), `'prospection'` keeps the existing
@@ -147,6 +180,7 @@ export function handleNavigationLaunch(
   candidateZones: RouteCandidateZone[],
   mode: NavigationMode
 ): string {
+  logNavEvent(origin, destination, mode);
   if (mode === 'direct') {
     return origin
       ? buildGoogleMapsProspectingUrl(origin, destination, [])

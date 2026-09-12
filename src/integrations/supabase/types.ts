@@ -440,6 +440,53 @@ export type Database = {
         }
         Relationships: []
       }
+      nav_events: {
+        Row: {
+          dest_label: string | null
+          dest_lat: number
+          dest_lng: number
+          dest_zone_id: string | null
+          driver_id: string | null
+          id: string
+          launched_at: string
+          mode: string | null
+          origin_lat: number | null
+          origin_lng: number | null
+        }
+        Insert: {
+          dest_label?: string | null
+          dest_lat: number
+          dest_lng: number
+          dest_zone_id?: string | null
+          driver_id?: string | null
+          id?: string
+          launched_at?: string
+          mode?: string | null
+          origin_lat?: number | null
+          origin_lng?: number | null
+        }
+        Update: {
+          dest_label?: string | null
+          dest_lat?: number
+          dest_lng?: number
+          dest_zone_id?: string | null
+          driver_id?: string | null
+          id?: string
+          launched_at?: string
+          mode?: string | null
+          origin_lat?: number | null
+          origin_lng?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nav_events_dest_zone_id_fkey"
+            columns: ["dest_zone_id"]
+            isOneToOne: false
+            referencedRelation: "zones"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           created_at: string
@@ -653,6 +700,7 @@ export type Database = {
           mime_type: string | null
           notes: string | null
           source: string
+          storage_purged_at: string | null
           trip_id: string | null
           uploaded_at: string
           user_id: string
@@ -668,6 +716,7 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           source?: string
+          storage_purged_at?: string | null
           trip_id?: string | null
           uploaded_at?: string
           user_id: string
@@ -683,6 +732,7 @@ export type Database = {
           mime_type?: string | null
           notes?: string | null
           source?: string
+          storage_purged_at?: string | null
           trip_id?: string | null
           uploaded_at?: string
           user_id?: string
@@ -1034,6 +1084,7 @@ export type Database = {
       trips_raw: {
         Row: {
           bonus_cad: number | null
+          content_hash: string | null
           created_at: string | null
           distance_km: number | null
           drive_time_min: number | null
@@ -1058,6 +1109,7 @@ export type Database = {
         }
         Insert: {
           bonus_cad?: number | null
+          content_hash?: string | null
           created_at?: string | null
           distance_km?: number | null
           drive_time_min?: number | null
@@ -1082,6 +1134,7 @@ export type Database = {
         }
         Update: {
           bonus_cad?: number | null
+          content_hash?: string | null
           created_at?: string | null
           distance_km?: number | null
           drive_time_min?: number | null
@@ -1466,6 +1519,7 @@ export type Database = {
           city_id: string
           created_at: string
           current_score: number | null
+          event_id: string | null
           id: string
           latitude: number
           longitude: number
@@ -1481,6 +1535,7 @@ export type Database = {
           city_id: string
           created_at?: string
           current_score?: number | null
+          event_id?: string | null
           id: string
           latitude: number
           longitude: number
@@ -1496,6 +1551,7 @@ export type Database = {
           city_id?: string
           created_at?: string
           current_score?: number | null
+          event_id?: string | null
           id?: string
           latitude?: number
           longitude?: number
@@ -1510,6 +1566,13 @@ export type Database = {
             columns: ["city_id"]
             isOneToOne: false
             referencedRelation: "cities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "zones_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
             referencedColumns: ["id"]
           },
         ]
@@ -1546,6 +1609,7 @@ export type Database = {
     }
     Functions: {
       aggregate_zone_performance: { Args: never; Returns: undefined }
+      cleanup_expired_event_zones: { Args: never; Returns: undefined }
       cleanup_old_context_vectors: { Args: never; Returns: undefined }
       cleanup_old_platform_signals: { Args: never; Returns: undefined }
       cleanup_old_weight_history: { Args: never; Returns: undefined }
@@ -1654,6 +1718,10 @@ export type Database = {
           w_weather: number
         }[]
       }
+      haversine_km: {
+        Args: { lat1: number; lat2: number; lng1: number; lng2: number }
+        Returns: number
+      }
       increment_rate_limit: {
         Args: { p_fn: string; p_window_start: string }
         Returns: number
@@ -1692,15 +1760,15 @@ export type Database = {
     }
     Enums: {
       zone_type:
-        | "métro"
+        | "mÃ©tro"
         | "commercial"
-        | "résidentiel"
+        | "rÃ©sidentiel"
         | "nightlife"
-        | "aéroport"
+        | "aÃ©roport"
         | "transport"
-        | "médical"
-        | "université"
-        | "événements"
+        | "mÃ©dical"
+        | "universitÃ©"
+        | "Ã©vÃ©nements"
         | "tourisme"
     }
     CompositeTypes: {
@@ -1830,15 +1898,15 @@ export const Constants = {
   public: {
     Enums: {
       zone_type: [
-        "métro",
+        "mÃ©tro",
         "commercial",
-        "résidentiel",
+        "rÃ©sidentiel",
         "nightlife",
-        "aéroport",
+        "aÃ©roport",
         "transport",
-        "médical",
-        "université",
-        "événements",
+        "mÃ©dical",
+        "universitÃ©",
+        "Ã©vÃ©nements",
         "tourisme",
       ],
     },

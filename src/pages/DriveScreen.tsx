@@ -16,6 +16,7 @@ import { CustomNavigationMap } from '@/components/CustomNavigationMap';
 import {
   buildGoogleMapsProspectingUrl,
   handleNavigationLaunch,
+  logNavEvent,
   type RouteCandidateZone,
   type RoutePoint,
 } from '@/services/routing';
@@ -120,6 +121,7 @@ function resolveOneTapUrl(
   returnCorridor: ReturnCorridorResult | null
 ): string {
   if (origin && corridorTargetsZone(zone.id, antiDeadhead, returnCorridor)) {
+    logNavEvent(origin, zone, 'prospection');
     return buildGoogleMapsProspectingUrl(origin, zone, returnCorridor!.steps);
   }
   // Recommended-zone taps, manual search, and 15-min auto-routing all route
