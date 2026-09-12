@@ -118,6 +118,10 @@ interface FileItem {
   filePath?: string;
   analysis?: AnalysisResultMinimal | null;
   tripSaved?: boolean;
+  // File's own lastModified — proxy for "when was this screenshot taken",
+  // used to corroborate a pre-accept offer card against a later confirmed-ride
+  // screenshot in the same batch (see isSavableAsTrip in bulkImportPipeline.ts).
+  timestampMs?: number;
 }
 
 function sanitizeFilename(name: string): string {
@@ -139,6 +143,8 @@ interface AnalysisResultMinimal {
     pickup_time_minutes?: number | null;
     ride_time_minutes?: number | null;
     hours_worked?: number | null;
+    active_trip_payout?: number | null;
+    trips_count?: number | null;
   } | null;
 }
 
@@ -432,6 +438,7 @@ export function BulkScreenshotUploader() {
         file,
         status: oversize ? 'skipped' : 'pending',
         message: oversize ? `Trop gros (${(file.size / 1024 / 1024).toFixed(1)} MB > 10 MB)` : undefined,
+        timestampMs: file.lastModified,
       };
     });
     updateItemsState(() => newItems);
@@ -620,6 +627,7 @@ export function BulkScreenshotUploader() {
       id: `retry-${Date.now()}-${i}-${sanitizeFilename(q.file.name)}`,
       file: q.file,
       status: 'pending',
+      timestampMs: q.file.lastModified,
     }));
     updateItemsState((prev) => [...prev, ...newItems]);
     toast.info(
@@ -747,7 +755,7 @@ export function BulkScreenshotUploader() {
   // already auto-saves everything the moment a batch finishes, so this is only
   // needed if the driver reopens the app on a batch left half-saved.
   async function handleSaveAllAsTrips() {
-    if (!items.some(isSavableAsTrip)) {
+    if (!items.some((it) => isSavableAsTrip(it, items))) {
       toast.info('Aucune course à sauvegarder (aucun revenu détecté)');
       return;
     }
@@ -755,7 +763,7 @@ export function BulkScreenshotUploader() {
   }
 
   // How many analyzed items are still eligible to be saved as trips.
-  const savableTripCount = items.filter(isSavableAsTrip).length;
+  const savableTripCount = items.filter((it) => isSavableAsTrip(it, items)).length;
 
   function copyFailedSummary() {
     const failed = items.filter((i) => i.status === 'failed');

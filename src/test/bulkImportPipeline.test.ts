@@ -47,6 +47,70 @@ describe('isSavableAsTrip', () => {
   });
 });
 
+describe('isSavableAsTrip: pre-accept offer card corroboration', () => {
+  function offerCard(overrides: Partial<PipelineItem> = {}): PipelineItem {
+    return item({
+      timestampMs: 1_000_000,
+      analysis: {
+        matched_zone_id: 'mtl-anjou',
+        extracted_data: { earnings: 14.5, pickup_time_minutes: 3, ride_time_minutes: 12 },
+      },
+      ...overrides,
+    });
+  }
+
+  function confirmedScreenshot(overrides: Partial<PipelineItem> = {}): PipelineItem {
+    return item({
+      timestampMs: 1_000_000,
+      analysis: {
+        matched_zone_id: 'mtl-anjou',
+        extracted_data: { earnings: 12.5, active_trip_payout: 12.5 },
+      },
+      ...overrides,
+    });
+  }
+
+  it('rejects a bare offer card with no corroborating screenshot in the batch', () => {
+    const card = offerCard();
+    expect(isSavableAsTrip(card, [card])).toBe(false);
+  });
+
+  it('accepts an offer card corroborated by a same-zone confirmed screenshot within the window', () => {
+    const card = offerCard({ timestampMs: 1_000_000 });
+    const confirmed = confirmedScreenshot({ timestampMs: 1_000_000 + 5 * 60_000 });
+    expect(isSavableAsTrip(card, [card, confirmed])).toBe(true);
+  });
+
+  it('rejects an offer card whose only match is in a different zone', () => {
+    const card = offerCard();
+    const confirmed = confirmedScreenshot({
+      analysis: {
+        matched_zone_id: 'lvl-centre',
+        extracted_data: { earnings: 12.5, active_trip_payout: 12.5 },
+      },
+    });
+    expect(isSavableAsTrip(card, [card, confirmed])).toBe(false);
+  });
+
+  it('rejects an offer card whose only match is outside the confirmation window', () => {
+    const card = offerCard({ timestampMs: 1_000_000 });
+    const confirmed = confirmedScreenshot({ timestampMs: 1_000_000 + 45 * 60_000 });
+    expect(isSavableAsTrip(card, [card, confirmed])).toBe(false);
+  });
+
+  it('accepts a screenshot that already carries its own confirmed signal, no sibling needed', () => {
+    const confirmed = confirmedScreenshot();
+    expect(isSavableAsTrip(confirmed, [confirmed])).toBe(true);
+  });
+
+  it('accepts a shift summary (trips_count) with no offer-decomposition fields, no corroboration needed', () => {
+    const summary = item({
+      analysis: { extracted_data: { earnings: 40, trips_count: 6 } },
+    });
+    expect(isSavableAsTrip(summary)).toBe(true);
+  });
+});
+
 // [Import terminé -> Auto-Save -> Auto-Sync -> Auto-Train] end to end, with
 // no click in between — the exact flow requested. Dependencies are injected
 // spies so this exercises the real orchestration in bulkImportPipeline.ts
