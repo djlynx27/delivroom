@@ -3,6 +3,14 @@ import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
+import {
+  autoSaveNotesTag,
+  computeEndedAt,
+  extractUserIdFromStorageUrl,
+  hasAutoSaveConfidence,
+  normalizeStartedAt,
+  resolveDurationMinutes,
+} from './autoSave.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -17,7 +25,7 @@ interface ZoneDetected {
   color_intensity: string;
 }
 
-interface ExtractedData {
+export interface ExtractedData {
   earnings?: number | null;
   tips?: number | null;
   distance_km?: number | null;
@@ -60,7 +68,7 @@ interface TripWaypoint {
   address: string;
 }
 
-interface AnalysisResult {
+export interface AnalysisResult {
   zones_detected?: ZoneDetected[];
   overall_demand?: string;
   time_context?: string | null;
@@ -199,7 +207,57 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   await resolveZoneIfNeeded(geminiResult.analysis, body, client, zones);
-  return jsonResponse({ analysis: geminiResult.analysis });
+  const autoSaved = await autoSaveTripIfConfident(geminiResult.analysis, body.image_url, client);
+  return jsonResponse({ analysis: geminiResult.analysis, auto_saved: autoSaved });
+}
+
+/**
+ * Auto-save path for the live capture pipeline (Maxymo screenshot →
+ * analyze-screenshot → trips), so a shift's earnings land on "Aujourd'hui"
+ * without the driver having to open Bulk Upload and click "Tout sauvegarder"
+ * mid-shift. Gated by hasAutoSaveConfidence (see autoSave.ts) — anything less
+ * confident still waits for the manual review flow. Returns whether a trip
+ * was inserted (false = skipped or nothing to save).
+ */
+async function autoSaveTripIfConfident(
+  analysis: AnalysisResult,
+  imageUrl: string | undefined,
+  client: SupabaseClient | null,
+): Promise<boolean> {
+  if (!client || !imageUrl || !hasAutoSaveConfidence(analysis)) return false;
+  const d = analysis.extracted_data!;
+
+  const userId = extractUserIdFromStorageUrl(imageUrl);
+  if (!userId) return false;
+
+  // Idempotency: one auto-saved trip per source screenshot — same "tag the
+  // notes field" dedup pattern BulkScreenshotUploader already uses.
+  const notes = autoSaveNotesTag(imageUrl);
+  const { data: existing } = await client
+    .from('trips')
+    .select('id')
+    .eq('notes', notes)
+    .maybeSingle();
+  if (existing) return false;
+
+  const startedAt = normalizeStartedAt(d.date);
+  const durationMinutes = resolveDurationMinutes(d);
+  const { error } = await client.from('trips').insert({
+    user_id: userId,
+    zone_id: analysis.matched_zone_id,
+    started_at: startedAt,
+    earnings: d.earnings ?? null,
+    tips: d.tips ?? null,
+    distance_km: d.distance_km ?? null,
+    duration_minutes: durationMinutes,
+    ended_at: computeEndedAt(startedAt, durationMinutes),
+    notes,
+  });
+  if (error) {
+    console.error('analyze-screenshot: auto-save trip insert failed', error);
+    return false;
+  }
+  return true;
 }
 
 interface FetchedImage { bytes: Uint8Array; mimeType: string; }
