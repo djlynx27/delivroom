@@ -70,6 +70,7 @@ Versionnées dans `supabase/migrations/` — voir le dossier pour la liste et le
 
 - TypeScript **strict** — zero `any`, zero `as any`, `unknown` + type guard à la place
 - Named exports uniquement, jamais de `default export`
+  - **Exception** : composants de route chargés via `React.lazy(() => import(...))` (routes secondaires, voir §Conventions PDA) — `React.lazy` exige un module dont l'export par défaut est le composant. Limité aux fichiers `src/pages/*Screen.tsx` qui sont réellement lazy-loadés, pas une porte ouverte au reste du code.
 - `as const` > enums
 - Commits conventional : `feat(scope):` / `fix(scope):` / `chore(scope):` / `refactor(scope):` / `docs(scope):` — en anglais
 - Branches : `feature/xxx`, `fix/xxx`, `hotfix/xxx`, `chore/xxx`
