@@ -19,6 +19,7 @@ import {
 import { supabase } from '@/integrations/supabase/client';
 import type { TablesInsert } from '@/integrations/supabase/types';
 import { isSavableAsTrip, runAutoPipeline } from '@/lib/bulkImportPipeline';
+import { triggerLearningRetrain } from '@/lib/triggerLearningRetrain';
 import {
   fileKey,
   findExistingFileNames,
@@ -527,37 +528,20 @@ export function BulkScreenshotUploader() {
     }
   }
 
-  // After trips are saved, kick the zone scoring recalculation so the
-  // learning loop (EMA/Bayesian + TrendAgent/RushHourAgent) reflects them
-  // right away instead of waiting for the next cron tick. Best-effort: a
-  // failure here doesn't affect what's already saved, just delays the score
-  // refresh. Keyed on trips actually saved, not screenshots uploaded — a
-  // batch that uploaded 40 screenshots but extracted 0 fares has nothing new
-  // for score-calculator to recompute.
-  async function triggerRetrain(savedCount: number): Promise<void> {
-    if (savedCount <= 0) return;
-    const toastId = toast.loading(`Recalcul des zones (${savedCount} nouvelle(s) course(s))…`);
-    try {
-      await supabase.functions.invoke('score-calculator');
-      toast.success('Scores de zones mis à jour', { id: toastId });
-    } catch (err) {
-      console.error('[retrain] score-calculator failed:', err);
-      toast.error('Recalcul des zones échoué (les courses restent sauvegardées)', { id: toastId });
-    }
-  }
-
   // Shared zero-touch tail: auto-save every analyzed screenshot that carries
-  // a fare, refresh every query the learning loop reads from, then retrain.
-  // See src/lib/bulkImportPipeline.ts — one implementation, every batch
-  // completion (manual run, silent auto-scan, upload-retry queue) routes
-  // through it so none of them can drift out of sync with each other.
+  // a fare, refresh every query the learning loop reads from, then retrain
+  // (score-calculator + weight-calibrator + ai-score-analysis, see
+  // triggerLearningRetrain.ts). See src/lib/bulkImportPipeline.ts — one
+  // implementation, every batch completion (manual run, silent auto-scan,
+  // upload-retry queue) routes through it so none of them can drift out of
+  // sync with each other.
   async function runPostBatchPipeline(freshItems: FileItem[]): Promise<void> {
     setSavingTrips(true);
     try {
       await runAutoPipeline(freshItems, {
         saveTrips: persistTrips,
         invalidate: (key) => qc.invalidateQueries({ queryKey: [key] }),
-        retrain: triggerRetrain,
+        retrain: triggerLearningRetrain,
       });
     } catch (err) {
       toast.error(

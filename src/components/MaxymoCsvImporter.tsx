@@ -17,6 +17,7 @@ import {
 import { useCities, useZones } from '@/hooks/useSupabase';
 import { supabase } from '@/integrations/supabase/client';
 import { runAutoPipeline, type PipelineItem } from '@/lib/bulkImportPipeline';
+import { triggerLearningRetrain } from '@/lib/triggerLearningRetrain';
 import { DEADHEAD_PENALTY_KM_THRESHOLD } from '@/lib/learningEngine';
 import {
   buildAcceptedTripInsert,
@@ -119,18 +120,6 @@ async function saveAcceptedTrips(
   return rows.length;
 }
 
-async function triggerRetrain(savedCount: number): Promise<void> {
-  if (savedCount <= 0) return;
-  const toastId = toast.loading(`Recalcul des zones (${savedCount} nouvelle(s) course(s))…`);
-  try {
-    await supabase.functions.invoke('score-calculator');
-    toast.success('Scores de zones mis à jour', { id: toastId });
-  } catch (err) {
-    console.error('[MaxymoCsvImporter] retrain failed:', err);
-    toast.error('Recalcul des zones échoué (les courses restent sauvegardées)', { id: toastId });
-  }
-}
-
 /** Market history (all offers, accepted AND rejected) → trips_raw, then the
  * shared auto-pipeline (save accepted-with-fare candidates → invalidate the
  * learning-loop queries → retrain) — the same tail BulkScreenshotUploader
@@ -160,7 +149,7 @@ async function importMaxymoRecords(
   const { savedCount } = await runAutoPipeline(newRecords.map(toPipelineItem), {
     saveTrips: (candidates) => saveAcceptedTrips(candidates, userId, importedAt, zoneId),
     invalidate,
-    retrain: triggerRetrain,
+    retrain: triggerLearningRetrain,
   });
 
   return { trips: savedCount, marketRows: marketRows.length, skippedDuplicates };
