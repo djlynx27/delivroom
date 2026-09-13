@@ -183,6 +183,29 @@ serve(async (req: Request) => {
       supabase,
       (zones as Zone[]).map((z) => z.id)
     );
+
+    // Single round-trip for every zone's baseline instead of one
+    // get_surge_baseline() RPC per zone in the loop below — with ~70
+    // zones that sequential fan-out was what pushed this function's
+    // runtime to 9-15s every 5-minute cron cycle.
+    const { data: baselineRows, error: baselineErr } = await supabase.rpc(
+      'get_surge_baselines_bulk',
+      {
+        p_zone_ids: (zones as Zone[]).map((z) => z.id),
+        p_hour_slot: montrealHour(now),
+        p_dow: montrealDayOfWeek(now),
+      }
+    );
+    if (baselineErr) {
+      throw new Error(`Surge baseline bulk lookup failed: ${baselineErr.message}`);
+    }
+    const baselineByZone = new Map<string, number>(
+      (baselineRows as Array<{ zone_id: string; baseline: number }>).map((r) => [
+        r.zone_id,
+        r.baseline,
+      ])
+    );
+
     const newPeakCandidates: NewPeakCandidate[] = [];
     const contextInserts: Array<{
       zone_id: string;
@@ -195,30 +218,10 @@ serve(async (req: Request) => {
     for (const zone of zones as Zone[]) {
       if (zone.current_score == null) continue;
 
-      // 2. Get 4-week rolling baseline for this zone/slot
-      const hour = montrealHour(now);
-      const dow = montrealDayOfWeek(now);
-
-      // get_surge_baseline(p_zone_id, p_hour_slot, p_dow) returns a bare
-      // numeric (see 20260320000001_pgvector_context.sql) — not a row set,
-      // so `data` here is already the scalar, never an array to index into.
-      const { data: baselineData, error: baselineError } = await supabase.rpc(
-        'get_surge_baseline',
-        {
-          p_zone_id: zone.id,
-          p_hour_slot: hour,
-          p_dow: dow,
-        }
-      );
-
-      if (baselineError) {
-        throw new Error(
-          `Surge baseline lookup failed for zone ${zone.id}: ${baselineError.message}`
-        );
-      }
-
+      // 2. 4-week rolling baseline for this zone/slot, already fetched in
+      // bulk above.
       const baselineScore: number =
-        (baselineData as number | null) ??
+        baselineByZone.get(zone.id) ??
         zone.base_score ??
         zone.current_score * 0.85;
 
