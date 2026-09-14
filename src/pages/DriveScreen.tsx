@@ -48,7 +48,7 @@ import { nearestEmergingHotspot, useEmergingHotspots } from '@/hooks/useEmerging
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
-import { haversineKm, useUserLocation } from '@/hooks/useUserLocation';
+import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
 import {
@@ -92,6 +92,11 @@ type WakeLockStatus = 'active' | 'inactive' | 'unsupported';
 function hasActiveSurge(surge: SurgeResult | null | undefined): surge is SurgeResult {
   return !!surge && surge.surgeClass !== 'normal';
 }
+
+// Same reachability cap as useSmartZones.MAX_DISTANCE_KM -- 35km covers
+// Laval <-> downtown MTL / Vieux-Port without letting a stale cityId
+// surface a zone the driver can't realistically reach.
+const MAX_HERO_ZONE_DISTANCE_KM = 35;
 
 function getHeroCardGlowClass(surge: SurgeResult | null | undefined): string {
   if (!hasActiveSurge(surge)) return '';
@@ -157,6 +162,12 @@ export default function DriveScreen() {
   const [cityId, setCityId] = useCityId();
   const { data: cities = [] } = useCities();
   const { location, status, error, refresh } = useUserLocation(15000);
+  // Same guard as NearestHotspot/useSmartZones: a cold or coarse GPS fix can
+  // land the hero recommendation on a zone across a city boundary (e.g. a
+  // stale `cityId` from localStorage still pointing at Longueuil while the
+  // driver is actually in Laval) -- hold the hero card until the first
+  // trustworthy fix, and never rank a zone outside a reachable radius.
+  const hasPreciseFix = useHasPreciseFix(location);
   const { data: emergingHotspots = [] } = useEmergingHotspots();
   const nearbyHotspot = location
     ? nearestEmergingHotspot(location.latitude, location.longitude, emergingHotspots)
@@ -347,6 +358,10 @@ export default function DriveScreen() {
   );
 
   const rankedZones = useMemo(() => {
+    // No trustworthy fix yet -- don't rank anything, the hero card shows a
+    // skeleton instead (see hasPreciseFix gate below `noZonesAvailable`).
+    if (!hasPreciseFix || !location) return [];
+
     return zones
       .map((z) => {
         const score = scores.get(z.id) ?? 0;
@@ -360,8 +375,13 @@ export default function DriveScreen() {
             : score,
         };
       })
+      .filter(
+        (z) =>
+          haversineKm(location.latitude, location.longitude, z.latitude, z.longitude) <=
+          MAX_HERO_ZONE_DISTANCE_KM
+      )
       .sort((a, b) => b.score - a.score);
-  }, [zones, scores, saturatedZoneIds, driversByZone]);
+  }, [zones, scores, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
 
   const marketRadarZones = useMemo(
     () =>
@@ -878,7 +898,7 @@ export default function DriveScreen() {
                 />
               </div>
             </>
-          ) : scoresLoading ? (
+          ) : scoresLoading || !hasPreciseFix ? (
             <div className="flex flex-col items-center space-y-3 py-2">
               <Skeleton className="h-9 w-48" />
               <Skeleton className="h-4 w-24" />
