@@ -571,6 +571,29 @@ describe('syncLearningAggregates', () => {
     expect(result.ok).toBe(false);
     expect(result.message).toBe('Unexpected network error');
   });
+
+  it('logs the raw Supabase error (message/details/hint/code), not just the driver-facing toast', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockUpsert.mockResolvedValueOnce({
+      error: {
+        message: 'new row violates row-level security policy for table "ema_patterns"',
+        details: null,
+        hint: null,
+        code: '42501',
+      },
+    });
+
+    await syncLearningAggregates(sharedTrips, DEFAULT_WEIGHTS);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      '[syncLearningAggregates] Supabase sync failed:',
+      expect.objectContaining({
+        message: expect.stringContaining('row-level security'),
+        code: '42501',
+      })
+    );
+    consoleErrorSpy.mockRestore();
+  });
 });
 
 describe('syncShiftLearning', () => {

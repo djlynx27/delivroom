@@ -222,6 +222,29 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+// PostgrestError carries message/details/hint/code that getErrorMessage()
+// throws away in favor of a driver-facing fallback string — log the exact
+// shape here so an RLS/schema failure is diagnosable from the console
+// instead of just showing "Sync Supabase impossible." with no context.
+function logSupabaseSyncError(context: string, error: unknown) {
+  if (error && typeof error === 'object') {
+    const { message, details, hint, code } = error as {
+      message?: string;
+      details?: string;
+      hint?: string;
+      code?: string;
+    };
+    console.error(`[${context}] Supabase sync failed:`, {
+      message,
+      details,
+      hint,
+      code,
+    });
+    return;
+  }
+  console.error(`[${context}] Supabase sync failed:`, error);
+}
+
 function getLearningSyncFailureMessage(error: unknown, fallback: string) {
   if (
     typeof navigator !== 'undefined' &&
@@ -820,6 +843,7 @@ export async function syncLearningAggregates(
       message: 'Patterns EMA, croyances et poids synchronisés.',
     };
   } catch (error: unknown) {
+    logSupabaseSyncError('syncLearningAggregates', error);
     return {
       ok: false,
       syncedCounts: createEmptySyncCounts(),
@@ -881,6 +905,7 @@ export async function syncShiftLearning(
       message: 'Shift, prédictions et patterns synchronisés vers Supabase.',
     };
   } catch (error: unknown) {
+    logSupabaseSyncError('syncShiftLearning', error);
     if (sessionId !== null) {
       await cleanupFailedShiftSync(sessionId);
     }
