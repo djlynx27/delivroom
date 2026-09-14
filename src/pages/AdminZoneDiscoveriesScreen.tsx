@@ -39,7 +39,7 @@ import {
   Sparkles,
   Trash2,
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 const ZONE_TYPES = [
@@ -391,6 +391,23 @@ export default function AdminZoneDiscoveriesScreen() {
       setAutoBulk(null);
     }
   }
+
+  // Zero-touch: run the same data-driven promotion automatically the first
+  // time this screen sees qualified nuggets, so they don't pile up in
+  // "À traiter" waiting for a manual click. Guarded to fire once per mount —
+  // autoPromoteNuggets() itself already re-checks eligibility per candidate.
+  const autoRanRef = useRef(false);
+  useEffect(() => {
+    if (autoRanRef.current) return;
+    if (isLoading || autoBulk || bulk) return;
+    if (nuggetCandidateCount === 0) return;
+    autoRanRef.current = true;
+    void autoPromoteNuggets();
+    // autoPromoteNuggets is redefined every render (reads discoveries/bulk
+    // state) — the autoRanRef guard above is what keeps this to one run,
+    // not the dep array.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, autoBulk, bulk, nuggetCandidateCount]);
 
   async function rejectDiscovery(id: string) {
     setRejectingId(id);

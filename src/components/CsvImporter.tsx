@@ -17,6 +17,7 @@ import {
   parseOptionalMilesToKm,
   parseRequiredCurrencyValue,
 } from '@/lib/csvTripParsing';
+import { triggerLearningRetrain } from '@/lib/triggerLearningRetrain';
 import { useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSpreadsheet, Loader2, Upload } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
@@ -417,6 +418,7 @@ export function CsvImporter() {
     if (success > 0) {
       queryClient.invalidateQueries({ queryKey: ['trips-feed'] });
       queryClient.invalidateQueries({ queryKey: ['recent-trips'] });
+      void triggerLearningRetrain(success);
     }
 
     const skippedCount = skippedRows.size;

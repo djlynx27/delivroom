@@ -35,6 +35,7 @@ import { getActiveTimeBoosts } from '@/lib/timeBoosts';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
 import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { recordRide as shiftRecordRide } from '@/lib/shiftTracker';
+import { triggerLearningRetrain } from '@/lib/triggerLearningRetrain';
 import { useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Camera, CheckCircle2, Flame, Loader2, MapPin, Navigation, Save, ShieldCheck, ThumbsDown, ThumbsUp, Upload, Zap } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -453,6 +454,7 @@ export function ScreenshotAnalyzer() {
       }
       qc.invalidateQueries({ queryKey: ['trips-feed'] });
       qc.invalidateQueries({ queryKey: ['trip-history'] });
+      void triggerLearningRetrain(1);
       toast.success('Course sauvegardée — le moteur d\'apprentissage va s\'améliorer');
     } catch (err) {
       toast.error(getErrorMessage(err, 'Erreur lors de la sauvegarde'));
