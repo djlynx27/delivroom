@@ -14,7 +14,7 @@ const SUPABASE_ANON_KEY =
 // from this same client, Drive included, since nothing ever rejected.
 // AbortController here is the floor: every request now fails fast instead
 // of hanging indefinitely, regardless of cause.
-const REQUEST_TIMEOUT_MS = 8_000;
+const REQUEST_TIMEOUT_MS = 15_000;
 
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
