@@ -99,6 +99,10 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file, same as single upload
 // Above this many files we just show a heads-up (long run), never drop any.
 const LARGE_BATCH_WARN = 300;
 const DEFAULT_FILTER = 'Maxymo';        // pre-fill the filter for Maxymo's default filename prefix
+// Rendering thousands of <li> rows kept the list itself as the main jank
+// source once the item count got large — every file still gets processed,
+// this only caps how many status rows the DOM has to keep reconciling.
+const VISIBLE_ITEMS_CAP = 100;
 
 const PLATFORMS = ['lyft', 'imoove', 'hypra', 'doordash', 'uber', 'autre'] as const;
 type Platform = (typeof PLATFORMS)[number];
@@ -233,6 +237,13 @@ export function BulkScreenshotUploader() {
   // its DEFAULT_FILTER default regardless of what's actually configured)
   // without clobbering a manual edit the driver makes mid-session.
   const lastSyncedFolderRef = useRef<string | null>(null);
+  // A large batch (thousands of real screenshots) calls updateItem several
+  // times per file in quick succession — each one used to trigger its own
+  // full items-array clone + re-render of every <li>. Coalescing same-frame
+  // patches into a single state update keeps re-renders proportional to
+  // frames, not to file count.
+  const pendingPatchesRef = useRef<Map<string, Partial<FileItem>>>(new Map());
+  const flushScheduledRef = useRef(false);
   const kind = scannerKind();
 
   function updateItemsState(updater: (prev: FileItem[]) => FileItem[]) {
@@ -561,8 +572,30 @@ export function BulkScreenshotUploader() {
     void ingest(Array.from(e.target.files ?? []), { fromFolder: true });
   }
 
+  // Applies whatever patches are still queued right now, bypassing the rAF
+  // wait — needed before any read of itemsRef.current (post-batch pipeline,
+  // retry queue) so it never sees a stale status for the item that just
+  // finished processing.
+  function flushPendingItemPatches() {
+    if (pendingPatchesRef.current.size === 0) return;
+    const patches = pendingPatchesRef.current;
+    pendingPatchesRef.current = new Map();
+    updateItemsState((prev) =>
+      prev.map((it) => {
+        const patch = patches.get(it.id);
+        return patch ? { ...it, ...patch } : it;
+      }),
+    );
+  }
+
   function updateItem(id: string, patch: Partial<FileItem>) {
-    updateItemsState((prev) => prev.map((it) => (it.id === id ? { ...it, ...patch } : it)));
+    pendingPatchesRef.current.set(id, { ...pendingPatchesRef.current.get(id), ...patch });
+    if (flushScheduledRef.current) return;
+    flushScheduledRef.current = true;
+    requestAnimationFrame(() => {
+      flushScheduledRef.current = false;
+      flushPendingItemPatches();
+    });
   }
 
   async function processOne(item: FileItem): Promise<void> {
@@ -661,6 +694,7 @@ export function BulkScreenshotUploader() {
         // eslint-disable-next-line no-await-in-loop
         await processOne(item);
       }
+      flushPendingItemPatches();
       await runPostBatchPipeline(itemsRef.current);
     } finally {
       setRunning(false);
@@ -721,6 +755,7 @@ export function BulkScreenshotUploader() {
     for (const item of newItems) {
       await processOne(item);
     }
+    flushPendingItemPatches();
     await runPostBatchPipeline(itemsRef.current);
   }
 
@@ -1193,8 +1228,14 @@ export function BulkScreenshotUploader() {
               </div>
             )}
 
+            {items.length > VISIBLE_ITEMS_CAP && (
+              <p className="text-[10px] text-muted-foreground text-center">
+                Affichage des {VISIBLE_ITEMS_CAP} plus récents sur {items.length} — le reste est traité
+                normalement, juste pas listé ici.
+              </p>
+            )}
             <ul className="max-h-72 overflow-y-auto space-y-1 text-xs">
-              {items.map((it) => (
+              {items.slice(0, VISIBLE_ITEMS_CAP).map((it) => (
                 <li
                   key={it.id}
                   className="flex items-center justify-between gap-2 bg-background rounded-md border border-border p-2"

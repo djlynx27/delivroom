@@ -235,19 +235,52 @@ async function readdirSafe(path: string): Promise<ListedFile[]> {
   }
 }
 
+// Decodes base64 straight to bytes instead of building a
+// "data:...;base64,<payload>" string and round-tripping it through fetch() —
+// that doubled the live memory footprint per file (the base64 string, the
+// data: URL copy of it, and the fetch's internal buffering all alive at
+// once). Confirmed on a real device: scanning a folder with 2000+ real
+// screenshots and an empty name filter crashed the app — every candidate's
+// bytes were being decoded concurrently via Promise.all with no cap at all.
+function base64ToBlob(base64: string, mime: string): Blob {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
 async function loadFile(c: ListedFile): Promise<File | null> {
   try {
     const read = await Filesystem.readFile({
       path: `${c.dir}/${c.name}`,
       directory: Directory.ExternalStorage,
     });
-    const dataUrl = `data:${mimeFromName(c.name)};base64,${read.data}`;
-    const blob = await (await fetch(dataUrl)).blob();
-    return new File([blob], c.name, { type: blob.type, lastModified: c.mtime || Date.now() });
+    const mime = mimeFromName(c.name);
+    const blob = base64ToBlob(read.data as string, mime);
+    return new File([blob], c.name, { type: mime, lastModified: c.mtime || Date.now() });
   } catch (err) {
     console.warn('[capacitorScanner] could not load', c.name, err);
     return null;
   }
+}
+
+// Hard cap on concurrent file reads/decodes — each one holds a full base64
+// string + decoded bytes in memory at once, so scanning thousands of real
+// screenshots at once (nameFilter empty = "take everything") was blowing
+// past what the WebView process could hold. Sequential batches keep peak
+// memory bounded to this many files regardless of folder size.
+const LOAD_BATCH_SIZE = 15;
+
+async function loadFilesInBatches(candidates: ListedFile[]): Promise<File[]> {
+  const loaded: File[] = [];
+  for (let i = 0; i < candidates.length; i += LOAD_BATCH_SIZE) {
+    const batch = candidates.slice(i, i + LOAD_BATCH_SIZE);
+    const results = await Promise.all(batch.map(loadFile));
+    for (const file of results) {
+      if (file) loaded.push(file);
+    }
+  }
+  return loaded;
 }
 
 /**
@@ -267,8 +300,7 @@ export async function nativeScan(nameFilter: string): Promise<File[]> {
     .filter((e) => !needle || e.name.toLowerCase().includes(needle))
     .sort((a, b) => b.mtime - a.mtime);
 
-  const loaded = await Promise.all(candidates.map(loadFile));
-  return loaded.filter((f): f is File => f !== null);
+  return loadFilesInBatches(candidates);
 }
 
 function mimeFromName(name: string): string {
