@@ -155,6 +155,13 @@ npm run test:e2e
 
 # Android
 npx cap sync android
+npm run build:apk    # vite build + cap sync + gradlew assembleDebug (voir docs/android-native-build.md)
+npm run install:apk  # adb install -r sur l'appareil connecté
+
+# Forcer le SW à sauter l'attente sur un appareil de test après un déploiement
+# Vercel (non-destructif — ne PAS utiliser `pm clear com.android.chrome`, voir
+# §"Topologie réelle" plus bas)
+python scripts/force_refresh_device.py --transport <id>
 ```
 
 ---
