@@ -396,7 +396,11 @@ export function useDemandScores(
           zones.map((zone) => zone.id)
         )
         .gte('captured_at', lookbackStart)
-        .order('captured_at', { ascending: false });
+        .order('captured_at', { ascending: false })
+        // Defensive cap — this is naturally bounded by zone count × window
+        // already, but a scraper writing unusually often must not turn an
+        // in-shift query into an unbounded scan.
+        .limit(500);
       if (error) throw error;
 
       const latestByZone = new Map<string, (typeof data)[number]>();
