@@ -93,10 +93,13 @@ function hasActiveSurge(surge: SurgeResult | null | undefined): surge is SurgeRe
   return !!surge && surge.surgeClass !== 'normal';
 }
 
-// Same reachability cap as useSmartZones.MAX_DISTANCE_KM -- 35km covers
-// Laval <-> downtown MTL / Vieux-Port without letting a stale cityId
-// surface a zone the driver can't realistically reach.
-const MAX_HERO_ZONE_DISTANCE_KM = 35;
+// Stricter than useSmartZones.MAX_DISTANCE_KM (35km, general zone browsing)
+// -- the hero card claims to be THE actionable recommendation right now, so
+// a stale cityId or a border zone with a high score must not surface a
+// destination the driver can't reasonably drive to (e.g. Station Longueuil
+// while physically in Saint-Léonard, ~15-18km away, was winning solely on
+// score with no distance penalty).
+const MAX_HERO_ZONE_DISTANCE_KM = 15;
 
 function getHeroCardGlowClass(surge: SurgeResult | null | undefined): string {
   if (!hasActiveSurge(surge)) return '';
