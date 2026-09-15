@@ -306,6 +306,13 @@ export function BulkScreenshotUploader() {
   const [pickedFolder, setPickedFolder] = useState(DEFAULT_SCAN_PATHS[0]);
   const [extraFolderPaths, setExtraFolderPaths] = useState<string[]>([]);
   const customFolderInputRef = useRef<HTMLInputElement>(null);
+  // @capacitor/filesystem's requestPermissions() doesn't actually re-query
+  // Android when it's already (wrongly) cached as granted — confirmed on a
+  // real device it returns "granted" instantly with no OS dialog even after
+  // the permission was truly revoked. No re-request path exists from here,
+  // so the "Réactiver" banner just walks the driver to the Settings screen
+  // manually instead of pretending a tap can fix it.
+  const [permissionHelpOpen, setPermissionHelpOpen] = useState(false);
 
   function promptNativePath(): Promise<string | null> {
     return new Promise((resolve) => {
@@ -924,8 +931,8 @@ export function BulkScreenshotUploader() {
                 <span className="flex-1">
                   Permission Stockage Révoquée par Android — Cliquez pour Réactiver
                 </span>
-                <Button size="sm" className="h-7 text-xs" onClick={requestPermission}>
-                  Réactiver
+                <Button size="sm" className="h-7 text-xs" onClick={() => setPermissionHelpOpen(true)}>
+                  Voir instructions
                 </Button>
               </div>
             ) : scanStatus === 'granted' && lastSyncCount != null ? (
@@ -1251,6 +1258,27 @@ export function BulkScreenshotUploader() {
           <DialogFooter>
             <Button variant="outline" onClick={cancelFolderPick}>Annuler</Button>
             <Button onClick={confirmFolderPick}>Confirmer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={permissionHelpOpen} onOpenChange={setPermissionHelpOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Réactiver l'accès aux photos</DialogTitle>
+            <DialogDescription>
+              Android a masqué la permission en arrière-plan (ça arrive après une longue période
+              sans ouvrir l'app). L'app ne peut pas la redemander elle-même — il faut l'activer
+              manuellement :
+            </DialogDescription>
+          </DialogHeader>
+          <ol className="list-decimal list-inside space-y-1 text-sm text-foreground">
+            <li>Ouvre les Paramètres du téléphone</li>
+            <li>Va dans Applications → Delivroom → Autorisations</li>
+            <li>Active "Photos et vidéos" (ou Stockage)</li>
+          </ol>
+          <DialogFooter>
+            <Button onClick={() => setPermissionHelpOpen(false)}>Compris</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
