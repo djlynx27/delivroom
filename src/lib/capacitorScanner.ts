@@ -118,18 +118,6 @@ export async function verifyNativeReadAccess(configuredPath: string | null): Pro
   return localStorage.getItem(EVER_SAW_FILES_KEY) !== '1';
 }
 
-/**
- * Forces a real native permission re-request, bypassing
- * Filesystem.checkPermissions()'s cached/stale "granted" — only called from
- * a driver tap (the Admin Imports "Réactiver" banner), never silently on
- * mount, since Android pops a real system dialog here if the grant really
- * is gone.
- */
-export async function forceNativePermissionReprompt(): Promise<boolean> {
-  if (!isNative()) return false;
-  const after = await Filesystem.requestPermissions();
-  return after.publicStorage === 'granted';
-}
 
 interface ListedFile {
   name: string;

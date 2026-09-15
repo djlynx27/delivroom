@@ -5,7 +5,6 @@
 
 import {
   ensureNativePermission,
-  forceNativePermissionReprompt,
   getConfiguredPath,
   isNative,
   nativeScan,
@@ -63,13 +62,16 @@ export async function getScanStatus(): Promise<ScanStatus> {
 }
 
 /**
- * Re-request permission — used by the banner's "1-tap grant"/"Réactiver"
- * button. Native forces a real OS re-prompt (see forceNativePermissionReprompt's
- * doc comment for why checkPermissions() alone can't be trusted); web
- * re-requests on the already-configured folder handle, no folder picker.
+ * Re-request permission — used by the web/fs-access "1-tap grant" banner
+ * button on the already-configured folder handle, no folder picker. Native
+ * has no equivalent: Filesystem.requestPermissions() doesn't re-query
+ * Android once it's (wrongly) cached as granted, confirmed on a real device
+ * — see verifyNativeReadAccess's doc comment — so the native
+ * 'permission-revoked' banner sends the driver to Android Settings instead
+ * of calling this.
  */
 export async function regrantPermission(): Promise<boolean> {
-  if (isNative()) return forceNativePermissionReprompt();
+  if (isNative()) return false;
   const handle = await getStoredHandle();
   if (!handle) return false;
   return ensureReadPermission(handle, true);
