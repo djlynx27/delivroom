@@ -97,7 +97,7 @@ interface ListedFile {
 // the foreground, while a Lyft in-app share can land in Pictures/Lyft. The
 // configured path (whatever the driver picked for the overlay-button output,
 // typically Pictures/Maxymo) is scanned too, on top of these — not instead.
-const DEFAULT_SCAN_PATHS = ['Pictures/Screenshots', 'Pictures/Lyft', 'Pictures/Maxymo', 'DCIM/Screenshots'];
+export const DEFAULT_SCAN_PATHS = ['Pictures/Screenshots', 'Pictures/Lyft', 'Pictures/Maxymo', 'DCIM/Screenshots'];
 
 /** Every folder a scan should check: the configured one (if any) plus the
  * standard OS/app screenshot locations, deduplicated. Exported standalone so

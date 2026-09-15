@@ -8,6 +8,14 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Progress } from '@/components/ui/progress';
 import {
   Select,
@@ -40,7 +48,11 @@ import {
   registerMaxymoPeriodicSync,
   unregisterMaxymoPeriodicSync,
 } from '@/lib/backgroundSync';
-import { onAppResume, triggerImmediateBackgroundScan } from '@/lib/capacitorScanner';
+import {
+  DEFAULT_SCAN_PATHS,
+  onAppResume,
+  triggerImmediateBackgroundScan,
+} from '@/lib/capacitorScanner';
 import {
   clearAutoScanConfig,
   configureAutoScan as configureScanner,
@@ -256,13 +268,29 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function promptNativePath(): Promise<string | null> {
-    const current = autoScanLabel?.replace(/^📁 /, '') ?? 'Pictures/Maxymo';
-    const path = window.prompt(
-      'Chemin du dossier Maxymo (sous External Storage)\nex: Pictures/Maxymo, DCIM/Screenshots',
-      current,
-    );
-    return path?.trim() || null;
+  // Graphical folder picker replacing the old window.prompt text entry —
+  // Android gives no native folder-browse dialog for app-private External
+  // Storage paths, so the choices are the same fixed set nativeScan() already
+  // walks (see DEFAULT_SCAN_PATHS in capacitorScanner.ts); a free-text path
+  // outside that set would never get scanned anyway.
+  const [folderPickerResolve, setFolderPickerResolve] = useState<((path: string | null) => void) | null>(null);
+  const [pickedFolder, setPickedFolder] = useState(DEFAULT_SCAN_PATHS[0]);
+
+  function promptNativePath(): Promise<string | null> {
+    return new Promise((resolve) => {
+      setPickedFolder(autoScanLabel?.replace(/^📁 /, '') ?? DEFAULT_SCAN_PATHS[0]);
+      setFolderPickerResolve(() => resolve);
+    });
+  }
+
+  function confirmFolderPick() {
+    folderPickerResolve?.(pickedFolder);
+    setFolderPickerResolve(null);
+  }
+
+  function cancelFolderPick() {
+    folderPickerResolve?.(null);
+    setFolderPickerResolve(null);
   }
 
   async function configureAutoScan() {
@@ -1116,6 +1144,31 @@ export function BulkScreenshotUploader() {
           </>
         )}
       </CardContent>
+
+      <Dialog open={folderPickerResolve !== null} onOpenChange={(open) => !open && cancelFolderPick()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Dossier Maxymo à surveiller</DialogTitle>
+            <DialogDescription>
+              Choisis où Maxymo (ou l'overlay button) enregistre ses captures.
+            </DialogDescription>
+          </DialogHeader>
+          <Select value={pickedFolder} onValueChange={setPickedFolder}>
+            <SelectTrigger className="bg-background border-border">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              {DEFAULT_SCAN_PATHS.map((p) => (
+                <SelectItem key={p} value={p}>{p}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelFolderPick}>Annuler</Button>
+            <Button onClick={confirmFolderPick}>Confirmer</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

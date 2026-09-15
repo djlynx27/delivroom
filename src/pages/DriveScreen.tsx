@@ -591,7 +591,10 @@ export default function DriveScreen() {
       {/* Address search — floating overlay, sticks above the hero card while
           scrolling. 1-tap: picking a result goes straight to Google Maps,
           same as the recommended-zone flow, no in-app map detour. */}
-      <div className="sticky top-0 z-20 px-4 pt-2 pb-3 bg-gradient-to-b from-background via-background/95 to-transparent">
+      <div
+        className="sticky top-0 z-20 px-4 pt-2 pb-3 bg-gradient-to-b from-background via-background/95 to-transparent"
+        style={{ paddingTop: 'calc(env(safe-area-inset-top) + 0.5rem)' }}
+      >
         <AddressSearchBox
           onSelect={handleAddressSelect}
           proximity={

@@ -238,7 +238,11 @@ export function DrivingHUD({
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col select-none touch-none overflow-visible"
-      style={{ background: '#08081a' }}
+      style={{
+        background: '#08081a',
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+      }}
       role="region"
       aria-label="Mode conduite actif"
     >
