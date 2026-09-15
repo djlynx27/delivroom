@@ -134,7 +134,7 @@ interface ListedFile {
 // the foreground, while a Lyft in-app share can land in Pictures/Lyft. The
 // configured path (whatever the driver picked for the overlay-button output,
 // typically Pictures/Maxymo) is scanned too, on top of these — not instead.
-export const DEFAULT_SCAN_PATHS = ['Pictures/Screenshots', 'Pictures/Lyft', 'Pictures/Maxymo', 'DCIM/Screenshots'];
+export const DEFAULT_SCAN_PATHS = ['Pictures/maxymo/lyft', 'Pictures/Screenshots', 'Pictures/Lyft', 'DCIM/Screenshots'];
 
 /** Every folder a scan should check: the configured one (if any) plus the
  * standard OS/app screenshot locations, deduplicated. Exported standalone so
@@ -173,44 +173,57 @@ export async function resolveFolderPathByName(leafName: string): Promise<string 
   return null;
 }
 
+// Confirmed on a real device: Maxymo's actual overlay-button output lands
+// two levels under Pictures (Pictures/maxymo/lyft), not one — a single-level
+// search missed it entirely. Bounded at 2 to keep the folder/file listing
+// cost (cheap metadata calls, no file reads) proportional; go deeper only if
+// a real device turns up a folder nested further than this.
+const FILE_SEARCH_MAX_DEPTH = 2;
+
+/** Depth-bounded search for `fileName` under `basePath`, trying `stat` at
+ * every level before descending — see resolveFolderPathByFileName's doc
+ * comment for why `stat`, not `readdir`, is what actually finds the file. */
+async function searchForFile(basePath: string, fileName: string, depthLeft: number): Promise<string | null> {
+  try {
+    await Filesystem.stat({ path: basePath ? `${basePath}/${fileName}` : fileName, directory: Directory.ExternalStorage });
+    return basePath;
+  } catch {
+    // Not directly here — descend into subfolders below, if any depth left.
+  }
+  if (depthLeft <= 0) return null;
+  let files;
+  try {
+    files = (await Filesystem.readdir({ path: basePath, directory: Directory.ExternalStorage })).files;
+  } catch {
+    return null;
+  }
+  for (const sub of files.filter((f) => f.type === 'directory')) {
+    const subPath = basePath ? `${basePath}/${sub.name}` : sub.name;
+    const found = await searchForFile(subPath, fileName, depthLeft - 1);
+    if (found !== null) return found;
+  }
+  return null;
+}
+
 /**
  * Fallback for when the picker returned no usable `webkitRelativePath` at
  * all (confirmed on a real device: Samsung's Files app, used by the Android
  * WebView's generic document chooser, returns files with an empty relative
  * path instead of the "<folder>/<file>" Chrome's own picker gives) —
- * enumerates subfolder names one level under the common roots (that listing
- * is reliable), then `stat`s the guessed "<subfolder>/<fileName>" path
- * directly. Deliberately uses `stat`, not `readdir`, on the subfolder itself:
- * confirmed on-device that `readdir` on a non-media-only nested folder comes
- * back empty under Android scoped storage even though the file is there and
- * `stat` finds it fine — a plugin/OS quirk this works around, not a bug in
- * the search logic. Same "good enough, not exhaustive" ceiling otherwise as
+ * recursively `stat`s the guessed "<subfolder.../fileName>" path under each
+ * common root, up to FILE_SEARCH_MAX_DEPTH levels deep. Deliberately uses
+ * `stat`, not `readdir`, on the file itself: confirmed on-device that
+ * `readdir` on a non-media-only nested folder comes back empty under
+ * Android scoped storage even though the file is there and `stat` finds it
+ * fine — a plugin/OS quirk this works around, not a bug in the search
+ * logic. Same "good enough, not exhaustive" ceiling otherwise as
  * resolveFolderPathByName.
  */
 export async function resolveFolderPathByFileName(fileName: string): Promise<string | null> {
   if (!isNative()) return null;
   for (const root of COMMON_PICKER_ROOTS) {
-    let files;
-    try {
-      files = (await Filesystem.readdir({ path: root, directory: Directory.ExternalStorage })).files;
-    } catch {
-      continue;
-    }
-    try {
-      await Filesystem.stat({ path: root ? `${root}/${fileName}` : fileName, directory: Directory.ExternalStorage });
-      return root;
-    } catch {
-      // Not directly in this root — check its subfolders below.
-    }
-    for (const sub of files.filter((f) => f.type === 'directory')) {
-      const subPath = root ? `${root}/${sub.name}` : sub.name;
-      try {
-        await Filesystem.stat({ path: `${subPath}/${fileName}`, directory: Directory.ExternalStorage });
-        return subPath;
-      } catch {
-        // Not in this subfolder — try the next one.
-      }
-    }
+    const found = await searchForFile(root, fileName, FILE_SEARCH_MAX_DEPTH);
+    if (found !== null) return found;
   }
   return null;
 }

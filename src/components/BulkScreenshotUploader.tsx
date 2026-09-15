@@ -49,7 +49,6 @@ import {
   unregisterMaxymoPeriodicSync,
 } from '@/lib/backgroundSync';
 import {
-  DEFAULT_SCAN_PATHS,
   onAppResume,
   resolveFolderPathByFileName,
   resolveFolderPathByName,
@@ -307,15 +306,12 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Graphical folder picker replacing the old window.prompt text entry.
-  // Defaults to the fixed set nativeScan() already walks (DEFAULT_SCAN_PATHS)
-  // plus whatever custom folders got resolved this session; "Autre…" opens
-  // the system folder browser (webkitdirectory) and resolveFolderPathByName
-  // maps the picked folder back to an External-Storage-relative path.
-  const CUSTOM_FOLDER_SENTINEL = '__custom__';
+  // Graphical folder picker replacing the old window.prompt text entry —
+  // one tap on "Changer de dossier" opens the system file browser directly
+  // (no intermediate dropdown/confirm step); picking any file inside the
+  // target folder derives and saves that folder immediately via
+  // resolveFolderPathByName/resolveFolderPathByFileName.
   const [folderPickerResolve, setFolderPickerResolve] = useState<((path: string | null) => void) | null>(null);
-  const [pickedFolder, setPickedFolder] = useState(DEFAULT_SCAN_PATHS[0]);
-  const [extraFolderPaths, setExtraFolderPaths] = useState<string[]>([]);
   const customFolderInputRef = useRef<HTMLInputElement>(null);
   // @capacitor/filesystem's requestPermissions() doesn't actually re-query
   // Android when it's already (wrongly) cached as granted — confirmed on a
@@ -325,26 +321,26 @@ export function BulkScreenshotUploader() {
   // manually instead of pretending a tap can fix it.
   const [permissionHelpOpen, setPermissionHelpOpen] = useState(false);
 
+  // Opens the system file browser immediately — no dropdown, no confirm
+  // step. Resolves with the derived folder path once a file is picked (see
+  // handleCustomFolderPick), or null if the picker returns nothing.
   function promptNativePath(): Promise<string | null> {
     return new Promise((resolve) => {
-      setPickedFolder(autoScanLabel?.replace(/^📁 /, '') ?? DEFAULT_SCAN_PATHS[0]);
       setFolderPickerResolve(() => resolve);
-    });
-  }
-
-  function handleFolderSelectChange(value: string) {
-    if (value === CUSTOM_FOLDER_SENTINEL) {
       customFolderInputRef.current?.click();
-      return;
-    }
-    setPickedFolder(value);
+    });
   }
 
   async function handleCustomFolderPick(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
     e.target.value = ''; // allow re-picking the same folder later
+    const resolve = folderPickerResolve;
+    setFolderPickerResolve(null);
     const first = files[0];
-    if (!first) return;
+    if (!first) {
+      resolve?.(null);
+      return;
+    }
     // Chrome's own folder picker sets webkitRelativePath to "<folder>/<file>";
     // some OEM file-chooser apps (confirmed: Samsung's, on the Android WebView
     // generic document intent) return it empty instead — fall back to
@@ -358,22 +354,12 @@ export function BulkScreenshotUploader() {
       toast.error(
         `"${failedLabel}" est hors de Pictures/DCIM/Download — l'auto-scan ne peut pas le suivre. Utilise l'import manuel "Dossier entier" pour ce dossier.`,
       );
+      resolve?.(null);
       return;
     }
-    setExtraFolderPaths((prev) => (prev.includes(resolved) ? prev : [...prev, resolved]));
-    setPickedFolder(resolved);
-  }
-
-  function confirmFolderPick() {
-    setNameFilter(filterForFolder(pickedFolder));
-    lastSyncedFolderRef.current = pickedFolder;
-    folderPickerResolve?.(pickedFolder);
-    setFolderPickerResolve(null);
-  }
-
-  function cancelFolderPick() {
-    folderPickerResolve?.(null);
-    setFolderPickerResolve(null);
+    setNameFilter(filterForFolder(resolved));
+    lastSyncedFolderRef.current = resolved;
+    resolve?.(resolved);
   }
 
   async function configureAutoScan() {
@@ -1036,7 +1022,7 @@ export function BulkScreenshotUploader() {
                   onClick={configureAutoScan}
                   disabled={running || autoScanning}
                 >
-                  Changer
+                  Changer de dossier
                 </Button>
                 <Button
                   size="sm"
@@ -1268,40 +1254,17 @@ export function BulkScreenshotUploader() {
         )}
       </CardContent>
 
-      <Dialog open={folderPickerResolve !== null} onOpenChange={(open) => !open && cancelFolderPick()}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Dossier Maxymo à surveiller</DialogTitle>
-            <DialogDescription>
-              Choisis où Maxymo (ou l'overlay button) enregistre ses captures.
-            </DialogDescription>
-          </DialogHeader>
-          <Select value={pickedFolder} onValueChange={handleFolderSelectChange}>
-            <SelectTrigger className="bg-background border-border">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent className="bg-card border-border">
-              {[...DEFAULT_SCAN_PATHS, ...extraFolderPaths].map((p) => (
-                <SelectItem key={p} value={p}>{p}</SelectItem>
-              ))}
-              <SelectItem value={CUSTOM_FOLDER_SENTINEL}>Autre… (parcourir)</SelectItem>
-            </SelectContent>
-          </Select>
-          <input
-            ref={customFolderInputRef}
-            type="file"
-            multiple
-            webkitdirectory=""
-            directory=""
-            className="hidden"
-            onChange={(e) => void handleCustomFolderPick(e)}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={cancelFolderPick}>Annuler</Button>
-            <Button onClick={confirmFolderPick}>Confirmer</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Hidden always — promptNativePath() clicks this directly, no
+          intermediate dropdown/confirm dialog in between. */}
+      <input
+        ref={customFolderInputRef}
+        type="file"
+        multiple
+        webkitdirectory=""
+        directory=""
+        className="hidden"
+        onChange={(e) => void handleCustomFolderPick(e)}
+      />
 
       <Dialog open={permissionHelpOpen} onOpenChange={setPermissionHelpOpen}>
         <DialogContent>
