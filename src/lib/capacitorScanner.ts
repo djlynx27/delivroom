@@ -107,6 +107,77 @@ export function getScanPaths(configuredPath: string | null): string[] {
   return Array.from(new Set(all));
 }
 
+// Roots the graphical "Autre…" folder picker probes for a direct-child match
+// by name (see resolveFolderPathByName). One level deep only — a full
+// recursive walk of external storage to find an arbitrarily nested folder
+// would be slow and disproportionate for this; DEFAULT_SCAN_PATHS already
+// covers every folder Android/Maxymo actually write to.
+const COMMON_PICKER_ROOTS = ['Pictures', 'DCIM', 'Download', ''];
+
+/**
+ * The browser's webkitdirectory folder picker never exposes a file's real
+ * absolute path (privacy sandboxing) — only the picked folder's own name via
+ * `webkitRelativePath`. This re-derives the External-Storage-relative path
+ * `nativeScan` needs by checking whether a same-named subdirectory exists
+ * under one of the common roots. Returns null if no match is found (folder
+ * lives somewhere nativeScan can't reach without a real SAF plugin).
+ */
+export async function resolveFolderPathByName(leafName: string): Promise<string | null> {
+  if (!isNative()) return null;
+  for (const root of COMMON_PICKER_ROOTS) {
+    try {
+      const { files } = await Filesystem.readdir({ path: root, directory: Directory.ExternalStorage });
+      const match = files.some((f) => f.type === 'directory' && f.name === leafName);
+      if (match) return root ? `${root}/${leafName}` : leafName;
+    } catch {
+      // Root itself missing/unreadable — try the next candidate.
+    }
+  }
+  return null;
+}
+
+/**
+ * Fallback for when the picker returned no usable `webkitRelativePath` at
+ * all (confirmed on a real device: Samsung's Files app, used by the Android
+ * WebView's generic document chooser, returns files with an empty relative
+ * path instead of the "<folder>/<file>" Chrome's own picker gives) —
+ * enumerates subfolder names one level under the common roots (that listing
+ * is reliable), then `stat`s the guessed "<subfolder>/<fileName>" path
+ * directly. Deliberately uses `stat`, not `readdir`, on the subfolder itself:
+ * confirmed on-device that `readdir` on a non-media-only nested folder comes
+ * back empty under Android scoped storage even though the file is there and
+ * `stat` finds it fine — a plugin/OS quirk this works around, not a bug in
+ * the search logic. Same "good enough, not exhaustive" ceiling otherwise as
+ * resolveFolderPathByName.
+ */
+export async function resolveFolderPathByFileName(fileName: string): Promise<string | null> {
+  if (!isNative()) return null;
+  for (const root of COMMON_PICKER_ROOTS) {
+    let files;
+    try {
+      files = (await Filesystem.readdir({ path: root, directory: Directory.ExternalStorage })).files;
+    } catch {
+      continue;
+    }
+    try {
+      await Filesystem.stat({ path: root ? `${root}/${fileName}` : fileName, directory: Directory.ExternalStorage });
+      return root;
+    } catch {
+      // Not directly in this root — check its subfolders below.
+    }
+    for (const sub of files.filter((f) => f.type === 'directory')) {
+      const subPath = root ? `${root}/${sub.name}` : sub.name;
+      try {
+        await Filesystem.stat({ path: `${subPath}/${fileName}`, directory: Directory.ExternalStorage });
+        return subPath;
+      } catch {
+        // Not in this subfolder — try the next one.
+      }
+    }
+  }
+  return null;
+}
+
 /** A missing/inaccessible folder (not every device has Pictures/Lyft, say)
  * is not an error — it just contributes nothing to the scan. */
 async function readdirSafe(path: string): Promise<ListedFile[]> {

@@ -10,6 +10,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme as ToasterProps["theme"]}
       className="toaster group"
+      // Sonner switches to --mobile-offset-* below a 600px viewport (see its
+      // own @media rule) — our phone width falls under that, so both offset
+      // props are needed or the desktop one is silently ignored on-device.
+      offset={{ bottom: "calc(env(safe-area-inset-bottom) + 80px)" }}
+      mobileOffset={{ bottom: "calc(env(safe-area-inset-bottom) + 80px)" }}
       toastOptions={{
         classNames: {
           toast:

@@ -51,6 +51,8 @@ import {
 import {
   DEFAULT_SCAN_PATHS,
   onAppResume,
+  resolveFolderPathByFileName,
+  resolveFolderPathByName,
   triggerImmediateBackgroundScan,
 } from '@/lib/capacitorScanner';
 import {
@@ -141,6 +143,13 @@ function sanitizeFilename(name: string): string {
   return name.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+// The name filter defaults to "Maxymo" (DEFAULT_FILTER) for the Maxymo
+// folder — scanning e.g. Pictures/Lyft with that filter still set would
+// silently drop every Lyft-named screenshot.
+function filterForFolder(folder: string): string {
+  return folder.toLowerCase().includes('maxymo') ? DEFAULT_FILTER : '';
+}
+
 interface AnalysisResultMinimal {
   is_fallback?: boolean;
   matched_zone_id?: string | null;
@@ -218,6 +227,12 @@ export function BulkScreenshotUploader() {
   // auto pipeline always reads the freshest statuses instead of a stale
   // closure over the `items` state from whichever render kicked off the run.
   const itemsRef = useRef<FileItem[]>([]);
+  // Tracks which configured folder nameFilter was last synced against, so the
+  // mount/visibility effect re-derives the filter once per folder change
+  // (including the very first mount, where nameFilter always starts back at
+  // its DEFAULT_FILTER default regardless of what's actually configured)
+  // without clobbering a manual edit the driver makes mid-session.
+  const lastSyncedFolderRef = useRef<string | null>(null);
   const kind = scannerKind();
 
   function updateItemsState(updater: (prev: FileItem[]) => FileItem[]) {
@@ -242,12 +257,25 @@ export function BulkScreenshotUploader() {
       if (cancelled || !configured) return;
       setAutoScanConfigured(true);
       const label = await getConfiguredLabel();
-      if (label) setAutoScanLabel(label);
+      // nameFilter is captured once at effect-creation time (this callback
+      // never re-runs since the effect has no deps) — a plain `setNameFilter`
+      // wouldn't be visible to the `silentRescan` call below in this same
+      // invocation, so the derived value is tracked locally too.
+      let effectiveFilter = nameFilter;
+      if (label) {
+        setAutoScanLabel(label);
+        const folder = label.replace(/^📁 /, '');
+        if (lastSyncedFolderRef.current !== folder) {
+          lastSyncedFolderRef.current = folder;
+          effectiveFilter = filterForFolder(folder);
+          setNameFilter(effectiveFilter);
+        }
+      }
       const status = await getScanStatus();
       if (cancelled) return;
       setScanStatus(status);
       if (status !== 'granted') return;
-      const files = await silentRescan(nameFilter || '');
+      const files = await silentRescan(effectiveFilter || '');
       if (cancelled || !files.length) return;
       void ingest(files, { fromFolder: true });
     }
@@ -268,13 +296,16 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Graphical folder picker replacing the old window.prompt text entry —
-  // Android gives no native folder-browse dialog for app-private External
-  // Storage paths, so the choices are the same fixed set nativeScan() already
-  // walks (see DEFAULT_SCAN_PATHS in capacitorScanner.ts); a free-text path
-  // outside that set would never get scanned anyway.
+  // Graphical folder picker replacing the old window.prompt text entry.
+  // Defaults to the fixed set nativeScan() already walks (DEFAULT_SCAN_PATHS)
+  // plus whatever custom folders got resolved this session; "Autre…" opens
+  // the system folder browser (webkitdirectory) and resolveFolderPathByName
+  // maps the picked folder back to an External-Storage-relative path.
+  const CUSTOM_FOLDER_SENTINEL = '__custom__';
   const [folderPickerResolve, setFolderPickerResolve] = useState<((path: string | null) => void) | null>(null);
   const [pickedFolder, setPickedFolder] = useState(DEFAULT_SCAN_PATHS[0]);
+  const [extraFolderPaths, setExtraFolderPaths] = useState<string[]>([]);
+  const customFolderInputRef = useRef<HTMLInputElement>(null);
 
   function promptNativePath(): Promise<string | null> {
     return new Promise((resolve) => {
@@ -283,7 +314,41 @@ export function BulkScreenshotUploader() {
     });
   }
 
+  function handleFolderSelectChange(value: string) {
+    if (value === CUSTOM_FOLDER_SENTINEL) {
+      customFolderInputRef.current?.click();
+      return;
+    }
+    setPickedFolder(value);
+  }
+
+  async function handleCustomFolderPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ''; // allow re-picking the same folder later
+    const first = files[0];
+    if (!first) return;
+    // Chrome's own folder picker sets webkitRelativePath to "<folder>/<file>";
+    // some OEM file-chooser apps (confirmed: Samsung's, on the Android WebView
+    // generic document intent) return it empty instead — fall back to
+    // locating the picked file itself by name.
+    const leafName = first.webkitRelativePath?.split('/')[0];
+    const resolved = leafName
+      ? await resolveFolderPathByName(leafName)
+      : await resolveFolderPathByFileName(first.name);
+    const failedLabel = leafName || first.name;
+    if (!resolved) {
+      toast.error(
+        `"${failedLabel}" est hors de Pictures/DCIM/Download — l'auto-scan ne peut pas le suivre. Utilise l'import manuel "Dossier entier" pour ce dossier.`,
+      );
+      return;
+    }
+    setExtraFolderPaths((prev) => (prev.includes(resolved) ? prev : [...prev, resolved]));
+    setPickedFolder(resolved);
+  }
+
   function confirmFolderPick() {
+    setNameFilter(filterForFolder(pickedFolder));
+    lastSyncedFolderRef.current = pickedFolder;
     folderPickerResolve?.(pickedFolder);
     setFolderPickerResolve(null);
   }
@@ -1153,16 +1218,26 @@ export function BulkScreenshotUploader() {
               Choisis où Maxymo (ou l'overlay button) enregistre ses captures.
             </DialogDescription>
           </DialogHeader>
-          <Select value={pickedFolder} onValueChange={setPickedFolder}>
+          <Select value={pickedFolder} onValueChange={handleFolderSelectChange}>
             <SelectTrigger className="bg-background border-border">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="bg-card border-border">
-              {DEFAULT_SCAN_PATHS.map((p) => (
+              {[...DEFAULT_SCAN_PATHS, ...extraFolderPaths].map((p) => (
                 <SelectItem key={p} value={p}>{p}</SelectItem>
               ))}
+              <SelectItem value={CUSTOM_FOLDER_SENTINEL}>Autre… (parcourir)</SelectItem>
             </SelectContent>
           </Select>
+          <input
+            ref={customFolderInputRef}
+            type="file"
+            multiple
+            webkitdirectory=""
+            directory=""
+            className="hidden"
+            onChange={(e) => void handleCustomFolderPick(e)}
+          />
           <DialogFooter>
             <Button variant="outline" onClick={cancelFolderPick}>Annuler</Button>
             <Button onClick={confirmFolderPick}>Confirmer</Button>
