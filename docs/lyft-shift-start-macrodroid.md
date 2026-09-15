@@ -43,6 +43,7 @@ retenter sans nouvelle preuve :
 | B | Trigger `Notification` sur le passage online/offline | Testé en direct (`adb shell dumpsys notification` avant/pendant/après un aller-retour online↔offline réel) : **Lyft Driver ne poste aucune notification système à ce changement d'état.** Seule notif présente en permanence : `id=119`, canal `driver_shortcut` (raccourci de chat/support, `MessagingStyle`, texte `null`) — sans rapport avec le statut online. Piste définitivement fermée |
 | C | Trigger `Screen Content` (OCR/accessibilité) sur le toggle Go Online/Offline | Rejetée par décision produit : dette de maintenance récurrente à chaque refonte UI Lyft — déjà vécue avec les coordonnées de capture Nearby Drivers et `Lyft_GPS_Google_Maps.macro` |
 | D | Import JSON MacroDroid à l'aveugle via un broadcast `com.arlosoft.macrodroid.macro.IMPORT` | Ce broadcast n'existe pas — absent de la table des receivers exportés de MacroDroid (`dumpsys package com.arlosoft.macrodroid`). Pas de root sur l'appareil non plus, donc pas d'écriture directe dans `/data/data/com.arlosoft.macrodroid/` |
+| E | Trigger `Application Closed` pour `Lyft Shift Stop` (construit puis retiré le même jour) | Faux-positif identifié après coup : `Application Closed` fire dès que Lyft Driver quitte le premier plan — donc aussi quand le chauffeur switch vers Google Maps/Waze pour naviguer pendant une course. Un STOP involontaire à chaque bascule nav aurait coupé le shift en plein milieu. Remplacé par un déclenchement manuel (§3) |
 
 ## 1. Configuration (une seule fois)
 
@@ -73,17 +74,36 @@ Authorization: Bearer <SHIFT_TRACKER_API_KEY>
 rien. `STOP` sans session active répond `{ "ok": true, "message": "Aucun
 shift actif" }` (`index.ts:294-296`) — idempotent aussi dans l'autre sens.
 
-## 3. Macros MacroDroid — état réel sur le S23 Ultra (vérifié 2026-09-14)
+## 3. Architecture retenue — START auto, STOP manuel (mise à jour 2026-09-14)
 
 | Macro | Trigger | Action | Constraint |
 |---|---|---|---|
 | **Lyft Shift Start** (créée 2026-09-06) | `Application Launched` → `com.lyft.android.driver` | `HTTP Request (POST)` → endpoint §2, body `{"action":"START"}` | Aucune |
-| **Lyft Shift Stop** (créée 2026-09-14, clonée depuis Start) | `Application Closed` → `com.lyft.android.driver` | `HTTP Request (POST)` → endpoint §2, body `{"action":"STOP"}` | Aucune |
+| **Lyft Shift Stop** (reconstruite 2026-09-14) | `Quick Settings Tile` → **MacroDroid tile 1**, mode `Toggle On/Button Press` | `HTTP Request (POST)` → endpoint §2, body `{"action":"STOP"}` | Aucune |
 
-Les deux macros n'ont **aucune constraint anti-spam** — laissé tel quel
+**START reste automatique** — pas de faux-positif possible : ouvrir Lyft
+Driver signifie toujours "je commence/reprends un shift", peu importe combien
+de fois ça se répète dans une journée (idempotent, §2).
+
+**STOP est désormais manuel, volontairement** — voir piste E du §0 : un
+trigger automatique sur la sortie de premier plan de Lyft Driver
+(`Application Closed`) coupait le shift dès que le chauffeur ouvrait Google
+Maps/Waze pour naviguer, ce qui arrive plusieurs fois par shift. Fin de
+shift = tap sur la tuile **"MacroDroid tile 1"** dans le panneau de
+notifications rapides (Quick Settings) — geste volontaire, aucune bascule
+d'app ne peut la déclencher par accident.
+
+Aucune constraint anti-spam sur les deux macros — laissé tel quel
 volontairement : l'idempotence côté serveur (§2) rend un déclenchement
-répété inoffensif, ajouter une contrainte "il y a plus de 5 minutes" n'aurait
-gagné qu'un appel HTTP en moins, pas de correction de bug.
+répété inoffensif (STOP sans session active est aussi un no-op, voir §2).
+
+**Reste à faire manuellement, une seule fois (pas automatisable sans risque
+via ADB — voir §4)** : renommer la tuile "MacroDroid tile 1" en un libellé
+plus clair (ex. "Fin Shift Lyft") et lui assigner une icône, via `Paramètres
+MacroDroid → Settings → Quick Settings Tiles`, ou en glissant la tuile dans
+le panneau Quick Settings puis en la maintenant enfoncée (long-press standard
+Android) pour éditer son libellé. Fonctionnellement identique sans ce
+renommage — juste moins lisible dans le panneau.
 
 Un header parasite existe sur l'action HTTP de `Lyft Shift Start`
 (`{setting_system=aod_content_type}: {app_name}`, probablement un
@@ -102,9 +122,11 @@ vérifié — voir les `.macro` dans `scripts/`). Précédent déjà documenté
 JSON deviné à la main pour un champ jamais vérifié **échoue silencieusement à
 l'import** (macro vide, sans trigger ni action).
 
-Construite ici en clonant `Lyft Shift Start` (menu contextuel → **Clone
-macro**) puis en éditant en place via `adb shell input tap`/`input text` +
-captures d'écran à chaque étape :
+### 4.1 Version initiale (Application Closed) — construite puis remplacée le même jour
+
+Clonée depuis `Lyft Shift Start` (menu contextuel → **Clone macro**) puis
+éditée en place via `adb shell input tap`/`input text` + captures d'écran à
+chaque étape :
 1. Renommée `Lyft Shift Start 2` → `Lyft Shift Stop`.
 2. Trigger : `Configure` sur `Application Launched` → radio **Application
    Closed** → `OK` → re-confirmer l'app sélectionnée (`Lyft Driver`) → `OK`.
@@ -119,20 +141,56 @@ ou toute autre combinaison ; toutes les autres variantes testées produisaient
 soit rien, soit un caractère tronqué. Les accolades et `:` n'ont besoin
 d'aucun échappement particulier.
 
+### 4.2 Version retenue (Quick Settings Tile) — remplace 4.1 le même jour
+
+Une fois le faux-positif Maps/Waze identifié (piste E, §0), le trigger a été
+remplacé en place sur la même macro, action HTTP inchangée :
+1. Trigger `Application Closed` → menu contextuel (tap simple sur la ligne
+   trigger, pas besoin de long-press) → **Delete**.
+2. `Triggers` → `+` → recherche texte "Quick Settings" (plus fiable que la
+   navigation par catégorie, même leçon déjà notée dans
+   `ingest-lyft-screenshots-macrodroid.md`) → **Quick Settings Tile**
+   (catégorie *MacroDroid Specific*).
+3. Sélectionner **MacroDroid tile 1** (`Disabled` = libre — `Pass_Through` et
+   `Test3` occupaient déjà les tuiles 2/3, ne pas les toucher) → `OK`.
+4. Mode d'interaction : **Toggle On/Button Press** (valeur par défaut, un
+   simple tap suffit — pas besoin de `Toggle Off` ni `Long Press`) → `OK`.
+5. Retour arrière → **Save changes** → **Save**.
+
+Résultat affiché dans la liste des macros : trigger `Quick Tile On/Press —
+MacroDroid tile 1`.
+
+**Piège rencontré** : dans l'éditeur de macro, un tap sur la ligne d'un
+trigger ouvre directement son **Configure** (pas le menu contextuel complet)
+quand on vient d'y toucher juste avant — repasser par un aller-retour
+(`CANCEL` puis retaper la ligne) suffit à récupérer le vrai menu contextuel
+(`Configure` / `Test trigger` / … / `Delete` / `Disable`).
+
 ## 5. Vérifié de bout en bout (2026-09-14)
 
-Test réel : lancement de Lyft Driver puis retour à l'écran d'accueil (Home).
-`mcp__supabase__query_logs` sur `shift-tracker` montre bien 2 appels distincts
-à 4 secondes d'écart :
+**START** (`Application Launched`) : test réel, lancement de Lyft Driver puis
+retour à l'écran d'accueil (Home) — à l'époque où STOP était encore
+`Application Closed` (§4.1). `mcp__supabase__query_logs` sur `shift-tracker`
+a montré 2 appels distincts à 4 secondes d'écart :
 
 ```
 POST | 200 | .../shift-tracker   00:45:13 (Application Launched → START)
 POST | 200 | .../shift-tracker   00:45:18 (Application Closed  → STOP)
 ```
 
-Et `public.sessions` confirme une session propre créée puis fermée dans la
+Et `public.sessions` a confirmé une session propre créée puis fermée dans la
 foulée (`id=25`, `started_at` = `ended_at` à 4s près) — pas un artefact
-"toujours active" comme la session 24.
+"toujours active" comme la session 24. Ce test validait la chaîne HTTP/auth
+côté serveur ; il n'a pas re-testé le nouveau trigger Quick Settings Tile
+(§4.2), qui remplace `Application Closed` seulement côté déclenchement, pas
+côté action HTTP (identique, déjà validée).
+
+**STOP** (Quick Settings Tile, §4.2) — à valider sur le terrain : ajouter la
+tuile "MacroDroid tile 1" au panneau Quick Settings du S23 Ultra (glisser
+depuis l'écran d'édition des tuiles, ou tirer les paramètres rapides puis
+"Modifier"), taper dessus pendant un shift actif, puis vérifier via `curl`
+STATUS (ci-dessous) ou `mcp__supabase__query_logs` qu'un `POST 200` apparaît
+et que la session correspondante a bien `ended_at` renseigné.
 
 Vérification manuelle possible en tout temps :
 
