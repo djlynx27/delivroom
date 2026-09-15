@@ -82,6 +82,55 @@ export async function ensureNativePermission(): Promise<boolean> {
   return after.publicStorage === 'granted';
 }
 
+// Set once a scan actually finds real files somewhere — lets
+// verifyNativeReadAccess tell "this folder is genuinely empty" apart from
+// "permission got silently revoked" (see its doc comment) without a false
+// positive on a fresh install that hasn't scanned anything yet.
+const EVER_SAW_FILES_KEY = 'maxymo-ever-saw-files';
+
+/**
+ * Active probe for real Android media-read access, run in addition to (not
+ * instead of) Filesystem.checkPermissions() — confirmed on a real device
+ * that checkPermissions() can keep reporting "granted" after Android
+ * silently auto-revokes READ_MEDIA_IMAGES (its unused-permissions reset, for
+ * an app that hasn't been opened in a while), and that Filesystem.readdir()
+ * doesn't throw in that case either — it just returns an empty file list,
+ * identical to a genuinely empty folder. The only signal JS can reliably
+ * get without popping a permission dialog on every launch is a regression:
+ * every configured/default scan path suddenly reporting zero files, on a
+ * device where a scan has previously found real ones.
+ */
+export async function verifyNativeReadAccess(configuredPath: string | null): Promise<boolean> {
+  if (!isNative()) return true;
+  let total = 0;
+  for (const path of getScanPaths(configuredPath)) {
+    try {
+      const { files } = await Filesystem.readdir({ path, directory: Directory.ExternalStorage });
+      total += files.filter((f) => f.type === 'file').length;
+    } catch {
+      // Folder missing/unreadable isn't itself a permission signal.
+    }
+  }
+  if (total > 0) {
+    localStorage.setItem(EVER_SAW_FILES_KEY, '1');
+    return true;
+  }
+  return localStorage.getItem(EVER_SAW_FILES_KEY) !== '1';
+}
+
+/**
+ * Forces a real native permission re-request, bypassing
+ * Filesystem.checkPermissions()'s cached/stale "granted" — only called from
+ * a driver tap (the Admin Imports "Réactiver" banner), never silently on
+ * mount, since Android pops a real system dialog here if the grant really
+ * is gone.
+ */
+export async function forceNativePermissionReprompt(): Promise<boolean> {
+  if (!isNative()) return false;
+  const after = await Filesystem.requestPermissions();
+  return after.publicStorage === 'granted';
+}
+
 interface ListedFile {
   name: string;
   size: number;

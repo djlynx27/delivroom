@@ -5,10 +5,12 @@
 
 import {
   ensureNativePermission,
+  forceNativePermissionReprompt,
   getConfiguredPath,
   isNative,
   nativeScan,
   setConfiguredPath,
+  verifyNativeReadAccess,
 } from '@/lib/capacitorScanner';
 import {
   clearStoredHandle,
@@ -37,14 +39,22 @@ export async function isAutoScanConfigured(): Promise<boolean> {
   return !!(await getStoredHandle());
 }
 
-export type ScanStatus = 'unsupported' | 'not-configured' | 'granted' | 'permission-needed';
+export type ScanStatus =
+  | 'unsupported'
+  | 'not-configured'
+  | 'granted'
+  | 'permission-needed'
+  | 'permission-revoked';
 
 /** Current state for the admin banner — never prompts, just reports. */
 export async function getScanStatus(): Promise<ScanStatus> {
   const kind = scannerKind();
   if (kind === 'unsupported') return 'unsupported';
   if (kind === 'native') {
-    return getConfiguredPath() ? 'granted' : 'not-configured';
+    const path = getConfiguredPath();
+    if (!path) return 'not-configured';
+    const ok = await verifyNativeReadAccess(path);
+    return ok ? 'granted' : 'permission-revoked';
   }
   const handle = await getStoredHandle();
   if (!handle) return 'not-configured';
@@ -53,13 +63,13 @@ export async function getScanStatus(): Promise<ScanStatus> {
 }
 
 /**
- * Re-request permission on the already-configured folder handle (no folder
- * picker) — used by the "1-tap grant" banner button. Native permission decay
- * doesn't happen the same way (see capacitorScanner.ts), so this is a no-op
- * there.
+ * Re-request permission — used by the banner's "1-tap grant"/"Réactiver"
+ * button. Native forces a real OS re-prompt (see forceNativePermissionReprompt's
+ * doc comment for why checkPermissions() alone can't be trusted); web
+ * re-requests on the already-configured folder handle, no folder picker.
  */
 export async function regrantPermission(): Promise<boolean> {
-  if (isNative()) return true;
+  if (isNative()) return forceNativePermissionReprompt();
   const handle = await getStoredHandle();
   if (!handle) return false;
   return ensureReadPermission(handle, true);

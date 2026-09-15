@@ -918,6 +918,16 @@ export function BulkScreenshotUploader() {
                   Autoriser
                 </Button>
               </div>
+            ) : scanStatus === 'permission-revoked' ? (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-md p-2 text-xs text-red-400">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span className="flex-1">
+                  Permission Stockage Révoquée par Android — Cliquez pour Réactiver
+                </span>
+                <Button size="sm" className="h-7 text-xs" onClick={requestPermission}>
+                  Réactiver
+                </Button>
+              </div>
             ) : scanStatus === 'granted' && lastSyncCount != null ? (
               <div className="flex items-center gap-2 bg-green-500/10 border border-green-500/30 rounded-md p-2 text-xs text-green-400">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
