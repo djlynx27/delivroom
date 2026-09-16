@@ -39,8 +39,42 @@ export function useAddCity() {
 }
 
 // Zones
+// Zones rarely change (a fixed territory list, see repo CLAUDE.md), so the
+// last successful fetch is cached to localStorage and read back as
+// initialData. Without this, a slow/failed Supabase call on a fresh app
+// launch left `zones` (and therefore DriveScreen's hero zone) empty for as
+// long as react-query's fetch+retry cycle took — up to a minute — with the
+// UI stuck on "Calcul…" the whole time despite GPS already being precise.
+// Since useAnonAuth no longer hard-blocks startup, this can now be the very
+// first thing the screen renders, so it needs its own instant fallback
+// rather than assuming the network already succeeded by the time it runs.
+function zonesCacheKey(ids: string[]): string {
+  return `delivroom_zones_cache_${ids.slice().sort().join(',')}`;
+}
+
+function readZonesCache(ids: string[]): { data: Zone[]; at: number } | null {
+  try {
+    const raw = localStorage.getItem(zonesCacheKey(ids));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data: Zone[]; at: number };
+    return Array.isArray(parsed.data) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeZonesCache(ids: string[], data: Zone[]): void {
+  try {
+    localStorage.setItem(zonesCacheKey(ids), JSON.stringify({ data, at: Date.now() }));
+  } catch {
+    // localStorage unavailable — next launch just fetches live with no fallback.
+  }
+}
+
 export function useZones(cityIds: string | string[]) {
   const ids = Array.isArray(cityIds) ? cityIds : [cityIds];
+  const cached = readZonesCache(ids);
+
   return useQuery({
     queryKey: ['zones', ...ids],
     queryFn: async () => {
@@ -50,9 +84,12 @@ export function useZones(cityIds: string | string[]) {
         .in('city_id', ids)
         .order('name');
       if (error) throw error;
+      writeZonesCache(ids, data as Zone[]);
       return data as Zone[];
     },
     enabled: ids.length > 0 && ids.every(Boolean),
+    initialData: cached?.data,
+    initialDataUpdatedAt: cached?.at,
     staleTime: 5 * 60 * 1000, // consider fresh for 5 min
     refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
     refetchOnWindowFocus: true, // re-fetch when user returns to tab

@@ -75,6 +75,28 @@ function ExitButton({
   );
 }
 
+const CALCULATING_TIMEOUT_MS = 2_500;
+
+// heroZone starts null on a genuinely first-ever launch with no cached
+// zones yet (see useZones' localStorage fallback in useSupabase.ts) and a
+// slow/failed network — every OTHER case (returning driver, cache hit)
+// should populate heroZone near-instantly. Past this timeout there's no
+// fake zone data to invent, so this just stops looking silently frozen.
+function CalculatingPlaceholder() {
+  const [elapsed, setElapsed] = useState(false);
+
+  useEffect(() => {
+    const id = setTimeout(() => setElapsed(true), CALCULATING_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, []);
+
+  return (
+    <div className="text-white/30 text-2xl text-center px-4">
+      {elapsed ? 'GPS en attente de signal ou de réseau…' : 'Calcul…'}
+    </div>
+  );
+}
+
 function HeroZoneDisplay({
   heroZone,
   heroSurge,
@@ -89,7 +111,7 @@ function HeroZoneDisplay({
   returnCorridor?: { steps: ReturnCorridorStep[] } | null;
 }) {
   if (!heroZone) {
-    return <div className="text-white/30 text-3xl">Calcul…</div>;
+    return <CalculatingPlaceholder />;
   }
 
   return (

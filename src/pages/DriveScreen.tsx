@@ -382,14 +382,14 @@ export default function DriveScreen() {
                 computeSaturationFactor(driversByZone.get(z.id) ?? 0, score)
               )
             : score,
+          distKm: haversineKm(location.latitude, location.longitude, z.latitude, z.longitude),
         };
       })
-      .filter(
-        (z) =>
-          haversineKm(location.latitude, location.longitude, z.latitude, z.longitude) <=
-          MAX_HERO_ZONE_DISTANCE_KM
-      )
-      .sort((a, b) => b.score - a.score);
+      .filter((z) => z.distKm <= MAX_HERO_ZONE_DISTANCE_KM)
+      // Ties broken by distance — matters when scores haven't loaded yet
+      // (every zone defaults to 0) so the hero zone still falls back to the
+      // geometrically nearest one instead of an arbitrary array order.
+      .sort((a, b) => b.score - a.score || a.distKm - b.distKm);
   }, [zones, scores, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
 
   const marketRadarZones = useMemo(
