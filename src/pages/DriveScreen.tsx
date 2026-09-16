@@ -43,7 +43,7 @@ import { useCityId } from '@/hooks/useCityId';
 import { useDemandScores } from '@/hooks/useDemandScores';
 import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
-import { findNearestZone, useNotifications } from '@/hooks/useNotifications';
+import { useNotifications } from '@/hooks/useNotifications';
 import { nearestEmergingHotspot, useEmergingHotspots } from '@/hooks/useEmergingHotspots';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
@@ -51,6 +51,7 @@ import { useTrips } from '@/hooks/useTrips';
 import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
+import { findNearestZone } from '@/lib/zoneMatch';
 import {
   getConservativePresencePreference,
   getDriverFingerprint,
@@ -229,10 +230,15 @@ export default function DriveScreen() {
   // the moment it tries to attach its own listener to an already-subscribed
   // channel (crashed the whole screen into the error boundary).
   const { enabled: notifEnabled, requestPermission: requestNotifPermission } =
-    useNotifications(
-      { userLocation: location, zones, scores, weather, endingSoon, startingSoon, surgeMap },
-      { conservativePresence }
-    );
+    useNotifications({
+      userLocation: location,
+      zones,
+      scores,
+      weather,
+      endingSoon,
+      startingSoon,
+      surgeMap,
+    });
   const { board: gasBoard } = useGasBoard(
     'regular',
     location ? { latitude: location.latitude, longitude: location.longitude } : null,

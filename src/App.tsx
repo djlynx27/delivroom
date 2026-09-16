@@ -1,4 +1,5 @@
 import { AutoShiftMonitor } from '@/components/AutoShiftMonitor';
+import { ShiftGeoWatcherMonitor } from '@/components/ShiftGeoWatcherMonitor';
 import { BottomNav } from '@/components/BottomNav';
 import { NearestHotspot } from '@/components/NearestHotspot';
 import { PwaInstallBanner } from '@/components/PwaInstallBanner';
@@ -275,6 +276,7 @@ function AppContent() {
       </Suspense>
       {showNearestHotspot && <NearestHotspot />}
       <AutoShiftMonitor />
+      <ShiftGeoWatcherMonitor />
       <PwaInstallBanner />
       <BottomNav />
     </div>

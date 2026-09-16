@@ -1,7 +1,6 @@
 import type { useDemandScores } from '@/hooks/useDemandScores';
-import type { Zone } from '@/hooks/useSupabase';
 import { haversineKm, type UserLocationResult } from '@/hooks/useUserLocation';
-import { MAX_GPS_ZONE_KM } from '@/lib/tripSave';
+import { findNearestZone } from '@/lib/zoneMatch';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const NOTIF_COOLDOWN_MS = 15 * 60_000; // 15 min per notification type
@@ -142,11 +141,7 @@ interface NotifState {
   lastWeatherNotif: number;
   lastBarNotif: number;
   lastSurgeNotif: number;
-  lastDriftNotif: number;
   prevWeatherId: number | null;
-  stationarySince: number | null;
-  stationaryLat: number | null;
-  stationaryLng: number | null;
 }
 
 function getGoogleMapsUrl(lat: number, lng: number) {
@@ -176,24 +171,6 @@ async function sendNotification(title: string, body: string, url?: string) {
   new Notification(title, { body, icon: '/pwa-icon-192.png' });
 }
 
-// No cap == a mis-geocoded event (or one genuinely outside the Delivroom
-// territory) would still resolve to whatever zone is technically closest,
-// and the "positionne-toi près de X" push notification would send a driver
-// toward a zone that's actually 100+ km away. Same MAX_GPS_ZONE_KM sanity
-// radius tripSave.ts already uses for GPS-fix zone matching.
-export function findNearestZone(lat: number, lng: number, zones: Zone[]): Zone | null {
-  let best: Zone | null = null;
-  let bestDist = Infinity;
-  for (const z of zones) {
-    const d = haversineKm(lat, lng, z.latitude, z.longitude);
-    if (d < bestDist) {
-      bestDist = d;
-      best = z;
-    }
-  }
-  return bestDist <= MAX_GPS_ZONE_KM ? best : null;
-}
-
 type DemandScoresResult = ReturnType<typeof useDemandScores>;
 
 // Demand-scoring data comes from the caller's OWN useDemandScores/
@@ -216,10 +193,7 @@ export interface NotificationsDemandData {
   surgeMap: DemandScoresResult['surgeMap'];
 }
 
-export function useNotifications(
-  data: NotificationsDemandData,
-  options: { conservativePresence?: boolean } = {}
-) {
+export function useNotifications(data: NotificationsDemandData) {
   const { userLocation, zones, scores, weather, endingSoon, startingSoon, surgeMap } = data;
   const [enabled, setEnabled] = useState(
     () =>
@@ -231,11 +205,7 @@ export function useNotifications(
     lastWeatherNotif: 0,
     lastBarNotif: 0,
     lastSurgeNotif: 0,
-    lastDriftNotif: 0,
     prevWeatherId: null,
-    stationarySince: null,
-    stationaryLat: null,
-    stationaryLng: null,
   });
 
   const requestPermission = useCallback(async () => {
@@ -436,80 +406,6 @@ export function useNotifications(
     );
     s.lastSurgeNotif = now;
   }, [enabled, surgeMap, zones, userLocation]);
-
-  useEffect(() => {
-    if (!enabled || !userLocation) return;
-
-    const s = stateRef.current;
-    const now = Date.now();
-    const speedKmh = userLocation.speed == null ? 0 : userLocation.speed * 3.6;
-
-    if (s.stationaryLat == null || s.stationaryLng == null) {
-      s.stationaryLat = userLocation.latitude;
-      s.stationaryLng = userLocation.longitude;
-      s.stationarySince = now;
-      return;
-    }
-
-    const movedKm = haversineKm(
-      s.stationaryLat,
-      s.stationaryLng,
-      userLocation.latitude,
-      userLocation.longitude
-    );
-
-    if (movedKm > 0.12 || speedKmh >= 8) {
-      s.stationaryLat = userLocation.latitude;
-      s.stationaryLng = userLocation.longitude;
-      s.stationarySince = now;
-      return;
-    }
-
-    if (s.stationarySince == null) {
-      s.stationarySince = now;
-      return;
-    }
-
-    if (
-      now - s.stationarySince < 12 * 60_000 ||
-      now - s.lastDriftNotif < NOTIF_COOLDOWN_MS
-    ) {
-      return;
-    }
-
-    const nearbyTarget = [...zones]
-      .map((zone) => ({
-        zone,
-        score: scores.get(zone.id) ?? 0,
-        distKm: haversineKm(
-          userLocation.latitude,
-          userLocation.longitude,
-          zone.latitude,
-          zone.longitude
-        ),
-      }))
-      .filter((entry) => entry.distKm <= 8)
-      .sort((left, right) => right.score - left.score)[0];
-
-    const body = nearbyTarget
-      ? options.conservativePresence
-        ? `Immobile depuis 12 min. Garde Lyft actif et place un filtre destination vers ${nearbyTarget.zone.name} (${nearbyTarget.distKm.toFixed(1)} km).`
-        : `Immobile depuis 12 min. ${nearbyTarget.zone.name} est à ${nearbyTarget.distKm.toFixed(1)} km avec ${nearbyTarget.score}/100.`
-      : 'Immobile depuis 12 min. Réévalue ta zone active sur Lyft.';
-
-    sendNotification(
-      '🧭 Alerte de dérive',
-      body,
-      nearbyTarget
-        ? getGoogleMapsUrl(
-            nearbyTarget.zone.latitude,
-            nearbyTarget.zone.longitude
-          )
-        : undefined
-    );
-    s.lastDriftNotif = now;
-    s.stationarySince = now;
-  }, [enabled, options.conservativePresence, scores, userLocation, zones]);
 
   return { enabled, requestPermission };
 }

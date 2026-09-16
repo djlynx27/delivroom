@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Zone } from '@/hooks/useSupabase';
-import { findNearestZone } from '@/hooks/useNotifications';
+import { findNearestZone } from '@/lib/zoneMatch';
 
 function zone(id: string, latitude: number, longitude: number): Zone {
   return { id, latitude, longitude } as unknown as Zone;
