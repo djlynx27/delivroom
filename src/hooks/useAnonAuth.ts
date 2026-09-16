@@ -1,122 +1,85 @@
 import { supabase } from '@/integrations/supabase/client';
 import { useEffect, useState } from 'react';
 
-type AuthStatus = 'loading' | 'ready' | 'error';
+// 'ready' from the very first render — see below. 'degraded' means the last
+// background attempt failed; nothing in the app gates on it, it exists only
+// as an optional diagnostic signal.
+type AuthStatus = 'ready' | 'degraded';
 
-// Cold Android opens can leave the radio/DNS warming up; an un-timed
-// signInAnonymously() then hangs forever and the app sits on a blank screen
-// until the driver force-closes and reopens. Cap the whole auth handshake so a
-// stall surfaces the visible "Réessayer" error UI instead of a black screen.
+const RETRY_BASE_MS = 5_000;
+const RETRY_MAX_MS = 60_000;
+
+// This used to be a hard gate: AppContent wouldn't mount at all until this
+// resolved, and a failure (slow network, backgrounded mid-handshake, fully
+// offline) showed a full-screen "Connexion impossible" blocker with no way
+// past it except a manual reload — confirmed on-device this can wedge the
+// app completely on a bad connection, unacceptable for a driver mid-shift
+// who needs Drive/the shift tracker regardless of Supabase reachability.
 //
-// This used to race the call against its OWN 10s timer on top of the
-// Supabase client's fetch already having a 15s AbortController-backed
-// timeout (see integrations/supabase/client.ts's fetchWithTimeout). Two
-// independent timeouts, the shorter one always winning, meant this always
-// fired first and never actually cancelled the in-flight request — which
-// then went on to reject on its own 15-20s later as an unhandled
-// "AuthRetryableFetchError: signal is aborted without reason", visible only
-// in logs after the UI had already shown the hard error. Confirmed on
-// device: this fired mid-handshake while the app was backgrounded (Android
-// throttles the WebView's network then), a case that isn't a real failure —
-// it resolves itself the moment the app is foregrounded again. So: only one
-// timeout now (the client's own, already the correct cancel-based one), and
-// a backgrounded-during-handshake failure retries once automatically on
-// resume instead of going straight to the error screen.
-const AUTH_TIMEOUT_MS = 20_000;
-
-class AuthTimeoutError extends Error {
-  constructor() {
-    super('Connexion trop lente — réessaie.');
-    this.name = 'AuthTimeoutError';
-  }
-}
-
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new AuthTimeoutError()), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (err) => {
-        clearTimeout(timer);
-        reject(err);
-      }
-    );
-  });
-}
-
-function waitForVisible(): Promise<void> {
-  if (typeof document === 'undefined' || document.visibilityState === 'visible') {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        document.removeEventListener('visibilitychange', onVisible);
-        resolve();
-      }
-    };
-    document.addEventListener('visibilitychange', onVisible);
-  });
-}
-
+// Auth is now a background concern only. getSession() (local, no network)
+// picks up a persisted session near-instantly when one exists; when it
+// doesn't, the app renders immediately anyway and signInAnonymously() keeps
+// retrying silently with backoff until it succeeds or the user goes back
+// online. Individual Supabase-backed screens already handle their own
+// query failures — that's the right layer for "no session yet", not the
+// app shell.
 export function useAnonAuth(): { status: AuthStatus; error: string | null } {
-  const [status, setStatus] = useState<AuthStatus>('loading');
+  const [status, setStatus] = useState<AuthStatus>('ready');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let retryDelay = RETRY_BASE_MS;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
-    async function attemptHandshake() {
-      // getSession() is a local read (persisted session) — the network path
-      // is only signInAnonymously().
-      const { data } = await withTimeout(supabase.auth.getSession(), AUTH_TIMEOUT_MS);
-      if (data.session) {
-        if (!cancelled) setStatus('ready');
-        return;
-      }
-
-      const { error: signInError } = await withTimeout(
-        supabase.auth.signInAnonymously(),
-        AUTH_TIMEOUT_MS
-      );
-      if (cancelled) return;
-
-      if (signInError) {
-        throw signInError;
-      }
-      setStatus('ready');
-    }
-
-    async function ensureSession(isRetry: boolean) {
+    async function attempt() {
       try {
-        await attemptHandshake();
+        const { data } = await supabase.auth.getSession();
+        if (data.session) {
+          if (!cancelled) {
+            setStatus('ready');
+            setError(null);
+          }
+          return;
+        }
+
+        const { error: signInError } = await supabase.auth.signInAnonymously();
+        if (cancelled) return;
+        if (signInError) throw signInError;
+
+        setStatus('ready');
+        setError(null);
       } catch (err) {
         if (cancelled) return;
         const message =
           err instanceof Error ? err.message : 'Auth anonyme indisponible.';
-
-        // A failure while backgrounded isn't a real failure — Android
-        // throttles the WebView's network while hidden. Wait for the app to
-        // come back to the foreground and try once more before giving up.
-        if (!isRetry && typeof document !== 'undefined' && document.visibilityState !== 'visible') {
-          console.warn('[useAnonAuth] handshake failed while backgrounded, retrying on resume:', message);
-          await waitForVisible();
-          if (!cancelled) void ensureSession(true);
-          return;
-        }
-
-        console.error('[useAnonAuth] auth handshake failed:', message);
+        console.warn(
+          '[useAnonAuth] handshake failed, app stays usable — retrying in background:',
+          message
+        );
+        setStatus('degraded');
         setError(message);
-        setStatus('error');
+
+        retryTimer = setTimeout(() => {
+          retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+          void attempt();
+        }, retryDelay);
       }
     }
 
-    void ensureSession(false);
+    void attempt();
+
+    const onOnline = () => {
+      retryDelay = RETRY_BASE_MS;
+      if (retryTimer) clearTimeout(retryTimer);
+      void attempt();
+    };
+    window.addEventListener('online', onOnline);
+
     return () => {
       cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      window.removeEventListener('online', onOnline);
     };
   }, []);
 

@@ -204,7 +204,9 @@ function useColdStartRedirect(pathname: string) {
 function AppContent() {
   const location = useLocation();
   useColdStartRedirect(location.pathname);
-  const { status: authStatus, error: authError } = useAnonAuth();
+  // Fire-and-forget: kicks off the anon sign-in handshake and its own
+  // silent background retries. Never gates rendering — see useAnonAuth.ts.
+  useAnonAuth();
   // Hide NearestHotspot on Today screen since hero card already shows best zone + distance
   const showNearestHotspot =
     location.pathname !== '/today' &&
@@ -212,31 +214,6 @@ function AppContent() {
     location.pathname !== '/events' &&
     location.pathname !== '/gas' &&
     !location.pathname.startsWith('/admin');
-
-  if (authStatus === 'loading') {
-    return <AppLoading label="Connexion…" />;
-  }
-
-  if (authStatus === 'error') {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background text-foreground px-4 pt-[env(safe-area-inset-top)]">
-        <div className="max-w-sm text-center space-y-3">
-          <h1 className="text-xl font-display font-bold">
-            Connexion impossible
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {authError ?? 'Auth anonyme indisponible.'}
-          </p>
-          <button
-            className="mt-2 inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-            onClick={() => window.location.reload()}
-          >
-            Réessayer
-          </button>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-background text-foreground pt-[env(safe-area-inset-top)]">
