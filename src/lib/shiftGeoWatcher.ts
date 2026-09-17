@@ -87,27 +87,46 @@ export function evaluateZoneStay(
   return { state: prev, shouldNotify: false };
 }
 
-export interface CaptureTriggerEvaluation {
+export interface CaptureTriggerState {
   capturedZoneId: string | null;
+  awayFromHeroSince: number | null;
+}
+
+export interface CaptureTriggerEvaluation {
+  state: CaptureTriggerState;
   shouldCapture: boolean;
 }
 
-/** Pure state machine, mirrors evaluateZoneStay's shape -- fires once per
- * hero-zone arrival (not the 15-min stay timer, a separate concern). */
+// Grace period before a hero-zone departure is treated as real (not GPS
+// jitter at a zone boundary, or the hero zone itself re-ranking between
+// scoring cycles while the driver stands still). Short relative to the
+// 15-min stay timer -- this only guards against a spurious re-fire, not a
+// real "left and came back" cycle.
+export const CAPTURE_AWAY_GRACE_MS = 2 * 60_000;
+
+/** Pure state machine -- fires once per REAL hero-zone arrival (not the
+ * 15-min stay timer, a separate concern), tolerating brief excursions
+ * outside the hero zone without re-arming. */
 export function evaluateCaptureTrigger(
-  prevCapturedZoneId: string | null,
+  prev: CaptureTriggerState | null,
+  now: number,
   nearestZoneId: string | null,
   heroZoneId: string | null
 ): CaptureTriggerEvaluation {
-  if (nearestZoneId == null || heroZoneId == null || nearestZoneId !== heroZoneId) {
-    // Not standing in the hero zone (or it isn't known yet) -- clear any
-    // stale "already captured" mark so a later re-entry fires again.
-    return { capturedZoneId: null, shouldCapture: false };
+  const prevState = prev ?? { capturedZoneId: null, awayFromHeroSince: null };
+
+  if (heroZoneId == null || nearestZoneId !== heroZoneId) {
+    const awayFromHeroSince = prevState.awayFromHeroSince ?? now;
+    if (now - awayFromHeroSince >= CAPTURE_AWAY_GRACE_MS) {
+      return { state: { capturedZoneId: null, awayFromHeroSince }, shouldCapture: false };
+    }
+    return { state: { ...prevState, awayFromHeroSince }, shouldCapture: false };
   }
-  if (prevCapturedZoneId === heroZoneId) {
-    return { capturedZoneId: prevCapturedZoneId, shouldCapture: false };
+
+  if (prevState.capturedZoneId === heroZoneId) {
+    return { state: { capturedZoneId: heroZoneId, awayFromHeroSince: null }, shouldCapture: false };
   }
-  return { capturedZoneId: heroZoneId, shouldCapture: true };
+  return { state: { capturedZoneId: heroZoneId, awayFromHeroSince: null }, shouldCapture: true };
 }
 
 interface LiteZone {
@@ -162,21 +181,21 @@ async function readHeroZoneId(): Promise<string | null> {
   }
 }
 
-async function readCapturedZoneId(): Promise<string | null> {
+async function readCaptureState(): Promise<CaptureTriggerState | null> {
   try {
     const { value } = await Preferences.get({ key: PREFS_CAPTURED_ZONE_KEY });
-    return value || null;
+    return value ? (JSON.parse(value) as CaptureTriggerState) : null;
   } catch {
     return null;
   }
 }
 
-async function writeCapturedZoneId(zoneId: string | null): Promise<void> {
+async function writeCaptureState(state: CaptureTriggerState | null): Promise<void> {
   try {
-    if (zoneId == null) {
+    if (state == null) {
       await Preferences.remove({ key: PREFS_CAPTURED_ZONE_KEY });
     } else {
-      await Preferences.set({ key: PREFS_CAPTURED_ZONE_KEY, value: zoneId });
+      await Preferences.set({ key: PREFS_CAPTURED_ZONE_KEY, value: JSON.stringify(state) });
     }
   } catch {
     // Preferences unavailable -- next callback just re-evaluates from GPS.
@@ -200,13 +219,19 @@ async function runCaptureTrigger(
   nearestZoneId: string | null
 ): Promise<{ heroZoneId: string | null; shouldCapture: boolean }> {
   const heroZoneId = await readHeroZoneId();
-  const prevCaptured = await readCapturedZoneId();
-  const { capturedZoneId, shouldCapture } = evaluateCaptureTrigger(
-    prevCaptured,
+  const prevState = await readCaptureState();
+  const { state, shouldCapture } = evaluateCaptureTrigger(
+    prevState,
+    Date.now(),
     nearestZoneId,
     heroZoneId
   );
-  if (capturedZoneId !== prevCaptured) await writeCapturedZoneId(capturedZoneId);
+  if (
+    state.capturedZoneId !== prevState?.capturedZoneId ||
+    state.awayFromHeroSince !== prevState?.awayFromHeroSince
+  ) {
+    await writeCaptureState(state);
+  }
   if (shouldCapture) await triggerNearbyCapture();
   return { heroZoneId, shouldCapture };
 }
@@ -386,7 +411,7 @@ export async function stopShiftWatcher(): Promise<void> {
     }
     await Preferences.remove({ key: PREFS_WATCHER_ID_KEY });
     await writeState(null);
-    await writeCapturedZoneId(null);
+    await writeCaptureState(null);
   } catch (err) {
     logError('stopShiftWatcher failed', err);
   }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateZoneStay, ZONE_STAY_TIMER_MS, evaluateCaptureTrigger } from '@/lib/shiftGeoWatcher';
+import {
+  evaluateZoneStay,
+  ZONE_STAY_TIMER_MS,
+  evaluateCaptureTrigger,
+  CAPTURE_AWAY_GRACE_MS,
+} from '@/lib/shiftGeoWatcher';
 
 describe('evaluateZoneStay', () => {
   it('clears state when no zone is in range', () => {
@@ -48,44 +53,59 @@ describe('evaluateZoneStay', () => {
 });
 
 describe('evaluateCaptureTrigger', () => {
+  const T0 = 1_000_000;
+
   it('does nothing when there is no hero zone set yet', () => {
-    expect(evaluateCaptureTrigger(null, 'z1', null)).toEqual({
-      capturedZoneId: null,
-      shouldCapture: false,
-    });
+    const result = evaluateCaptureTrigger(null, T0, 'z1', null);
+    expect(result.shouldCapture).toBe(false);
+    expect(result.state.capturedZoneId).toBe(null);
   });
 
-  it('does nothing when the driver is not in the hero zone', () => {
-    expect(evaluateCaptureTrigger(null, 'z1', 'z2')).toEqual({
-      capturedZoneId: null,
-      shouldCapture: false,
-    });
+  it('does nothing on the first callback outside the hero zone (grace period)', () => {
+    const result = evaluateCaptureTrigger(null, T0, 'z1', 'z2');
+    expect(result.shouldCapture).toBe(false);
+    expect(result.state).toEqual({ capturedZoneId: null, awayFromHeroSince: T0 });
   });
 
   it('fires once on arrival in the hero zone', () => {
-    expect(evaluateCaptureTrigger(null, 'z1', 'z1')).toEqual({
-      capturedZoneId: 'z1',
+    const result = evaluateCaptureTrigger(null, T0, 'z1', 'z1');
+    expect(result).toEqual({
+      state: { capturedZoneId: 'z1', awayFromHeroSince: null },
       shouldCapture: true,
     });
   });
 
   it('does not re-fire on later callbacks in the same hero-zone stay', () => {
-    expect(evaluateCaptureTrigger('z1', 'z1', 'z1')).toEqual({
-      capturedZoneId: 'z1',
+    const prev = { capturedZoneId: 'z1', awayFromHeroSince: null };
+    const result = evaluateCaptureTrigger(prev, T0 + 60_000, 'z1', 'z1');
+    expect(result).toEqual({ state: prev, shouldCapture: false });
+  });
+
+  it('does not clear the captured mark on a brief excursion within the grace period', () => {
+    const prev = { capturedZoneId: 'z1', awayFromHeroSince: null };
+    const jitter = evaluateCaptureTrigger(prev, T0, 'z2', 'z1');
+    expect(jitter.state).toEqual({ capturedZoneId: 'z1', awayFromHeroSince: T0 });
+
+    const back = evaluateCaptureTrigger(jitter.state, T0 + 30_000, 'z1', 'z1');
+    expect(back).toEqual({
+      state: { capturedZoneId: 'z1', awayFromHeroSince: null },
       shouldCapture: false,
     });
   });
 
-  it('clears the captured mark once the driver leaves the hero zone', () => {
-    expect(evaluateCaptureTrigger('z1', 'z2', 'z1')).toEqual({
-      capturedZoneId: null,
-      shouldCapture: false,
-    });
+  it('clears the captured mark once the driver has been away past the grace period', () => {
+    const prev = { capturedZoneId: 'z1', awayFromHeroSince: T0 };
+    const result = evaluateCaptureTrigger(prev, T0 + CAPTURE_AWAY_GRACE_MS, 'z2', 'z1');
+    expect(result.state).toEqual({ capturedZoneId: null, awayFromHeroSince: T0 });
+    expect(result.shouldCapture).toBe(false);
   });
 
-  it('re-fires on a later re-entry into the hero zone', () => {
-    const left = evaluateCaptureTrigger('z1', 'z2', 'z1');
-    const reentered = evaluateCaptureTrigger(left.capturedZoneId, 'z1', 'z1');
-    expect(reentered).toEqual({ capturedZoneId: 'z1', shouldCapture: true });
+  it('re-fires on a later real re-entry into the hero zone', () => {
+    const left = { capturedZoneId: null, awayFromHeroSince: T0 };
+    const reentered = evaluateCaptureTrigger(left, T0 + CAPTURE_AWAY_GRACE_MS + 1000, 'z1', 'z1');
+    expect(reentered).toEqual({
+      state: { capturedZoneId: 'z1', awayFromHeroSince: null },
+      shouldCapture: true,
+    });
   });
 });

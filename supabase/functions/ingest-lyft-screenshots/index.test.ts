@@ -239,42 +239,54 @@ Deno.test('isZoneSaturated: true at or above the threshold', () => {
   assertEquals(isZoneSaturated(SATURATION_THRESHOLD - 1), false);
 });
 
+const ORIGIN = { latitude: 45.5, longitude: -73.6 }; // zone 'a's own centroid
 const ZONES: ZoneScoreRow[] = [
   { id: 'a', name: 'Zone A', latitude: 45.5, longitude: -73.6, current_score: 40 },
-  { id: 'b', name: 'Zone B', latitude: 45.6, longitude: -73.7, current_score: 80 },
-  { id: 'c', name: 'Zone C', latitude: 45.7, longitude: -73.8, current_score: null },
+  { id: 'b', name: 'Zone B (nearby, in range)', latitude: 45.54, longitude: -73.65, current_score: 80 },
+  { id: 'far', name: 'Zone Far (out of range, higher score)', latitude: 45.75, longitude: -73.95, current_score: 95 },
+  { id: 'c', name: 'Zone C (nearby, unscored)', latitude: 45.51, longitude: -73.61, current_score: null },
 ];
 
-Deno.test('findBestNeighboringZone: picks the highest-scoring zone, excluding self and nulls', () => {
-  const best = findBestNeighboringZone('a', ZONES);
+Deno.test('findBestNeighboringZone: picks the highest-scoring zone within range, excluding self and nulls', () => {
+  const best = findBestNeighboringZone('a', ZONES, ORIGIN.latitude, ORIGIN.longitude);
   assertEquals(best?.id, 'b');
 });
 
-Deno.test('findBestNeighboringZone: returns null when no scored neighbor exists', () => {
-  const best = findBestNeighboringZone('a', [ZONES[0], ZONES[2]]);
+Deno.test('findBestNeighboringZone: excludes a higher-scoring zone that is out of range', () => {
+  const best = findBestNeighboringZone('a', [ZONES[0], ZONES[2]], ORIGIN.latitude, ORIGIN.longitude);
+  assertEquals(best, null);
+});
+
+Deno.test('findBestNeighboringZone: returns null when no scored neighbor exists in range', () => {
+  const best = findBestNeighboringZone('a', [ZONES[0], ZONES[3]], ORIGIN.latitude, ORIGIN.longitude);
   assertEquals(best, null);
 });
 
 Deno.test('computeNavigationTarget: falls back to the best neighbor when saturated', () => {
-  const target = computeNavigationTarget(
-    { latitude: 45.5, longitude: -73.6 },
-    SATURATION_THRESHOLD,
-    undefined,
-    ZONES,
-    'a'
-  );
-  assertEquals(target, { latitude: 45.6, longitude: -73.7, mode: 'fallback_zone', zone_name: 'Zone B' });
+  const target = computeNavigationTarget(ORIGIN, SATURATION_THRESHOLD, undefined, ZONES, 'a');
+  assertEquals(target, {
+    latitude: ZONES[1].latitude,
+    longitude: ZONES[1].longitude,
+    mode: 'fallback_zone',
+    zone_name: ZONES[1].name,
+  });
 });
 
 Deno.test('computeNavigationTarget: falls back to micro-spot when saturated but no neighbor scored', () => {
   const grid = [3, 3, 0, 3, 3, 3, 9, 3, 3];
   const target = computeNavigationTarget(
-    CHOMEDEY,
+    ORIGIN,
     SATURATION_THRESHOLD,
     grid,
-    [ZONES[2]],
+    [ZONES[0], ZONES[3]],
     'a'
   );
+  assertEquals(target.mode, 'micro_spot');
+});
+
+Deno.test('computeNavigationTarget: saturated but only an out-of-range neighbor is scored -- falls through to micro-spot', () => {
+  const grid = [3, 3, 0, 3, 3, 3, 9, 3, 3];
+  const target = computeNavigationTarget(ORIGIN, SATURATION_THRESHOLD, grid, [ZONES[0], ZONES[2]], 'a');
   assertEquals(target.mode, 'micro_spot');
 });
 

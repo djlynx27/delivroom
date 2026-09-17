@@ -44,9 +44,15 @@ import {
   parseNearbyOnlySnapshot,
   resizeForGemini,
   shouldFlagEmergingHotspot,
+  type DriverGrid,
   type LyftSnapshot,
   type NavigationTarget,
 } from './lyftSnapshot.ts';
+
+// Mirrors src/lib/tripSave.ts's MAX_GPS_ZONE_KM / zoneMatch.ts's
+// findNearestZone cap (duplicated, not imported -- Deno/Vite don't share a
+// module graph).
+const MAX_GPS_ZONE_KM = 25;
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -228,16 +234,28 @@ async function handleRequest(req: Request): Promise<Response> {
   // unconditionally, not just within a short retry window, otherwise a
   // manual re-scan re-bills Gemini and inserts duplicate platform_signals
   // rows for every already-processed file.
+  // Fetched before the dedup check, not after: a replayed retry is exactly
+  // the case (failed-then-retried POST after the driver arrived) where a
+  // navigation_target still has to come back, so the replay branch below
+  // needs the zones too.
+  const zones = client ? await fetchAllZones(client) : [];
+
   const contentHash = await hashImages(images);
   if (client) {
     const { data: recent } = await client
       .from('platform_signals')
-      .select('zone_id, demand_level, estimated_wait_min, nearby_drivers_count')
+      .select('zone_id, demand_level, estimated_wait_min, nearby_drivers_count, nearby_drivers_grid')
       .eq('content_hash', contentHash)
       .order('captured_at', { ascending: false })
       .limit(1)
       .maybeSingle();
     if (recent) {
+      const replayTarget = buildNavigationTarget(
+        zones,
+        recent.zone_id,
+        recent.nearby_drivers_count ?? 0,
+        recent.nearby_drivers_grid ?? undefined
+      );
       return json({
         ok: true,
         zone_id: recent.zone_id,
@@ -247,6 +265,7 @@ async function handleRequest(req: Request): Promise<Response> {
           nearby_drivers_count: recent.nearby_drivers_count,
         },
         replayed: true,
+        ...(replayTarget && { navigation_target: replayTarget }),
       });
     }
   }
@@ -265,7 +284,6 @@ async function handleRequest(req: Request): Promise<Response> {
 
   let zoneId = body.zone_id ?? null;
   let nearestDistanceKm: number | null = null;
-  const zones = client ? await fetchAllZones(client) : [];
   if (!zoneId) {
     const nearest = resolveNearestZone(zones, body.latitude!, body.longitude!);
     zoneId = nearest?.id ?? null;
@@ -304,19 +322,22 @@ async function handleRequest(req: Request): Promise<Response> {
     emergingHotspot = await logEmergingHotspot(client, body.latitude!, body.longitude!, snapshot);
   }
 
-  let navigationTarget: NavigationTarget | null = null;
-  if (zoneId) {
-    const currentZone = zones.find((z) => z.id === zoneId);
-    if (currentZone) {
-      navigationTarget = computeNavigationTarget(
-        { latitude: currentZone.latitude, longitude: currentZone.longitude },
-        snapshot.nearby_drivers_count,
-        snapshot.nearby_drivers_grid,
-        zones,
-        zoneId
-      );
-    }
-  }
+  // Distance-gated: resolveNearestZone is deliberately uncapped (the
+  // emerging-hotspot path above wants an unbounded distance), but a
+  // mis-geocoded/out-of-territory GPS fix must never auto-launch turn-by-turn
+  // navigation. Same 25km sanity radius as src/lib/tripSave.ts's
+  // MAX_GPS_ZONE_KM (duplicated, not imported -- Deno/Vite don't share a
+  // module graph). A null distance means zone_id was supplied explicitly by
+  // MacroDroid (GPS resolution skipped) -- trusted, like everywhere else here.
+  const navigationTarget =
+    nearestDistanceKm == null || nearestDistanceKm <= MAX_GPS_ZONE_KM
+      ? buildNavigationTarget(
+          zones,
+          zoneId,
+          snapshot.nearby_drivers_count,
+          snapshot.nearby_drivers_grid
+        )
+      : null;
 
   return json({
     ok: true,
@@ -438,6 +459,28 @@ Rules:
     return null;
   }
   return nearbyOnly ? parseNearbyOnlySnapshot(parsed) : parseLyftSnapshot(parsed);
+}
+
+/** Shared by the main path and the dedup/replay branch -- both must return a
+ * navigation_target, since a retried POST is exactly when the driver has
+ * arrived and still needs one. Degrades to null (target simply omitted from
+ * the response) when the zone is unknown or absent from `zones`. */
+function buildNavigationTarget(
+  zones: ZoneRow[],
+  zoneId: string | null,
+  nearbyDriversCount: number,
+  grid: DriverGrid | undefined
+): NavigationTarget | null {
+  if (!zoneId) return null;
+  const currentZone = zones.find((z) => z.id === zoneId);
+  if (!currentZone) return null;
+  return computeNavigationTarget(
+    { latitude: currentZone.latitude, longitude: currentZone.longitude },
+    nearbyDriversCount,
+    grid,
+    zones,
+    zoneId
+  );
 }
 
 async function fetchAllZones(client: SupabaseClient): Promise<ZoneRow[]> {

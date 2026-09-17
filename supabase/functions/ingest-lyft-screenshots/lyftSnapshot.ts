@@ -318,17 +318,36 @@ export interface ZoneScoreRow {
   current_score: number | null;
 }
 
-/** Highest-scoring zone other than `currentZoneId`, excluding unscored
- * zones -- mirrors shiftGeoWatcher.ts's notifyBestAlternate. */
+// Distance-weighted, not raw score -- mirrors src/lib/zoneMatch.ts's
+// rankByProximityPenalizedScore (duplicated, not imported -- Deno and Vite
+// don't share a module graph, see this file's header). Without this, a
+// saturation fallback could pick the globally highest-scoring zone
+// anywhere in the territory and auto-launch navigation to it with no
+// tap -- the exact bug rankByProximityPenalizedScore was built to fix
+// client-side (see zoneMatch.ts's own comment about Station Montmorency/
+// Terminus Longueuil winning on raw score from Saint-Léonard).
+export const MAX_FALLBACK_ZONE_DISTANCE_KM = 7;
+export const FALLBACK_DISTANCE_PENALTY_PER_KM = 3;
+
+/** Highest-ranking zone other than `currentZoneId` within
+ * MAX_FALLBACK_ZONE_DISTANCE_KM of the origin, ranked by
+ * `score - distKm * penalty`, excluding unscored zones. */
 export function findBestNeighboringZone(
   currentZoneId: string,
-  zones: ZoneScoreRow[]
+  zones: ZoneScoreRow[],
+  originLat: number,
+  originLng: number
 ): ZoneScoreRow | null {
-  const candidates = zones.filter((z) => z.id !== currentZoneId && z.current_score != null);
+  const candidates = zones
+    .filter((z) => z.id !== currentZoneId && z.current_score != null)
+    .map((z) => ({ ...z, distKm: haversineKm(originLat, originLng, z.latitude, z.longitude) }))
+    .filter((z) => z.distKm <= MAX_FALLBACK_ZONE_DISTANCE_KM);
   if (candidates.length === 0) return null;
-  return candidates.reduce((best, z) =>
-    (z.current_score ?? 0) > (best.current_score ?? 0) ? z : best
-  );
+  return candidates.reduce((best, z) => {
+    const rankZ = (z.current_score ?? 0) - z.distKm * FALLBACK_DISTANCE_PENALTY_PER_KM;
+    const rankBest = (best.current_score ?? 0) - best.distKm * FALLBACK_DISTANCE_PENALTY_PER_KM;
+    return rankZ > rankBest ? z : best;
+  });
 }
 
 export interface NavigationTarget extends GeoPoint {
@@ -347,7 +366,12 @@ export function computeNavigationTarget(
   currentZoneId: string
 ): NavigationTarget {
   if (isZoneSaturated(nearbyDriversCount)) {
-    const fallback = findBestNeighboringZone(currentZoneId, neighboringZones);
+    const fallback = findBestNeighboringZone(
+      currentZoneId,
+      neighboringZones,
+      currentZone.latitude,
+      currentZone.longitude
+    );
     if (fallback) {
       return {
         latitude: fallback.latitude,
