@@ -75,6 +75,8 @@ import {
 import type { SurgeResult } from '@/lib/surgeEngine';
 import { getMontrealDayStart } from '@/lib/timezone';
 import { summarizeTrips } from '@/lib/tripAnalytics';
+import { Preferences } from '@capacitor/preferences';
+import { PREFS_HERO_ZONE_KEY } from '@/lib/shiftGeoWatcher';
 import { Bell, Car, Crosshair, Maximize2, Minimize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
@@ -438,6 +440,14 @@ export default function DriveScreen() {
     }
     prevHeroZoneIdRef.current = currentId;
   }, [heroZone?.id, isLyftSyncing, vibrate]);
+
+  // Persist the recommended zone so the background geofence watcher
+  // (shiftGeoWatcher.ts, running even when this screen isn't mounted) knows
+  // which zone counts as "arrival" for the Nearby Drivers capture trigger.
+  useEffect(() => {
+    if (!heroZone) return;
+    void Preferences.set({ key: PREFS_HERO_ZONE_KEY, value: heroZone.id });
+  }, [heroZone?.id]);
 
   // Anti-deadhead: is the driver currently parked in a low-score zone
   // (e.g. just dropped off out in the sticks)? If so, suggest the best
