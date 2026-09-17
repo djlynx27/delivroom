@@ -35,6 +35,7 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
 import {
+  computeNavigationTarget,
   decodeBase64Image,
   formatGpsAddress,
   hashImages,
@@ -44,6 +45,7 @@ import {
   resizeForGemini,
   shouldFlagEmergingHotspot,
   type LyftSnapshot,
+  type NavigationTarget,
 } from './lyftSnapshot.ts';
 
 const corsHeaders = {
@@ -71,8 +73,10 @@ interface ImageSlot {
 
 interface ZoneRow {
   id: string;
+  name: string;
   latitude: number;
   longitude: number;
+  current_score: number | null;
 }
 
 interface EnvConfig {
@@ -261,8 +265,9 @@ async function handleRequest(req: Request): Promise<Response> {
 
   let zoneId = body.zone_id ?? null;
   let nearestDistanceKm: number | null = null;
-  if (!zoneId && client) {
-    const nearest = await resolveNearestZone(client, body.latitude!, body.longitude!);
+  const zones = client ? await fetchAllZones(client) : [];
+  if (!zoneId) {
+    const nearest = resolveNearestZone(zones, body.latitude!, body.longitude!);
     zoneId = nearest?.id ?? null;
     nearestDistanceKm = nearest?.distanceKm ?? null;
   }
@@ -299,7 +304,27 @@ async function handleRequest(req: Request): Promise<Response> {
     emergingHotspot = await logEmergingHotspot(client, body.latitude!, body.longitude!, snapshot);
   }
 
-  return json({ ok: true, zone_id: zoneId, snapshot, emerging_hotspot: emergingHotspot });
+  let navigationTarget: NavigationTarget | null = null;
+  if (zoneId) {
+    const currentZone = zones.find((z) => z.id === zoneId);
+    if (currentZone) {
+      navigationTarget = computeNavigationTarget(
+        { latitude: currentZone.latitude, longitude: currentZone.longitude },
+        snapshot.nearby_drivers_count,
+        snapshot.nearby_drivers_grid,
+        zones,
+        zoneId
+      );
+    }
+  }
+
+  return json({
+    ok: true,
+    zone_id: zoneId,
+    snapshot,
+    emerging_hotspot: emergingHotspot,
+    ...(navigationTarget && { navigation_target: navigationTarget }),
+  });
 }
 
 interface FetchedImage {
@@ -415,24 +440,23 @@ Rules:
   return nearbyOnly ? parseNearbyOnlySnapshot(parsed) : parseLyftSnapshot(parsed);
 }
 
+async function fetchAllZones(client: SupabaseClient): Promise<ZoneRow[]> {
+  const { data, error } = await client
+    .from('zones')
+    .select('id, name, latitude, longitude, current_score');
+  if (error || !data) return [];
+  return data as ZoneRow[];
+}
+
 interface NearestZoneResult {
   id: string;
   distanceKm: number;
 }
 
-async function resolveNearestZone(
-  client: SupabaseClient,
-  lat: number,
-  lng: number
-): Promise<NearestZoneResult | null> {
-  const { data, error } = await client
-    .from('zones')
-    .select('id, latitude, longitude');
-  if (error || !data?.length) return null;
-
+function resolveNearestZone(zones: ZoneRow[], lat: number, lng: number): NearestZoneResult | null {
   let best: ZoneRow | null = null;
   let bestDist = Infinity;
-  for (const zone of data as ZoneRow[]) {
+  for (const zone of zones) {
     const dist = haversineKm(lat, lng, zone.latitude, zone.longitude);
     if (dist < bestDist) {
       bestDist = dist;
