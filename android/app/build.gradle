@@ -1,4 +1,21 @@
+// Kotlin support for DelivroomBroadcastPlugin.kt (the app's own native
+// plugin, see src/lib/delivroomBroadcast.ts) -- mirrors the exact
+// buildscript pattern every Capacitor plugin module already uses (e.g.
+// node_modules/@capacitor/geolocation/android/build.gradle), since this
+// repo's root build.gradle never needed a Kotlin classpath before now.
+buildscript {
+    ext.kotlin_version = project.hasProperty("kotlin_version") ? rootProject.ext.kotlin_version : '2.2.20'
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
 apply plugin: 'com.android.application'
+apply plugin: 'kotlin-android'
 
 android {
     namespace = "com.delivroom.app"
