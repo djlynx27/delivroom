@@ -211,3 +211,157 @@ export function shouldFlagEmergingHotspot(
 export function formatGpsAddress(lat: number, lng: number): string {
   return `GPS ${lat.toFixed(4)},${lng.toFixed(4)}`;
 }
+
+// ── Micro-spot / saturation fallback ────────────────────────────────────
+// Duplicated from src/lib/spotter.ts, not imported -- this Deno function
+// and the Vite app don't share a module graph (see the DriverGrid comment
+// above). Computed server-side so the recommendation reaches the driver
+// without Delivroom ever being foregrounded -- see
+// docs/superpowers/specs/2026-09-17-nearby-drivers-geofence-autonav-design.md.
+
+export type Quadrant =
+  | 'top_left' | 'top_center' | 'top_right'
+  | 'middle_left' | 'center' | 'middle_right'
+  | 'bottom_left' | 'bottom_center' | 'bottom_right';
+
+const QUADRANT_LABELS: Quadrant[] = [
+  'top_left', 'top_center', 'top_right',
+  'middle_left', 'center', 'middle_right',
+  'bottom_left', 'bottom_center', 'bottom_right',
+];
+
+const QUADRANT_BEARING_DEG: Record<Quadrant, number | null> = {
+  top_left: 315,
+  top_center: 0,
+  top_right: 45,
+  middle_left: 270,
+  center: null,
+  middle_right: 90,
+  bottom_left: 225,
+  bottom_center: 180,
+  bottom_right: 135,
+};
+
+export const MIN_SPOT_OFFSET_METERS = 50;
+export const MAX_SPOT_OFFSET_METERS = 150;
+const DEFAULT_SPOT_OFFSET_METERS = 100;
+const EARTH_RADIUS_METERS = 6_371_000;
+
+export interface GeoPoint {
+  latitude: number;
+  longitude: number;
+}
+
+/** Row-major (matches the Gemini prompt in index.ts): the least-dense grid
+ * cell, ties resolved to the first cell in row-major order. */
+export function findQuietestQuadrant(grid: DriverGrid): { quadrant: Quadrant } {
+  let bestIndex = 0;
+  for (let i = 1; i < grid.length; i++) {
+    if (grid[i] < grid[bestIndex]) bestIndex = i;
+  }
+  return { quadrant: QUADRANT_LABELS[bestIndex] };
+}
+
+function clampOffsetMeters(distanceMeters: number): number {
+  return Math.min(MAX_SPOT_OFFSET_METERS, Math.max(MIN_SPOT_OFFSET_METERS, distanceMeters));
+}
+
+/** Equirectangular destination-point approximation -- accurate enough at the
+ * tens-to-low-hundreds-of-meters distances this deals with. */
+export function offsetCoordinate(
+  origin: GeoPoint,
+  bearingDeg: number,
+  distanceMeters: number
+): GeoPoint {
+  const bearingRad = (bearingDeg * Math.PI) / 180;
+  const latRad = (origin.latitude * Math.PI) / 180;
+  const dLat = (distanceMeters * Math.cos(bearingRad)) / EARTH_RADIUS_METERS;
+  const dLng =
+    (distanceMeters * Math.sin(bearingRad)) / (EARTH_RADIUS_METERS * Math.cos(latRad));
+  return {
+    latitude: origin.latitude + (dLat * 180) / Math.PI,
+    longitude: origin.longitude + (dLng * 180) / Math.PI,
+  };
+}
+
+/** 50-150m tactical offset toward the sparsest grid cell -- zero offset
+ * (zone centroid unchanged) when the center cell is already quietest. */
+export function computeMicroSpot(
+  zoneCentroid: GeoPoint,
+  grid: DriverGrid,
+  offsetMeters: number = DEFAULT_SPOT_OFFSET_METERS
+): GeoPoint & { quadrant: Quadrant; offsetMeters: number } {
+  const { quadrant } = findQuietestQuadrant(grid);
+  const bearingDeg = QUADRANT_BEARING_DEG[quadrant];
+  if (bearingDeg === null) {
+    return { ...zoneCentroid, quadrant, offsetMeters: 0 };
+  }
+  const distance = clampOffsetMeters(offsetMeters);
+  const point = offsetCoordinate(zoneCentroid, bearingDeg, distance);
+  return { ...point, quadrant, offsetMeters: distance };
+}
+
+// ponytail: fixed threshold, calibrate with real shift data once a few
+// real captures land -- add a per-cell density check instead if a flat
+// total ever proves too coarse.
+export const SATURATION_THRESHOLD = 15;
+
+export function isZoneSaturated(nearbyDriversCount: number): boolean {
+  return nearbyDriversCount >= SATURATION_THRESHOLD;
+}
+
+export interface ZoneScoreRow {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  current_score: number | null;
+}
+
+/** Highest-scoring zone other than `currentZoneId`, excluding unscored
+ * zones -- mirrors shiftGeoWatcher.ts's notifyBestAlternate. */
+export function findBestNeighboringZone(
+  currentZoneId: string,
+  zones: ZoneScoreRow[]
+): ZoneScoreRow | null {
+  const candidates = zones.filter((z) => z.id !== currentZoneId && z.current_score != null);
+  if (candidates.length === 0) return null;
+  return candidates.reduce((best, z) =>
+    (z.current_score ?? 0) > (best.current_score ?? 0) ? z : best
+  );
+}
+
+export interface NavigationTarget extends GeoPoint {
+  mode: 'micro_spot' | 'fallback_zone';
+  zone_name?: string;
+}
+
+/** The single entry point index.ts calls: saturated zone -> best
+ * neighboring zone (or the micro-spot nudge, if no neighbor is scored);
+ * otherwise the micro-spot nudge (or the bare zone centroid, if no grid). */
+export function computeNavigationTarget(
+  currentZone: GeoPoint,
+  nearbyDriversCount: number,
+  grid: DriverGrid | undefined,
+  neighboringZones: ZoneScoreRow[],
+  currentZoneId: string
+): NavigationTarget {
+  if (isZoneSaturated(nearbyDriversCount)) {
+    const fallback = findBestNeighboringZone(currentZoneId, neighboringZones);
+    if (fallback) {
+      return {
+        latitude: fallback.latitude,
+        longitude: fallback.longitude,
+        mode: 'fallback_zone',
+        zone_name: fallback.name,
+      };
+    }
+    // No scored neighbor -- fall through to the micro-spot nudge below
+    // rather than fail the response (see spec's Error handling section).
+  }
+  if (!grid) {
+    return { ...currentZone, mode: 'micro_spot' };
+  }
+  const spot = computeMicroSpot(currentZone, grid);
+  return { latitude: spot.latitude, longitude: spot.longitude, mode: 'micro_spot' };
+}

@@ -7,15 +7,23 @@
 
 import { assertEquals, assertNotEquals } from 'https://deno.land/std@0.168.0/testing/asserts.ts';
 import {
+  computeMicroSpot,
+  computeNavigationTarget,
   decodeBase64Image,
   EMERGING_HOTSPOT_DISTANCE_KM,
   EMERGING_HOTSPOT_MIN_DEMAND,
+  findBestNeighboringZone,
+  findQuietestQuadrant,
   formatGpsAddress,
   hashImages,
+  isZoneSaturated,
+  offsetCoordinate,
   parseLyftSnapshot,
   parseNearbyOnlySnapshot,
   resizeForGemini,
+  SATURATION_THRESHOLD,
   shouldFlagEmergingHotspot,
+  type ZoneScoreRow,
 } from './lyftSnapshot.ts';
 
 Deno.test('parseLyftSnapshot: accepts a well-formed snapshot', () => {
@@ -190,4 +198,94 @@ Deno.test('formatGpsAddress: two nearby detections round to the same label (dedu
   const a = formatGpsAddress(45.501701, -73.567301);
   const b = formatGpsAddress(45.501699, -73.567299);
   assertEquals(a, b);
+});
+
+const CHOMEDEY = { latitude: 45.544154, longitude: -73.739052 };
+
+Deno.test('findQuietestQuadrant: picks the cell with the fewest drivers', () => {
+  const grid = [5, 4, 0, 3, 6, 2, 1, 4, 3];
+  assertEquals(findQuietestQuadrant(grid), { quadrant: 'top_right' });
+});
+
+Deno.test('findQuietestQuadrant: breaks ties by row-major order', () => {
+  const grid = [0, 0, 1, 1, 1, 1, 1, 1, 1];
+  assertEquals(findQuietestQuadrant(grid).quadrant, 'top_left');
+});
+
+Deno.test('offsetCoordinate: moves due north by roughly the requested distance', () => {
+  const point = offsetCoordinate(CHOMEDEY, 0, 100);
+  assertEquals(point.latitude > CHOMEDEY.latitude, true);
+});
+
+Deno.test('computeMicroSpot: leaves the centroid unmodified when center is quietest', () => {
+  const grid = [5, 5, 5, 5, 0, 5, 5, 5, 5];
+  const spot = computeMicroSpot(CHOMEDEY, grid);
+  assertEquals(spot.latitude, CHOMEDEY.latitude);
+  assertEquals(spot.longitude, CHOMEDEY.longitude);
+  assertEquals(spot.quadrant, 'center');
+  assertEquals(spot.offsetMeters, 0);
+});
+
+Deno.test('computeMicroSpot: offsets toward the sparsest quadrant', () => {
+  const grid = [3, 3, 0, 3, 3, 3, 9, 3, 3];
+  const spot = computeMicroSpot(CHOMEDEY, grid);
+  assertEquals(spot.quadrant, 'top_right');
+  assertEquals(spot.latitude > CHOMEDEY.latitude, true);
+  assertEquals(spot.longitude > CHOMEDEY.longitude, true);
+});
+
+Deno.test('isZoneSaturated: true at or above the threshold', () => {
+  assertEquals(isZoneSaturated(SATURATION_THRESHOLD), true);
+  assertEquals(isZoneSaturated(SATURATION_THRESHOLD - 1), false);
+});
+
+const ZONES: ZoneScoreRow[] = [
+  { id: 'a', name: 'Zone A', latitude: 45.5, longitude: -73.6, current_score: 40 },
+  { id: 'b', name: 'Zone B', latitude: 45.6, longitude: -73.7, current_score: 80 },
+  { id: 'c', name: 'Zone C', latitude: 45.7, longitude: -73.8, current_score: null },
+];
+
+Deno.test('findBestNeighboringZone: picks the highest-scoring zone, excluding self and nulls', () => {
+  const best = findBestNeighboringZone('a', ZONES);
+  assertEquals(best?.id, 'b');
+});
+
+Deno.test('findBestNeighboringZone: returns null when no scored neighbor exists', () => {
+  const best = findBestNeighboringZone('a', [ZONES[0], ZONES[2]]);
+  assertEquals(best, null);
+});
+
+Deno.test('computeNavigationTarget: falls back to the best neighbor when saturated', () => {
+  const target = computeNavigationTarget(
+    { latitude: 45.5, longitude: -73.6 },
+    SATURATION_THRESHOLD,
+    undefined,
+    ZONES,
+    'a'
+  );
+  assertEquals(target, { latitude: 45.6, longitude: -73.7, mode: 'fallback_zone', zone_name: 'Zone B' });
+});
+
+Deno.test('computeNavigationTarget: falls back to micro-spot when saturated but no neighbor scored', () => {
+  const grid = [3, 3, 0, 3, 3, 3, 9, 3, 3];
+  const target = computeNavigationTarget(
+    CHOMEDEY,
+    SATURATION_THRESHOLD,
+    grid,
+    [ZONES[2]],
+    'a'
+  );
+  assertEquals(target.mode, 'micro_spot');
+});
+
+Deno.test('computeNavigationTarget: micro-spot nudge when not saturated', () => {
+  const grid = [3, 3, 0, 3, 3, 3, 9, 3, 3];
+  const target = computeNavigationTarget(CHOMEDEY, 2, grid, ZONES, 'a');
+  assertEquals(target.mode, 'micro_spot');
+  assertEquals(target.latitude > CHOMEDEY.latitude, true);
+});
+
+Deno.test('computeNavigationTarget: zone centroid (no offset) when not saturated and no grid', () => {
+  const target = computeNavigationTarget(CHOMEDEY, 2, undefined, ZONES, 'a');
+  assertEquals(target, { latitude: CHOMEDEY.latitude, longitude: CHOMEDEY.longitude, mode: 'micro_spot' });
 });
