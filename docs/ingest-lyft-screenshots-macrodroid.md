@@ -512,3 +512,53 @@ Le blocker connu est côté facturation, pas côté device : crédits prépayés
 Gemini épuisés → `429 RESOURCE_EXHAUSTED` → `502` renvoyé à MacroDroid
 (section "Bloqueur restant" plus haut). Vérifier les `function_logs` de
 `ingest-lyft-screenshots` avant de toucher à la macro.
+
+## 10. Déclenchement par géofence + auto-navigation Maps (2026-09-17)
+
+Voir `docs/superpowers/specs/2026-09-17-nearby-drivers-geofence-autonav-design.md`
+pour le design complet. Changement de comportement : la capture "Nearby
+Drivers" ne se déclenche plus sur intervalle (§8) mais uniquement à
+l'arrivée dans la zone recommandée (hero zone) ou sur clic manuel.
+
+### 10.1 Édition de la macro "Lyft 3 Functions"
+
+1. Ouvrir la macro dans l'éditeur MacroDroid (édition live sur le device,
+   pas d'import de fichier — voir le piège `m_GUID` documenté plus haut
+   dans ce fichier).
+2. **Retirer** le trigger intervalle existant (§8.1).
+3. **Ajouter** un trigger `Intent Received` (catégorie *MacroDroid
+   Specific* ou recherche texte dans le picker) :
+   - Action de l'intent : `com.delivroom.TRIGGER_NEARBY_CAPTURE`
+   - Combiné en OR avec le trigger manuel déjà en place (raccourci/bouton).
+4. Après l'action `HTTP Request` existante (POST vers
+   `ingest-lyft-screenshots`), ajouter :
+   - Une action **"Obtenir la valeur JSON"** (ou équivalent MacroDroid pour
+     parser la réponse HTTP) sur les champs
+     `navigation_target.latitude` / `navigation_target.longitude` →
+     variables locales `%nav_lat%` / `%nav_lng%`.
+   - Une **contrainte** sur les actions suivantes : `%nav_lat%` non vide
+     (dédup/kill-switch, même pattern que `Lyft_GPS_Google_Maps.macro` —
+     voir §"Fix boucle infinie" plus haut) — évite un Intent vide si la
+     réponse n'a pas de `navigation_target` (cas replay dédupliqué, ou
+     erreur amont).
+   - Une action `Send Intent` : target `Activity`, action
+     `android.intent.action.VIEW`, package `com.google.android.apps.maps`,
+     data `google.navigation:q={lv=nav_lat},{lv=nav_lng}` — même schéma
+     que `scripts/Lyft_GPS_Google_Maps.macro`.
+5. Ré-exporter la macro, vérifier `m_isDisabled` sur chaque action/trigger
+   (piège déjà documenté §9.2) avant de considérer le fix terminé.
+
+### 10.2 Vérification bout-en-bout
+
+1. Confirmer que le plugin natif envoie bien le broadcast (Task 3 de
+   `docs/superpowers/plans/2026-09-17-nearby-drivers-geofence-autonav.md`,
+   Step 4).
+2. Démarrer un shift, se rendre physiquement (ou simuler via une app de
+   mock GPS) dans la hero zone affichée par Delivroom.
+3. Confirmer dans les logs MacroDroid (icône ⋮ → Logs, ou
+   `adb logcat | grep -i macrodroid`) que le trigger `Intent Received`
+   s'est déclenché et que la macro a couru.
+4. Confirmer que Google Maps s'ouvre automatiquement en navigation, sans
+   tap, avec la bonne destination (micro-spot dans la zone ou zone de
+   repli si saturée — comparer avec le `navigation_target.mode` retourné
+   par la fonction, visible dans les `function_logs` Supabase).
