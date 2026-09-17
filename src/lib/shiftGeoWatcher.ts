@@ -27,6 +27,7 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>(
 );
 import { supabase } from '@/integrations/supabase/client';
 import { findNearestZone } from '@/lib/zoneMatch';
+import DelivroomBroadcast from '@/lib/delivroomBroadcast';
 
 const LOG_TAG = '[ShiftGeoWatcher]';
 // console.warn, not console.log — confirmed on-device that Capacitor's
@@ -45,6 +46,9 @@ export const ZONE_STAY_TIMER_MS = 15 * 60_000;
 
 const PREFS_STATE_KEY = 'delivroom_shift_geo_state';
 const PREFS_WATCHER_ID_KEY = 'delivroom_shift_geo_watcher_id';
+export const PREFS_HERO_ZONE_KEY = 'delivroom_hero_zone_id';
+const PREFS_CAPTURED_ZONE_KEY = 'delivroom_shift_geo_captured_zone';
+const TRIGGER_CAPTURE_ACTION = 'com.delivroom.TRIGGER_NEARBY_CAPTURE';
 const GO_ACTION_TYPE = 'delivroom.shift.go';
 const NOTIFICATION_ID = 771_001;
 // 70 zones total (see repo CLAUDE.md) — cheap to fetch whole, cached in
@@ -81,6 +85,29 @@ export function evaluateZoneStay(
     return { state: { ...prev, notified: true }, shouldNotify: true };
   }
   return { state: prev, shouldNotify: false };
+}
+
+export interface CaptureTriggerEvaluation {
+  capturedZoneId: string | null;
+  shouldCapture: boolean;
+}
+
+/** Pure state machine, mirrors evaluateZoneStay's shape -- fires once per
+ * hero-zone arrival (not the 15-min stay timer, a separate concern). */
+export function evaluateCaptureTrigger(
+  prevCapturedZoneId: string | null,
+  nearestZoneId: string | null,
+  heroZoneId: string | null
+): CaptureTriggerEvaluation {
+  if (nearestZoneId == null || heroZoneId == null || nearestZoneId !== heroZoneId) {
+    // Not standing in the hero zone (or it isn't known yet) -- clear any
+    // stale "already captured" mark so a later re-entry fires again.
+    return { capturedZoneId: null, shouldCapture: false };
+  }
+  if (prevCapturedZoneId === heroZoneId) {
+    return { capturedZoneId: prevCapturedZoneId, shouldCapture: false };
+  }
+  return { capturedZoneId: heroZoneId, shouldCapture: true };
 }
 
 interface LiteZone {
@@ -124,6 +151,64 @@ async function writeState(state: ZoneStayState | null): Promise<void> {
   } catch {
     // Preferences unavailable — next callback just re-derives state from GPS.
   }
+}
+
+async function readHeroZoneId(): Promise<string | null> {
+  try {
+    const { value } = await Preferences.get({ key: PREFS_HERO_ZONE_KEY });
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function readCapturedZoneId(): Promise<string | null> {
+  try {
+    const { value } = await Preferences.get({ key: PREFS_CAPTURED_ZONE_KEY });
+    return value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeCapturedZoneId(zoneId: string | null): Promise<void> {
+  try {
+    if (zoneId == null) {
+      await Preferences.remove({ key: PREFS_CAPTURED_ZONE_KEY });
+    } else {
+      await Preferences.set({ key: PREFS_CAPTURED_ZONE_KEY, value: zoneId });
+    }
+  } catch {
+    // Preferences unavailable -- next callback just re-evaluates from GPS.
+  }
+}
+
+async function triggerNearbyCapture(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await DelivroomBroadcast.sendBroadcast({ action: TRIGGER_CAPTURE_ACTION });
+    log('triggerNearbyCapture: broadcast sent');
+  } catch (err) {
+    logError('triggerNearbyCapture failed', err);
+  }
+}
+
+/** Reads hero-zone state, runs evaluateCaptureTrigger, persists + fires the
+ * broadcast as needed. Split out of onLocation to stay under the complexity
+ * threshold (see CLAUDE.md M<=10). */
+async function runCaptureTrigger(
+  nearestZoneId: string | null
+): Promise<{ heroZoneId: string | null; shouldCapture: boolean }> {
+  const heroZoneId = await readHeroZoneId();
+  const prevCaptured = await readCapturedZoneId();
+  const { capturedZoneId, shouldCapture } = evaluateCaptureTrigger(
+    prevCaptured,
+    nearestZoneId,
+    heroZoneId
+  );
+  if (capturedZoneId !== prevCaptured) await writeCapturedZoneId(capturedZoneId);
+  if (shouldCapture) await triggerNearbyCapture();
+  return { heroZoneId, shouldCapture };
 }
 
 async function notifyBestAlternate(currentZoneId: string) {
@@ -170,7 +255,17 @@ async function onLocation(lat: number, lng: number) {
     const prev = await readState();
     const { state, shouldNotify } = evaluateZoneStay(prev, Date.now(), nearest?.id ?? null);
     await writeState(state);
-    log('onLocation', { lat, lng, nearestZone: nearest?.id ?? null, shouldNotify });
+
+    const { heroZoneId, shouldCapture } = await runCaptureTrigger(nearest?.id ?? null);
+
+    log('onLocation', {
+      lat,
+      lng,
+      nearestZone: nearest?.id ?? null,
+      shouldNotify,
+      heroZoneId,
+      shouldCapture,
+    });
 
     if (shouldNotify && nearest) {
       await notifyBestAlternate(nearest.id);
@@ -291,6 +386,7 @@ export async function stopShiftWatcher(): Promise<void> {
     }
     await Preferences.remove({ key: PREFS_WATCHER_ID_KEY });
     await writeState(null);
+    await writeCapturedZoneId(null);
   } catch (err) {
     logError('stopShiftWatcher failed', err);
   }

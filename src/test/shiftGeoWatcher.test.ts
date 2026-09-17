@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateZoneStay, ZONE_STAY_TIMER_MS } from '@/lib/shiftGeoWatcher';
+import { evaluateZoneStay, ZONE_STAY_TIMER_MS, evaluateCaptureTrigger } from '@/lib/shiftGeoWatcher';
 
 describe('evaluateZoneStay', () => {
   it('clears state when no zone is in range', () => {
@@ -44,5 +44,48 @@ describe('evaluateZoneStay', () => {
     const prev = { zoneId: 'z1', enteredAt: 0, notified: true };
     const result = evaluateZoneStay(prev, ZONE_STAY_TIMER_MS + 60_000, 'z1');
     expect(result).toEqual({ state: prev, shouldNotify: false });
+  });
+});
+
+describe('evaluateCaptureTrigger', () => {
+  it('does nothing when there is no hero zone set yet', () => {
+    expect(evaluateCaptureTrigger(null, 'z1', null)).toEqual({
+      capturedZoneId: null,
+      shouldCapture: false,
+    });
+  });
+
+  it('does nothing when the driver is not in the hero zone', () => {
+    expect(evaluateCaptureTrigger(null, 'z1', 'z2')).toEqual({
+      capturedZoneId: null,
+      shouldCapture: false,
+    });
+  });
+
+  it('fires once on arrival in the hero zone', () => {
+    expect(evaluateCaptureTrigger(null, 'z1', 'z1')).toEqual({
+      capturedZoneId: 'z1',
+      shouldCapture: true,
+    });
+  });
+
+  it('does not re-fire on later callbacks in the same hero-zone stay', () => {
+    expect(evaluateCaptureTrigger('z1', 'z1', 'z1')).toEqual({
+      capturedZoneId: 'z1',
+      shouldCapture: false,
+    });
+  });
+
+  it('clears the captured mark once the driver leaves the hero zone', () => {
+    expect(evaluateCaptureTrigger('z1', 'z2', 'z1')).toEqual({
+      capturedZoneId: null,
+      shouldCapture: false,
+    });
+  });
+
+  it('re-fires on a later re-entry into the hero zone', () => {
+    const left = evaluateCaptureTrigger('z1', 'z2', 'z1');
+    const reentered = evaluateCaptureTrigger(left.capturedZoneId, 'z1', 'z1');
+    expect(reentered).toEqual({ capturedZoneId: 'z1', shouldCapture: true });
   });
 });
