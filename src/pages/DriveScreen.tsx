@@ -51,7 +51,7 @@ import { useTrips } from '@/hooks/useTrips';
 import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
-import { findNearestZone } from '@/lib/zoneMatch';
+import { findNearestZone, rankByProximityPenalizedScore } from '@/lib/zoneMatch';
 import {
   getConservativePresencePreference,
   getDriverFingerprint,
@@ -93,14 +93,6 @@ type WakeLockStatus = 'active' | 'inactive' | 'unsupported';
 function hasActiveSurge(surge: SurgeResult | null | undefined): surge is SurgeResult {
   return !!surge && surge.surgeClass !== 'normal';
 }
-
-// Stricter than useSmartZones.MAX_DISTANCE_KM (35km, general zone browsing)
-// -- the hero card claims to be THE actionable recommendation right now, so
-// a stale cityId or a border zone with a high score must not surface a
-// destination the driver can't reasonably drive to (e.g. Station Longueuil
-// while physically in Saint-Léonard, ~15-18km away, was winning solely on
-// score with no distance penalty).
-const MAX_HERO_ZONE_DISTANCE_KM = 15;
 
 function getHeroCardGlowClass(surge: SurgeResult | null | undefined): string {
   if (!hasActiveSurge(surge)) return '';
@@ -371,25 +363,24 @@ export default function DriveScreen() {
     // skeleton instead (see hasPreciseFix gate below `noZonesAvailable`).
     if (!hasPreciseFix || !location) return [];
 
-    return zones
-      .map((z) => {
-        const score = scores.get(z.id) ?? 0;
-        return {
-          ...z,
-          score: saturatedZoneIds.has(z.id)
-            ? applySaturationDegradation(
-                score,
-                computeSaturationFactor(driversByZone.get(z.id) ?? 0, score)
-              )
-            : score,
-          distKm: haversineKm(location.latitude, location.longitude, z.latitude, z.longitude),
-        };
-      })
-      .filter((z) => z.distKm <= MAX_HERO_ZONE_DISTANCE_KM)
-      // Ties broken by distance — matters when scores haven't loaded yet
-      // (every zone defaults to 0) so the hero zone still falls back to the
-      // geometrically nearest one instead of an arbitrary array order.
-      .sort((a, b) => b.score - a.score || a.distKm - b.distKm);
+    // Displayed score -- what the driver sees on the badge. Never adjusted
+    // for distance here, so it keeps meaning "demand right now"; the
+    // distance penalty is applied only inside rankByProximityPenalizedScore
+    // for ordering purposes (see zoneMatch.ts).
+    const scoredZones = zones.map((z) => {
+      const score = scores.get(z.id) ?? 0;
+      return {
+        ...z,
+        score: saturatedZoneIds.has(z.id)
+          ? applySaturationDegradation(
+              score,
+              computeSaturationFactor(driversByZone.get(z.id) ?? 0, score)
+            )
+          : score,
+      };
+    });
+
+    return rankByProximityPenalizedScore(location.latitude, location.longitude, scoredZones);
   }, [zones, scores, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
 
   const marketRadarZones = useMemo(

@@ -30,3 +30,45 @@ export function findNearestZone<T extends ZoneLike>(lat: number, lng: number, zo
   }
   return bestDist <= MAX_GPS_ZONE_KM ? best : null;
 }
+
+// Stricter than findNearestZone's 25km (a much narrower "is this worth an
+// actionable drive right now" cap, not "is this technically in-territory")
+// AND score-aware with a real distance penalty rather than a pure cutoff.
+// Recurred on-device 2026-09-16: from Saint-Léonard/L'Acadie, Station
+// Montmorency (Laval) and Terminus Longueuil (11.7km) both won on raw score
+// alone despite much closer Montreal zones existing, because the only
+// distance handling at the time was an outer 15km cutoff with the score
+// otherwise untouched inside it.
+export const MAX_HERO_ZONE_DISTANCE_KM = 7;
+// Points subtracted per km from a zone's ranking score (the zone's own
+// displayed `score` is never touched — this only affects ranking order).
+export const DISTANCE_PENALTY_PER_KM = 3;
+
+export type ScoredZone<T> = T & { score: number };
+export type DistanceRankedZone<T> = ScoredZone<T> & { distKm: number };
+
+/**
+ * Filters zones to `maxDistanceKm` of the origin, then ranks them by
+ * `score - distKm * penaltyPerKm` (ties broken by distance) rather than raw
+ * score — so a farther zone needs a real demand edge, not a marginal one,
+ * to outrank a closer one.
+ */
+export function rankByProximityPenalizedScore<T extends ZoneLike>(
+  originLat: number,
+  originLng: number,
+  zones: ScoredZone<T>[],
+  maxDistanceKm: number = MAX_HERO_ZONE_DISTANCE_KM,
+  penaltyPerKm: number = DISTANCE_PENALTY_PER_KM
+): DistanceRankedZone<T>[] {
+  return zones
+    .map((z) => ({
+      ...z,
+      distKm: haversineKm(originLat, originLng, z.latitude, z.longitude),
+    }))
+    .filter((z) => z.distKm <= maxDistanceKm)
+    .sort((a, b) => {
+      const rankA = a.score - a.distKm * penaltyPerKm;
+      const rankB = b.score - b.distKm * penaltyPerKm;
+      return rankB - rankA || a.distKm - b.distKm;
+    });
+}
