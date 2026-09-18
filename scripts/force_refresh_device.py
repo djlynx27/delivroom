@@ -38,6 +38,7 @@ import time
 import urllib.request
 
 DEFAULT_URL_FILTER = "delivroom"
+DEFAULT_PACKAGE = "com.delivroom.app"
 DEFAULT_PORT = 9222
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -51,11 +52,25 @@ def adb_base_args(serial: str | None, transport: str | None) -> list[str]:
     return args
 
 
-def adb_forward(serial: str | None, transport: str | None, port: int) -> None:
+def find_devtools_socket(serial: str | None, transport: str | None, package: str) -> str:
+    """Delivroom used to run as a Chrome WebAPK (socket name
+    `chrome_devtools_remote`, fixed). It now also ships as the native
+    Capacitor app (`com.delivroom.app`), whose WebView exposes CDP on
+    `webview_devtools_remote_<pid>` instead — the pid changes every launch,
+    so it can't be hardcoded. Ask the device which one is actually live."""
+    pidof = adb_base_args(serial, transport) + ["shell", "pidof", package]
+    pid_result = subprocess.run(pidof, capture_output=True, text=True)
+    pid = pid_result.stdout.strip().split()[0] if pid_result.stdout.strip() else None
+    if pid:
+        return f"webview_devtools_remote_{pid}"
+    return "chrome_devtools_remote"
+
+
+def adb_forward(serial: str | None, transport: str | None, port: int, socket_name: str) -> None:
     args = adb_base_args(serial, transport) + [
         "forward",
         f"tcp:{port}",
-        "localabstract:chrome_devtools_remote",
+        f"localabstract:{socket_name}",
     ]
     subprocess.run(args, check=True, capture_output=True, text=True)
 
@@ -170,14 +185,16 @@ def main() -> int:
     parser.add_argument("--transport", default=None, help="adb -t <transport_id>")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--url-filter", default=DEFAULT_URL_FILTER)
+    parser.add_argument("--package", default=DEFAULT_PACKAGE)
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
 
     if args.selftest:
         return run_selftest()
 
-    print(f"[force-refresh] forwarding tcp:{args.port} -> chrome_devtools_remote ...")
-    adb_forward(args.serial, args.transport, args.port)
+    socket_name = find_devtools_socket(args.serial, args.transport, args.package)
+    print(f"[force-refresh] forwarding tcp:{args.port} -> {socket_name} ...")
+    adb_forward(args.serial, args.transport, args.port, socket_name)
 
     targets = fetch_targets(args.port)
     target = find_target(targets, args.url_filter)
