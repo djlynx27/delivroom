@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Geolocation } from '@capacitor/geolocation';
 import type { Position } from '@capacitor/geolocation';
 import { Capacitor } from '@capacitor/core';
@@ -84,117 +84,159 @@ export async function requestCurrentPreciseLocation(
   });
 }
 
-export function useUserLocation(intervalMs = 10000): UserLocationResult {
-  const [location, setLocation] = useState<UserLocation | null>(null);
-  const [status, setStatus] = useState<UserLocationStatus>('idle');
-  const [error, setError] = useState<string | null>(null);
-  const lastUpdateRef = useRef<number>(0);
-  const latestLocationRef = useRef<UserLocation | null>(null);
+// ── Shared GPS watcher ──────────────────────────────────────────────────
+// Every screen used to call useUserLocation() independently, each starting
+// its own native watchPosition — up to 4+ concurrent GPS watches running
+// at once on a single screen (DriveScreen + NearestHotspot + ModeTaxi...),
+// wasting battery and letting each component's `location` drift out of
+// sync with the others'. One native watch, shared via useSyncExternalStore,
+// refcounted so it stops when the last consumer unmounts.
+interface SharedLocationState {
+  location: UserLocation | null;
+  status: UserLocationStatus;
+  error: string | null;
+}
 
-  const applyLocation = useCallback((nextLocation: UserLocation) => {
-    const now = Date.now();
-    const previousLocation = latestLocationRef.current;
+let sharedState: SharedLocationState = { location: null, status: 'idle', error: null };
+const sharedListeners = new Set<() => void>();
+let sharedWatchId: string | number | null = null;
+let sharedWatchStarting = false;
+let subscriberCount = 0;
+let lastUpdateAt = 0;
+let latestLocation: UserLocation | null = null;
 
-    // Throttle updates to avoid UI flicker, but keep it responsive for driving
-    if (now - lastUpdateRef.current < 1000 && lastUpdateRef.current !== 0) {
-      return;
-    }
+function notifySharedListeners() {
+  for (const listener of sharedListeners) listener();
+}
 
-    // Ensure we don't process stale updates
-    if (
-      previousLocation?.timestamp != null &&
-      nextLocation.timestamp != null &&
-      nextLocation.timestamp < previousLocation.timestamp
-    ) {
-      return;
-    }
+function applySharedLocation(nextLocation: UserLocation) {
+  const now = Date.now();
 
-    lastUpdateRef.current = now;
-    latestLocationRef.current = nextLocation;
-    setLocation(nextLocation);
-    setStatus('success');
-    setError(null);
-  }, []);
+  // Throttle updates to avoid UI flicker, but keep it responsive for driving
+  if (now - lastUpdateAt < 1000 && lastUpdateAt !== 0) return;
 
-  const update = useCallback(async () => {
-    setStatus((prev) => (prev === 'success' ? prev : 'loading'));
+  // Ensure we don't process stale updates
+  if (
+    latestLocation?.timestamp != null &&
+    nextLocation.timestamp != null &&
+    nextLocation.timestamp < latestLocation.timestamp
+  ) {
+    return;
+  }
 
+  lastUpdateAt = now;
+  latestLocation = nextLocation;
+  sharedState = { location: nextLocation, status: 'success', error: null };
+  notifySharedListeners();
+}
+
+async function refreshSharedLocation(): Promise<UserLocation | null> {
+  sharedState = {
+    ...sharedState,
+    status: sharedState.status === 'success' ? sharedState.status : 'loading',
+  };
+  notifySharedListeners();
+
+  try {
+    const nextLocation = await requestCurrentPreciseLocation();
+    applySharedLocation(nextLocation);
+    return nextLocation;
+  } catch (err) {
+    const message = getGeolocationErrorMessage(err);
+    sharedState = {
+      ...sharedState,
+      status: latestLocation ? sharedState.status : 'error',
+      error: message,
+    };
+    notifySharedListeners();
+    return null;
+  }
+}
+
+function startSharedWatch() {
+  if (sharedWatchId !== null || sharedWatchStarting) return;
+  sharedWatchStarting = true;
+
+  void (async () => {
     try {
-      const nextLocation = await requestCurrentPreciseLocation();
-      applyLocation(nextLocation);
-      return nextLocation;
-    } catch (err) {
-      const message = getGeolocationErrorMessage(err);
-      if (!latestLocationRef.current) {
-        setStatus('error');
-      }
-      setError(message);
-      return null;
-    }
-  }, [applyLocation]);
-
-  useEffect(() => {
-    void update();
-    const id = setInterval(update, intervalMs);
-
-    let watchId: string | number | null = null;
-    // Native watchPosition resolves asynchronously: if the effect is cleaned
-    // up before it resolves, the cleanup below sees watchId === null and the
-    // watch would leak (GPS held forever). The flag lets the late resolution
-    // clear itself.
-    let cancelled = false;
-
-    const startWatching = async () => {
       if (Capacitor.isNativePlatform()) {
-        try {
-          watchId = await Geolocation.watchPosition(
-            { enableHighAccuracy: true },
-            (pos, err) => {
-              if (err) {
-                setError(getGeolocationErrorMessage(err));
-              } else if (pos) {
-                applyLocation(normalizePosition(pos));
-              }
+        sharedWatchId = await Geolocation.watchPosition(
+          { enableHighAccuracy: true },
+          (pos, err) => {
+            if (err) {
+              sharedState = { ...sharedState, error: getGeolocationErrorMessage(err) };
+              notifySharedListeners();
+            } else if (pos) {
+              applySharedLocation(normalizePosition(pos));
             }
-          );
-          if (cancelled && watchId !== null) {
-            void Geolocation.clearWatch({ id: watchId as string });
-            watchId = null;
-          }
-        } catch (err) {
-          setError(getGeolocationErrorMessage(err));
-        }
-      } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
-        watchId = navigator.geolocation.watchPosition(
-          (pos) => applyLocation(normalizePosition(pos)),
-          (watchError) => {
-            setError(getGeolocationErrorMessage(watchError));
-          },
-          {
-            enableHighAccuracy: true,
-            maximumAge: 0,
-            timeout: 15000,
           }
         );
+      } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+        sharedWatchId = navigator.geolocation.watchPosition(
+          (pos) => applySharedLocation(normalizePosition(pos)),
+          (watchError) => {
+            sharedState = { ...sharedState, error: getGeolocationErrorMessage(watchError) };
+            notifySharedListeners();
+          },
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        );
       }
-    };
-
-    void startWatching();
-
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-      if (watchId !== null) {
-        if (Capacitor.isNativePlatform()) {
-          void Geolocation.clearWatch({ id: watchId as string });
-        } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
-          navigator.geolocation.clearWatch(watchId as number);
-        }
+    } catch (err) {
+      sharedState = { ...sharedState, error: getGeolocationErrorMessage(err) };
+      notifySharedListeners();
+    } finally {
+      sharedWatchStarting = false;
+      // Every subscriber unmounted while the native watch was still
+      // resolving — stop it immediately instead of leaking GPS forever.
+      if (subscriberCount === 0 && sharedWatchId !== null) {
+        stopSharedWatch();
       }
-    };
-  }, [applyLocation, update, intervalMs]);
+    }
+  })();
+}
 
-  return { location, status, error, refresh: update };
+function stopSharedWatch() {
+  if (sharedWatchId === null) return;
+  if (Capacitor.isNativePlatform()) {
+    void Geolocation.clearWatch({ id: sharedWatchId as string });
+  } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
+    navigator.geolocation.clearWatch(sharedWatchId as number);
+  }
+  sharedWatchId = null;
+}
+
+function subscribeToSharedLocation(listener: () => void): () => void {
+  sharedListeners.add(listener);
+  subscriberCount += 1;
+  if (subscriberCount === 1) {
+    void refreshSharedLocation();
+    startSharedWatch();
+  }
+  return () => {
+    sharedListeners.delete(listener);
+    subscriberCount -= 1;
+    if (subscriberCount === 0) {
+      stopSharedWatch();
+    }
+  };
+}
+
+function getSharedLocationSnapshot(): SharedLocationState {
+  return sharedState;
+}
+
+/** `intervalMs` is kept for call-site compatibility but no longer used — the
+ * shared native watchPosition (see above) already pushes updates as the fix
+ * changes, so a per-consumer polling interval on top of it was redundant. */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function useUserLocation(intervalMs = 10000): UserLocationResult {
+  const state = useSyncExternalStore(subscribeToSharedLocation, getSharedLocationSnapshot);
+  return {
+    location: state.location,
+    status: state.status,
+    error: state.error,
+    refresh: refreshSharedLocation,
+  };
 }
 
 // Nearest-zone matching on a low-accuracy fix (a cold GPS lock, or a coarse
@@ -203,6 +245,13 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
 // Montmorency while actually in Chomedey. 50m is tight enough to rule that
 // out without stalling forever indoors, where accuracy may never improve.
 export const MAX_ZONE_MATCH_ACCURACY_M = 50;
+
+// A single precise-enough sample can still be a stale-but-accurate cached
+// fix or a first GPS lock that's still refining (e.g. 45m, then 8m a moment
+// later) — close enough to flip the "nearest zone" pick between two real
+// neighbouring zones right after cold boot. Requiring 2 in a row before
+// latching absorbs that refinement without stalling the UI meaningfully.
+export const REQUIRED_CONSECUTIVE_PRECISE_SAMPLES = 2;
 
 /** Whether a fix is trustworthy enough to drive a "nearest zone" match.
  * `accuracy` is the GPS API's 1-sigma radius in metres — null/undefined
@@ -214,20 +263,31 @@ export function isLocationPrecise(
   return location?.accuracy != null && location.accuracy <= maxAccuracyM;
 }
 
-/** Latches `true` the first time `location` clears the accuracy bar and
- * stays there — a single later noisy sample (a watchPosition blip) must not
- * yank an already-good "nearest zone" match away again. Callers that gate
+/** Latches `true` once `location` has cleared the accuracy bar on
+ * `REQUIRED_CONSECUTIVE_PRECISE_SAMPLES` consecutive samples, and stays
+ * there — a single noisy or still-refining sample must not yank an
+ * already-good "nearest zone" match away again. Callers that gate
  * zone-matching on GPS should hold off until this flips true. */
 export function useHasPreciseFix(
   location: Pick<UserLocation, 'accuracy'> | null,
   maxAccuracyM = MAX_ZONE_MATCH_ACCURACY_M
 ): boolean {
   const [hasPreciseFix, setHasPreciseFix] = useState(false);
+  const consecutivePreciseRef = useRef(0);
+
   useEffect(() => {
-    if (!hasPreciseFix && isLocationPrecise(location, maxAccuracyM)) {
-      setHasPreciseFix(true);
+    if (hasPreciseFix) return;
+
+    if (isLocationPrecise(location, maxAccuracyM)) {
+      consecutivePreciseRef.current += 1;
+      if (consecutivePreciseRef.current >= REQUIRED_CONSECUTIVE_PRECISE_SAMPLES) {
+        setHasPreciseFix(true);
+      }
+    } else {
+      consecutivePreciseRef.current = 0;
     }
   }, [location, maxAccuracyM, hasPreciseFix]);
+
   return hasPreciseFix;
 }
 
