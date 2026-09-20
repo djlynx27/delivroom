@@ -200,7 +200,13 @@ async function main() {
       const { data, error: invokeErr } = await supabase.functions.invoke('analyze-screenshot', {
         body: { image_url: signed.signedUrl, auto_zone: true, content_hash: contentHash },
       });
-      if (invokeErr) throw invokeErr;
+      if (invokeErr) {
+        const context = (invokeErr as { context?: Response }).context;
+        const status = context?.status;
+        const body = context ? await context.clone().text().catch(() => '<unreadable>') : undefined;
+        console.error(`[batch-import] analyze-screenshot status=${status} body=${body}`);
+        throw invokeErr;
+      }
 
       const analysis = (data as { analysis?: unknown; auto_saved?: boolean } | null) ?? {};
 
