@@ -30,13 +30,34 @@ const REQUEST_TIMEOUT_MS = 15_000;
 // calls) is exactly what the tighter floor still needs to catch fast.
 const AUTH_REQUEST_TIMEOUT_MS = 60_000;
 
+// analyze-screenshot's own internal Gemini call budget is 25s
+// (GEMINI_TIMEOUT_MS in the function) with up to one retry — worst case
+// ~25s + 1.5s + 25s = ~51.5s server-side, before even counting a cold
+// isolate boot + zones/image fetch on top. The general 15s floor above was
+// still being applied to ALL /functions/v1/ calls, so this client was
+// aborting analyze-screenshot well before it could finish. Confirmed via
+// Supabase runtime logs on 2026-09-20: the function's isolate was
+// shutting down and cold-booting again roughly every invocation — a
+// pattern that lines up exactly with the client severing the connection
+// mid-request rather than the function ever actually finishing on its own.
+const FUNCTIONS_REQUEST_TIMEOUT_MS = 90_000;
+
 function isAuthRequest(input: RequestInfo | URL): boolean {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
   return url.includes('/auth/v1/');
 }
 
+function isFunctionsRequest(input: RequestInfo | URL): boolean {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  return url.includes('/functions/v1/');
+}
+
 function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const timeoutMs = isAuthRequest(input) ? AUTH_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS;
+  const timeoutMs = isAuthRequest(input)
+    ? AUTH_REQUEST_TIMEOUT_MS
+    : isFunctionsRequest(input)
+      ? FUNCTIONS_REQUEST_TIMEOUT_MS
+      : REQUEST_TIMEOUT_MS;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   // A caller-supplied signal (e.g. a manual .abortSignal() on a query) must
