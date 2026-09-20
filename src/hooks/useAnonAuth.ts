@@ -1,4 +1,5 @@
 import { supabase } from '@/integrations/supabase/client';
+import type { Session } from '@supabase/supabase-js';
 import { useEffect, useState } from 'react';
 
 // 'ready' from the very first render — see below. 'degraded' means the last
@@ -8,6 +9,43 @@ type AuthStatus = 'ready' | 'degraded';
 
 const RETRY_BASE_MS = 5_000;
 const RETRY_MAX_MS = 60_000;
+
+// Shared in-flight guard: this hook's own background attempt() and any
+// on-demand caller (e.g. getAuthedUserId in screenshotDedup.ts, needed
+// before a bulk upload can start) must never both call signInAnonymously()
+// at once — each call mints a brand new anonymous user with no way to
+// dedupe, so a race would silently fork the driver's identity mid-session.
+// Confirmed on-device: a bulk batch started right after opening the app
+// (before this hook's own attempt() had finished) hit "Authentification
+// requise" on its first few files because there was no session yet to
+// refresh — refreshSession() needs an existing session's refresh token,
+// it can't create one from nothing.
+let inFlightSignIn: Promise<Session | null> | null = null;
+
+/** Resolves once a session exists — the current one if valid, otherwise a
+ * freshly established anonymous one. Safe to call from anywhere; concurrent
+ * callers (this hook's own effect, or an on-demand caller) share the same
+ * in-flight sign-in instead of racing separate ones. */
+export async function ensureAuthSession(): Promise<Session | null> {
+  const { data } = await supabase.auth.getSession();
+  if (data.session) return data.session;
+
+  if (!inFlightSignIn) {
+    inFlightSignIn = supabase.auth
+      .signInAnonymously()
+      .then(({ data: signedIn, error }) => {
+        if (error) {
+          console.warn('[useAnonAuth] signInAnonymously failed', error);
+          return null;
+        }
+        return signedIn.session;
+      })
+      .finally(() => {
+        inFlightSignIn = null;
+      });
+  }
+  return inFlightSignIn;
+}
 
 // This used to be a hard gate: AppContent wouldn't mount at all until this
 // resolved, and a failure (slow network, backgrounded mid-handshake, fully
@@ -34,18 +72,9 @@ export function useAnonAuth(): { status: AuthStatus; error: string | null } {
 
     async function attempt() {
       try {
-        const { data } = await supabase.auth.getSession();
-        if (data.session) {
-          if (!cancelled) {
-            setStatus('ready');
-            setError(null);
-          }
-          return;
-        }
-
-        const { error: signInError } = await supabase.auth.signInAnonymously();
+        const session = await ensureAuthSession();
         if (cancelled) return;
-        if (signInError) throw signInError;
+        if (!session) throw new Error('Auth anonyme indisponible.');
 
         setStatus('ready');
         setError(null);

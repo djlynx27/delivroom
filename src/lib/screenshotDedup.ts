@@ -1,3 +1,4 @@
+import { ensureAuthSession } from '@/hooks/useAnonAuth';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
 
@@ -71,21 +72,29 @@ export function fileKey(name: string, size: number): string {
 }
 
 /**
- * Resolves the current user id for an authenticated write, refreshing the
- * session once if it's missing/expired before giving up. Uses getSession()
- * (reads the locally persisted/auto-refreshed session, no network call)
- * instead of getUser() (a network round-trip to the auth server) — a bulk
- * batch previously called getUser() once per file (hundreds of times per
- * run), and any transient hiccup on that one specific call surfaced as a
- * false "Authentification requise", even though the real upload/analyze
- * calls would have worked fine with the same valid session.
+ * Resolves the current user id for an authenticated write. Uses
+ * getSession() (reads the locally persisted/auto-refreshed session, no
+ * network call) instead of getUser() (a network round-trip to the auth
+ * server) — a bulk batch previously called getUser() once per file
+ * (hundreds of times per run), and any transient hiccup on that one
+ * specific call surfaced as a false "Authentification requise", even
+ * though the real upload/analyze calls would have worked fine with the
+ * same valid session.
+ *
+ * Two distinct recovery paths matter here, not one: a session that EXISTS
+ * but expired needs refreshSession() (uses its refresh token); a batch
+ * started right after app launch can race useAnonAuth's own background
+ * signInAnonymously() and see NO session at all yet — refreshSession() has
+ * nothing to refresh in that case and just returns null again, so it must
+ * go through ensureAuthSession() instead, which shares useAnonAuth's own
+ * in-flight sign-in rather than racing a second one.
  */
 export async function getAuthedUserId(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   let session = data.session;
-  const expired =
-    session?.expires_at != null && session.expires_at * 1000 < Date.now();
-  if (!session || expired) {
+  if (!session) {
+    session = await ensureAuthSession();
+  } else if (session.expires_at != null && session.expires_at * 1000 < Date.now()) {
     const { data: refreshed } = await supabase.auth.refreshSession();
     session = refreshed.session;
   }
