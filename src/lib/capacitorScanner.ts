@@ -11,6 +11,8 @@ import { BackgroundRunner } from '@capacitor/background-runner';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { fileKey, findExistingFileNames } from '@/lib/screenshotDedup';
+import SafFolderPicker from '@/lib/safFolderPicker';
 
 const RUNNER_LABEL = 'com.delivroom.app.scanner';
 
@@ -43,10 +45,18 @@ async function syncToRunner(key: string, value: string | null): Promise<void> {
   }
 }
 
+// CONFIG_KEY now stores the SAF-picked folder's display LABEL only (e.g.
+// "Maxymo") — the folder itself is scanned via SAF_TREE_URI_KEY's persisted
+// content:// tree URI (see setConfiguredTreeUri), not a Filesystem-relative
+// path. A pre-SAF-picker install may still have an old relative-path string
+// here (from before 42708f8/this SAF change) — harmless, it just displays
+// as the label until the driver re-picks a folder, which also happens to
+// double as prompting them once for the new picker.
 const CONFIG_KEY = 'maxymo-folder-path';
+const SAF_TREE_URI_KEY = 'maxymo-saf-tree-uri';
 const SEEN_KEY = 'maxymo-seen-keys';
-// Capacitor Preferences is overkill for two strings — localStorage is fine
-// because the WebView has its own isolated storage per app.
+// Capacitor Preferences is overkill for a few strings — localStorage is
+// fine because the WebView has its own isolated storage per app.
 
 export function isNative(): boolean {
   return Capacitor.isNativePlatform();
@@ -67,6 +77,21 @@ export function setConfiguredPath(path: string | null): void {
   // Also mirror to the background runner's KV so the periodic task can scan
   // the right folder when fired from a cold start.
   void syncToRunner('maxymo-folder-path', path);
+}
+
+export function getConfiguredTreeUri(): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  return localStorage.getItem(SAF_TREE_URI_KEY);
+}
+
+export function setConfiguredTreeUri(uri: string | null): void {
+  if (typeof localStorage === 'undefined') return;
+  if (uri) {
+    localStorage.setItem(SAF_TREE_URI_KEY, uri);
+  } else {
+    localStorage.removeItem(SAF_TREE_URI_KEY);
+  }
+  void syncToRunner('maxymo-saf-tree-uri', uri);
 }
 
 /**
@@ -100,10 +125,10 @@ const EVER_SAW_FILES_KEY = 'maxymo-ever-saw-files';
  * every configured/default scan path suddenly reporting zero files, on a
  * device where a scan has previously found real ones.
  */
-export async function verifyNativeReadAccess(configuredPath: string | null): Promise<boolean> {
+export async function verifyNativeReadAccess(): Promise<boolean> {
   if (!isNative()) return true;
   let total = 0;
-  for (const path of getScanPaths(configuredPath)) {
+  for (const path of getScanPaths()) {
     try {
       const { files } = await Filesystem.readdir({ path, directory: Directory.ExternalStorage });
       total += files.filter((f) => f.type === 'file').length;
@@ -132,45 +157,15 @@ interface ListedFile {
 // not on the driver's own choice: the physical Vol-Down+Power / palm-swipe
 // gesture always lands in Pictures/Screenshots regardless of which app is in
 // the foreground, while a Lyft in-app share can land in Pictures/Lyft. The
-// configured path (whatever the driver picked for the overlay-button output,
-// typically Pictures/Maxymo) is scanned too, on top of these — not instead.
+// driver's custom folder (e.g. Maxymo's overlay-button output) is scanned
+// via SAF instead (see readSafFolderSafe) — these are the paths reachable
+// through the blanket READ_MEDIA_IMAGES permission alone.
 export const DEFAULT_SCAN_PATHS = ['Pictures/maxymo/lyft', 'Pictures/Screenshots', 'Pictures/Lyft', 'DCIM/Screenshots'];
 
-/** Every folder a scan should check: the configured one (if any) plus the
- * standard OS/app screenshot locations, deduplicated. Exported standalone so
- * the folder-selection logic is testable without a device filesystem. */
-export function getScanPaths(configuredPath: string | null): string[] {
-  const all = configuredPath ? [configuredPath, ...DEFAULT_SCAN_PATHS] : DEFAULT_SCAN_PATHS;
-  return Array.from(new Set(all));
-}
-
-// Roots the graphical "Autre…" folder picker probes for a direct-child match
-// by name (see resolveFolderPathByName). One level deep only — a full
-// recursive walk of external storage to find an arbitrarily nested folder
-// would be slow and disproportionate for this; DEFAULT_SCAN_PATHS already
-// covers every folder Android/Maxymo actually write to.
-const COMMON_PICKER_ROOTS = ['Pictures', 'DCIM', 'Download', ''];
-
-/**
- * The browser's webkitdirectory folder picker never exposes a file's real
- * absolute path (privacy sandboxing) — only the picked folder's own name via
- * `webkitRelativePath`. This re-derives the External-Storage-relative path
- * `nativeScan` needs by checking whether a same-named subdirectory exists
- * under one of the common roots. Returns null if no match is found (folder
- * lives somewhere nativeScan can't reach without a real SAF plugin).
- */
-export async function resolveFolderPathByName(leafName: string): Promise<string | null> {
-  if (!isNative()) return null;
-  for (const root of COMMON_PICKER_ROOTS) {
-    try {
-      const { files } = await Filesystem.readdir({ path: root, directory: Directory.ExternalStorage });
-      const match = files.some((f) => f.type === 'directory' && f.name === leafName);
-      if (match) return root ? `${root}/${leafName}` : leafName;
-    } catch {
-      // Root itself missing/unreadable — try the next candidate.
-    }
-  }
-  return null;
+/** Every standard OS/app screenshot location a scan should check. Exported
+ * standalone so it's testable without a device filesystem. */
+export function getScanPaths(): string[] {
+  return DEFAULT_SCAN_PATHS;
 }
 
 /** A missing/inaccessible folder (not every device has Pictures/Lyft, say)
@@ -209,16 +204,37 @@ function base64ToBlob(base64: string, mime: string): Blob {
 
 async function loadFile(c: ListedFile): Promise<File | null> {
   try {
-    const read = await Filesystem.readFile({
-      path: `${c.dir}/${c.name}`,
-      directory: Directory.ExternalStorage,
-    });
+    const data = c.uri.startsWith('content://')
+      ? (await SafFolderPicker.readFile({ uri: c.uri })).data
+      : (
+          await Filesystem.readFile({
+            path: `${c.dir}/${c.name}`,
+            directory: Directory.ExternalStorage,
+          })
+        ).data as string;
     const mime = mimeFromName(c.name);
-    const blob = base64ToBlob(read.data as string, mime);
+    const blob = base64ToBlob(data, mime);
     return new File([blob], c.name, { type: mime, lastModified: c.mtime || Date.now() });
   } catch (err) {
     console.warn('[capacitorScanner] could not load', c.name, err);
     return null;
+  }
+}
+
+/** Lists the driver's SAF-picked custom folder, if configured — degrades
+ * silently (empty list) if unconfigured or the persisted grant was revoked
+ * (folder moved/deleted, permission reset elsewhere), same as a missing
+ * standard folder in readdirSafe. `dir` stays empty since SAF entries carry
+ * their own full content:// uri, unlike readdirSafe's relative paths. */
+async function readSafFolderSafe(): Promise<ListedFile[]> {
+  const treeUri = getConfiguredTreeUri();
+  if (!treeUri) return [];
+  try {
+    const { files } = await SafFolderPicker.listFiles({ treeUri });
+    return files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime, uri: f.uri, dir: '' }));
+  } catch (err) {
+    console.warn('[capacitorScanner] SAF listFiles failed', err);
+    return [];
   }
 }
 
@@ -246,17 +262,37 @@ async function loadFilesInBatches(candidates: ListedFile[]): Promise<File[]> {
  * shallowly and return their image files (filtered by name substring).
  * Files are loaded into memory as File objects so the existing bulk
  * uploader pipeline can consume them unchanged.
+ *
+ * Prefilters candidates against the screenshot_uploads registry (name+size,
+ * same check `ingest()` in BulkScreenshotUploader.tsx already does) BEFORE
+ * reading any file bytes — previously every candidate's full content was
+ * read + base64-decoded first and only discarded afterward, so a 700+ file
+ * folder re-paid that cost on every scan even with almost nothing new.
+ * `skipPrefilter` mirrors the "Scan complet" checkbox, which must still be
+ * able to force a full re-read.
  */
-export async function nativeScan(nameFilter: string): Promise<File[]> {
+export async function nativeScan(
+  nameFilter: string,
+  skipPrefilter = false,
+): Promise<File[]> {
   if (!isNative()) return [];
-  const paths = getScanPaths(getConfiguredPath());
+  const paths = getScanPaths();
 
   const needle = nameFilter.trim().toLowerCase();
-  const perFolder = await Promise.all(paths.map(readdirSafe));
-  const candidates = perFolder
-    .flat()
+  const [perFolder, safFiles] = await Promise.all([
+    Promise.all(paths.map(readdirSafe)),
+    readSafFolderSafe(),
+  ]);
+  let candidates = [...perFolder.flat(), ...safFiles]
     .filter((e) => !needle || e.name.toLowerCase().includes(needle))
     .sort((a, b) => b.mtime - a.mtime);
+
+  if (!skipPrefilter && candidates.length) {
+    const known = await findExistingFileNames(
+      candidates.map((c) => ({ name: c.name, size: c.size })),
+    );
+    candidates = candidates.filter((c) => !known.has(fileKey(c.name, c.size)));
+  }
 
   return loadFilesInBatches(candidates);
 }

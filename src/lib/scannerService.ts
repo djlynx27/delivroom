@@ -9,6 +9,7 @@ import {
   isNative,
   nativeScan,
   setConfiguredPath,
+  setConfiguredTreeUri,
   verifyNativeReadAccess,
 } from '@/lib/capacitorScanner';
 import {
@@ -52,7 +53,7 @@ export async function getScanStatus(): Promise<ScanStatus> {
   if (kind === 'native') {
     const path = getConfiguredPath();
     if (!path) return 'not-configured';
-    const ok = await verifyNativeReadAccess(path);
+    const ok = await verifyNativeReadAccess();
     return ok ? 'granted' : 'permission-revoked';
   }
   const handle = await getStoredHandle();
@@ -87,24 +88,30 @@ export async function getConfiguredLabel(): Promise<string | null> {
 }
 
 /**
- * Native: prompt for a folder path (Maxymo's directory under External Storage,
- * e.g. "Pictures/Maxymo"). Also request read media permission.
+ * Native: open the real Android SAF folder picker for the driver's custom
+ * folder (e.g. Maxymo's overlay-button output), persist the granted tree
+ * URI, and request the blanket media-read permission the standard scan
+ * paths still rely on.
  *
  * Web: open the directory picker. The browser returns a handle and we persist
  * it in IDB so subsequent app loads can read silently.
  */
 export async function configureAutoScan(
-  nativePathPrompt?: () => Promise<string | null>,
+  nativePathPrompt?: () => Promise<{ uri: string; label: string } | null>,
 ): Promise<ConfigureResult> {
   if (isNative()) {
-    const path = nativePathPrompt ? await nativePathPrompt() : 'Pictures/Maxymo';
-    if (!path) return { ok: false };
+    if (!nativePathPrompt) {
+      return { ok: false, label: 'Sélecteur de dossier non disponible' };
+    }
+    const picked = await nativePathPrompt();
+    if (!picked) return { ok: false };
     const granted = await ensureNativePermission();
     if (!granted) {
       return { ok: false, label: 'Permission de stockage refusée' };
     }
-    setConfiguredPath(path);
-    return { ok: true, label: path };
+    setConfiguredTreeUri(picked.uri);
+    setConfiguredPath(picked.label);
+    return { ok: true, label: picked.label };
   }
   if (isFolderApiSupported()) {
     const handle = await pickFolder();
@@ -114,9 +121,12 @@ export async function configureAutoScan(
   return { ok: false, label: 'Pas supporté sur ce navigateur' };
 }
 
-export async function rescanConfigured(filter: string): Promise<File[]> {
+export async function rescanConfigured(
+  filter: string,
+  skipPrefilter = false,
+): Promise<File[]> {
   if (isNative()) {
-    return await nativeScan(filter);
+    return await nativeScan(filter, skipPrefilter);
   }
   const handle = await getStoredHandle();
   if (!handle) return [];
@@ -139,6 +149,7 @@ export async function silentRescan(filter: string): Promise<File[]> {
 export async function clearAutoScanConfig(): Promise<void> {
   if (isNative()) {
     setConfiguredPath(null);
+    setConfiguredTreeUri(null);
     return;
   }
   await clearStoredHandle();

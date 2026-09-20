@@ -50,9 +50,9 @@ import {
 } from '@/lib/backgroundSync';
 import {
   onAppResume,
-  resolveFolderPathByName,
   triggerImmediateBackgroundScan,
 } from '@/lib/capacitorScanner';
+import SafFolderPicker from '@/lib/safFolderPicker';
 import {
   clearAutoScanConfig,
   configureAutoScan as configureScanner,
@@ -305,18 +305,6 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Folder-name dialog replacing the old webkitdirectory file-picker trick —
-  // on Android WebView, a folder-flavored <input type="file"> always opens
-  // the media/image GRID picker (ACTION_GET_CONTENT-ish), never a real
-  // folder browser, confusing the driver. The only thing that flow ever
-  // extracted from a picked file was its parent folder NAME
-  // (webkitRelativePath.split('/')[0]) for resolveFolderPathByName — so
-  // just ask for that name directly instead of round-tripping through a
-  // misleading system picker.
-  const [folderPickerResolve, setFolderPickerResolve] = useState<((path: string | null) => void) | null>(null);
-  const [folderNameDialogOpen, setFolderNameDialogOpen] = useState(false);
-  const [folderNameInput, setFolderNameInput] = useState('maxymo');
-  const FOLDER_NAME_SHORTCUTS = ['maxymo', 'Screenshots', 'Lyft'];
   // @capacitor/filesystem's requestPermissions() doesn't actually re-query
   // Android when it's already (wrongly) cached as granted — confirmed on a
   // real device it returns "granted" instantly with no OS dialog even after
@@ -325,43 +313,20 @@ export function BulkScreenshotUploader() {
   // manually instead of pretending a tap can fix it.
   const [permissionHelpOpen, setPermissionHelpOpen] = useState(false);
 
-  // Opens the folder-name dialog. Resolves with the derived folder path once
-  // the driver confirms a name (see confirmFolderName), or null on cancel.
-  function promptNativePath(): Promise<string | null> {
-    return new Promise((resolve) => {
-      setFolderPickerResolve(() => resolve);
-      setFolderNameInput('maxymo');
-      setFolderNameDialogOpen(true);
-    });
-  }
-
-  function cancelFolderNameDialog() {
-    const resolve = folderPickerResolve;
-    setFolderNameDialogOpen(false);
-    setFolderPickerResolve(null);
-    resolve?.(null);
-  }
-
-  async function confirmFolderName() {
-    const resolve = folderPickerResolve;
-    const name = folderNameInput.trim();
-    setFolderNameDialogOpen(false);
-    setFolderPickerResolve(null);
-    if (!name) {
-      resolve?.(null);
-      return;
+  // Real SAF folder browser (ACTION_OPEN_DOCUMENT_TREE, "Utiliser ce
+  // dossier") via SafFolderPickerPlugin.kt — see
+  // docs/superpowers/specs/2026-09-20-saf-folder-picker-design.md. Replaced
+  // the 42708f8 folder-name dialog, which was too much friction on the road
+  // (typing/confirming a name blind instead of browsing).
+  async function promptNativePath(): Promise<{ uri: string; label: string } | null> {
+    try {
+      const { uri, name } = await SafFolderPicker.pickDirectory();
+      setNameFilter(filterForFolder(name));
+      lastSyncedFolderRef.current = name;
+      return { uri, label: name };
+    } catch {
+      return null; // driver cancelled the picker
     }
-    const resolved = await resolveFolderPathByName(name);
-    if (!resolved) {
-      toast.error(
-        `"${name}" est hors de Pictures/DCIM/Download — l'auto-scan ne peut pas le suivre. Utilise l'import manuel "Dossier entier" pour ce dossier.`,
-      );
-      resolve?.(null);
-      return;
-    }
-    setNameFilter(filterForFolder(resolved));
-    lastSyncedFolderRef.current = resolved;
-    resolve?.(resolved);
   }
 
   async function configureAutoScan() {
@@ -423,7 +388,7 @@ export function BulkScreenshotUploader() {
   async function runConfiguredScan(silent: boolean): Promise<void> {
     setAutoScanning(true);
     try {
-      const files = await rescanConfigured(nameFilter || '');
+      const files = await rescanConfigured(nameFilter || '', forceFullRescan);
       setScanStatus(await getScanStatus());
       if (!files.length) {
         if (!silent) toast.info(`Aucun fichier${nameFilter ? ` "${nameFilter}"` : ''} dans le dossier`);
@@ -1260,48 +1225,6 @@ export function BulkScreenshotUploader() {
           </>
         )}
       </CardContent>
-
-      <Dialog
-        open={folderNameDialogOpen}
-        onOpenChange={(open) => {
-          if (!open) cancelFolderNameDialog();
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Quel est le nom de ton dossier ?</DialogTitle>
-            <DialogDescription>
-              Delivroom cherche ce nom dans Pictures/DCIM/Download — pas besoin d'ouvrir un
-              sélecteur de fichiers.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-wrap gap-1.5">
-            {FOLDER_NAME_SHORTCUTS.map((name) => (
-              <Button
-                key={name}
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => setFolderNameInput(name)}
-              >
-                {name}
-              </Button>
-            ))}
-          </div>
-          <Input
-            value={folderNameInput}
-            onChange={(e) => setFolderNameInput(e.target.value)}
-            placeholder="maxymo"
-            className="h-9"
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={cancelFolderNameDialog}>
-              Annuler
-            </Button>
-            <Button onClick={() => void confirmFolderName()}>Valider</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={permissionHelpOpen} onOpenChange={setPermissionHelpOpen}>
         <DialogContent>
