@@ -2,6 +2,7 @@ import * as Sentry from '@sentry/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
+import { Capacitor } from '@capacitor/core';
 import './index.css';
 
 import App from './App.tsx';
@@ -35,19 +36,39 @@ if (SENTRY_DSN) {
   });
 }
 
-// Service worker: prompt (not silent auto-reload). When a new SW is ready we
-// dispatch an event so <SwUpdatePrompt> can toast "Recharger" — reloading
-// mid-boot after a deploy was flashing/parking a black screen.
-const updateSW = registerSW({
-  immediate: true,
-  onNeedRefresh() {
-    window.dispatchEvent(
-      new CustomEvent('delivroom:sw-need-refresh', {
-        detail: { update: () => void updateSW(true) },
-      })
-    );
-  },
-});
+// Service worker: web/WebAPK only. A native Capacitor build already ships
+// 100% fresh JS/CSS inside the APK on every install — there's no
+// deploy-vs-open-tab update race to manage, and WebView storage (unlike the
+// APK's own bundled assets) SURVIVES `adb install -r`, so a SW registered by
+// an old build can keep serving its precached bundle forever after a
+// reinstall (confirmed on-device: the APK's assets/public/ had the latest
+// commits, but the WebView still rendered the old UI). Actively unregister
+// any such leftover SW + wipe its caches instead of ever registering a new
+// one natively.
+if (Capacitor.isNativePlatform()) {
+  void navigator.serviceWorker?.getRegistrations().then((regs) => {
+    for (const reg of regs) void reg.unregister();
+  });
+  if (typeof caches !== 'undefined') {
+    void caches.keys().then((keys) => {
+      for (const key of keys) void caches.delete(key);
+    });
+  }
+} else {
+  // Prompt (not silent auto-reload). When a new SW is ready we dispatch an
+  // event so <SwUpdatePrompt> can toast "Recharger" — reloading mid-boot
+  // after a deploy was flashing/parking a black screen.
+  const updateSW = registerSW({
+    immediate: true,
+    onNeedRefresh() {
+      window.dispatchEvent(
+        new CustomEvent('delivroom:sw-need-refresh', {
+          detail: { update: () => void updateSW(true) },
+        })
+      );
+    },
+  });
+}
 
 // Ask Chrome to promote this origin's storage bucket to "persistent" so it's
 // exempt from best-effort eviction under storage pressure/low engagement.
