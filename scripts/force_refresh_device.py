@@ -163,13 +163,28 @@ SKIP_WAITING_JS = (
 )
 
 
-def run_skip_waiting(ws_url: str) -> str:
+# Harder reset than skip-waiting — for a page so far behind (a SW registered
+# before the native build ever stopped registering one, see main.tsx) that
+# it never even reaches a "waiting" worker: it might be stuck re-serving its
+# own old precached index.html on every update check. Unregisters every SW
+# and drops every Cache Storage entry outright, then reloads. Non-destructive
+# to auth/localStorage/IndexedDB/Preferences — only Cache Storage + SW
+# registrations are touched.
+NUKE_JS = (
+    "Promise.all(["
+    "navigator.serviceWorker.getRegistrations().then(rs => Promise.all(rs.map(r => r.unregister()))),"
+    "('caches' in self ? caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))) : Promise.resolve())"
+    "]).then(() => { location.reload(); return 'nuked'; })"
+)
+
+
+def run_js(ws_url: str, expression: str) -> str:
     sock = ws_connect(ws_url)
     try:
         request = {
             "id": 1,
             "method": "Runtime.evaluate",
-            "params": {"expression": SKIP_WAITING_JS, "awaitPromise": True},
+            "params": {"expression": expression, "awaitPromise": True},
         }
         ws_send_text(sock, json.dumps(request))
         raw = ws_recv_text(sock)
@@ -186,6 +201,11 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--url-filter", default=DEFAULT_URL_FILTER)
     parser.add_argument("--package", default=DEFAULT_PACKAGE)
+    parser.add_argument(
+        "--nuke",
+        action="store_true",
+        help="Unregister every SW + delete every cache instead of just skip-waiting (see NUKE_JS)",
+    )
     parser.add_argument("--selftest", action="store_true")
     args = parser.parse_args()
 
@@ -207,9 +227,14 @@ def main() -> int:
         return 1
 
     print(f"[force-refresh] found target: {target.get('title')} -- {target.get('url')}")
-    outcome = run_skip_waiting(target["webSocketDebuggerUrl"])
+    outcome = run_js(
+        target["webSocketDebuggerUrl"], NUKE_JS if args.nuke else SKIP_WAITING_JS
+    )
     print(f"[force-refresh] result: {outcome}")
 
+    if outcome == "nuked":
+        print("[force-refresh] all SW registrations + caches cleared, page reloaded.")
+        return 0
     if outcome == "skip-waiting-sent":
         print("[force-refresh] waiting SW told to activate -- the page's own "
               "controllerchange handler will reload it shortly.")
