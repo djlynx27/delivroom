@@ -12,6 +12,39 @@ export interface ZoneScore {
   calculated_at: string;
 }
 
+// Scores rarely change between fetches (10 min cron cadence), so the last
+// successful fetch is cached to localStorage and read back as initialData —
+// same convention as useZones() in useSupabase.ts. Without this, a cold
+// launch has the zone list instantly (from that cache) but no score to rank
+// it by, so the Hero Zone still renders blank until Supabase responds.
+function zoneScoresCacheKey(ids: string[]): string {
+  return `delivroom_zone_scores_cache_${ids.slice().sort().join(',')}`;
+}
+
+function readZoneScoresCache(
+  ids: string[]
+): { data: ZoneScore[]; at: number } | null {
+  try {
+    const raw = localStorage.getItem(zoneScoresCacheKey(ids));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { data: ZoneScore[]; at: number };
+    return Array.isArray(parsed.data) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeZoneScoresCache(ids: string[], data: ZoneScore[]): void {
+  try {
+    localStorage.setItem(
+      zoneScoresCacheKey(ids),
+      JSON.stringify({ data, at: Date.now() })
+    );
+  } catch {
+    // localStorage unavailable — next launch just fetches live with no fallback.
+  }
+}
+
 /**
  * Fetch the latest calculated scores for all zones in a city.
  * Subscribes to Realtime so the map updates live when the Edge Function
@@ -19,6 +52,7 @@ export interface ZoneScore {
  */
 export function useZoneScores(cityIds: string | string[]) {
   const ids = Array.isArray(cityIds) ? cityIds : [cityIds];
+  const cached = readZoneScoresCache(ids);
   const queryClient = useQueryClient();
 
   // Realtime: invalidate cache whenever scores table changes.
@@ -64,8 +98,12 @@ export function useZoneScores(cityIds: string | string[]) {
       );
       const error = results.find((r) => r.error)?.error;
       if (error) throw error;
-      return results.flatMap((r) => (r.data ?? [])) as ZoneScore[];
+      const data = results.flatMap((r) => (r.data ?? [])) as ZoneScore[];
+      writeZoneScoresCache(ids, data);
+      return data;
     },
+    initialData: cached?.data,
+    initialDataUpdatedAt: cached?.at,
     // 30 s — Realtime usually beats us to the punch, but this catches the
     // case where the channel temporarily drops (e.g. WebView paused) and
     // ensures the "best zone right now" never goes stale by more than the

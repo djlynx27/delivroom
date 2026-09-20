@@ -130,7 +130,18 @@ function applySharedLocation(nextLocation: UserLocation) {
   notifySharedListeners();
 }
 
-async function refreshSharedLocation(): Promise<UserLocation | null> {
+// Cold start: the very first fix of a session can accept Android's
+// last-known FusedLocationProvider position instead of forcing a fresh GPS
+// lock, so an approximate Hero Zone/location can render immediately. This
+// never affects zone-matching accuracy — useHasPreciseFix's consecutive-
+// sample hysteresis still gates the "nearest zone" pick, and the shared
+// watchPosition (always enableHighAccuracy, no maximumAge) keeps refining
+// right behind it.
+const COLD_START_MAX_AGE_MS = 5 * 60 * 1000;
+
+async function refreshSharedLocation(
+  allowCached = false
+): Promise<UserLocation | null> {
   sharedState = {
     ...sharedState,
     status: sharedState.status === 'success' ? sharedState.status : 'loading',
@@ -138,7 +149,9 @@ async function refreshSharedLocation(): Promise<UserLocation | null> {
   notifySharedListeners();
 
   try {
-    const nextLocation = await requestCurrentPreciseLocation();
+    const nextLocation = await requestCurrentPreciseLocation(
+      allowCached ? { maximumAge: COLD_START_MAX_AGE_MS } : undefined
+    );
     applySharedLocation(nextLocation);
     return nextLocation;
   } catch (err) {
@@ -209,7 +222,7 @@ function subscribeToSharedLocation(listener: () => void): () => void {
   sharedListeners.add(listener);
   subscriberCount += 1;
   if (subscriberCount === 1) {
-    void refreshSharedLocation();
+    void refreshSharedLocation(true);
     startSharedWatch();
   }
   return () => {
