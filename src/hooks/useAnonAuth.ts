@@ -22,6 +22,36 @@ const RETRY_MAX_MS = 60_000;
 // it can't create one from nothing.
 let inFlightSignIn: Promise<Session | null> | null = null;
 
+// A live Supabase-side audit (2026-09-20, this project) traced the recurring
+// "Authentification requise" to intermittent PgBouncer/Postgres contention
+// (unrelated background dashboard queries), causing GoTrue to 504 on
+// /signup and /token for roughly 12-50s at a stretch — not a permanent
+// outage, not an RLS/config issue. A single attempt at even a generous
+// timeout can still lose that race; a short bounded retry rides out one
+// transient window without risking an unbounded hang.
+const SIGN_IN_RETRY_DELAYS_MS = [5_000, 10_000];
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function signInAnonymouslyWithRetry(): Promise<Session | null> {
+  for (let attempt = 0; ; attempt++) {
+    const { data: signedIn, error } = await supabase.auth.signInAnonymously();
+    if (!error) return signedIn.session;
+
+    if (attempt >= SIGN_IN_RETRY_DELAYS_MS.length) {
+      console.warn('[useAnonAuth] signInAnonymously failed after retries', error);
+      return null;
+    }
+    console.warn(
+      `[useAnonAuth] signInAnonymously failed, retrying in ${SIGN_IN_RETRY_DELAYS_MS[attempt]}ms`,
+      error,
+    );
+    await sleep(SIGN_IN_RETRY_DELAYS_MS[attempt]);
+  }
+}
+
 /** Resolves once a session exists — the current one if valid, otherwise a
  * freshly established anonymous one. Safe to call from anywhere; concurrent
  * callers (this hook's own effect, or an on-demand caller) share the same
@@ -31,18 +61,9 @@ export async function ensureAuthSession(): Promise<Session | null> {
   if (data.session) return data.session;
 
   if (!inFlightSignIn) {
-    inFlightSignIn = supabase.auth
-      .signInAnonymously()
-      .then(({ data: signedIn, error }) => {
-        if (error) {
-          console.warn('[useAnonAuth] signInAnonymously failed', error);
-          return null;
-        }
-        return signedIn.session;
-      })
-      .finally(() => {
-        inFlightSignIn = null;
-      });
+    inFlightSignIn = signInAnonymouslyWithRetry().finally(() => {
+      inFlightSignIn = null;
+    });
   }
   return inFlightSignIn;
 }

@@ -17,16 +17,18 @@ const SUPABASE_ANON_KEY =
 const REQUEST_TIMEOUT_MS = 15_000;
 
 // signInAnonymously()/refreshSession() got their own, longer floor after a
-// real device logged this exact fetch aborting on 15s, repeatedly, for over
-// 8 minutes straight ("AuthRetryableFetchError: signal is aborted without
-// reason") while a plain browser request to the same Supabase URL from the
-// same phone/network succeeded immediately — the auth handshake (through a
-// fresh WebView fetch stack) can genuinely take longer than the bulk-upload
-// hot path this floor was originally sized for, on some mobile networks.
-// Kept separate from REQUEST_TIMEOUT_MS rather than raising it globally: a
-// hang during a 700+ file batch (storage/functions calls) is exactly what
-// the tighter floor still needs to catch fast.
-const AUTH_REQUEST_TIMEOUT_MS = 30_000;
+// real device logged this exact fetch aborting repeatedly with zero bytes
+// received. A live Supabase-side audit (2026-09-20, this project) traced it
+// to intermittent PgBouncer/Postgres contention from unrelated background
+// dashboard queries, causing GoTrue itself to take 12-50s (confirmed up to
+// 40s+ with a direct curl from a different network entirely, ruling out the
+// device/WebView) before returning its own 504 — not a permanent outage,
+// not an RLS/config issue. Sized comfortably past that reported worst case
+// so the client waits for GoTrue's own response/504 instead of racing it
+// with an earlier abort. Kept separate from REQUEST_TIMEOUT_MS rather than
+// raising it globally: a hang during a 700+ file batch (storage/functions
+// calls) is exactly what the tighter floor still needs to catch fast.
+const AUTH_REQUEST_TIMEOUT_MS = 60_000;
 
 function isAuthRequest(input: RequestInfo | URL): boolean {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getSession, signInAnonymously } = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -43,12 +43,40 @@ describe('ensureAuthSession', () => {
     expect(signInAnonymously).toHaveBeenCalledTimes(1);
   });
 
-  it('returns null and logs when signInAnonymously fails', async () => {
-    getSession.mockResolvedValue({ data: { session: null } });
-    signInAnonymously.mockResolvedValue({ data: { session: null }, error: new Error('offline') });
+  describe('transient failures (fake timers for the backoff delays)', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+    afterEach(() => {
+      vi.useRealTimers();
+    });
 
-    const session = await ensureAuthSession();
+    it('retries with backoff and succeeds on a later attempt (PgBouncer-style transient 504)', async () => {
+      getSession.mockResolvedValue({ data: { session: null } });
+      const fresh = { user: { id: 'user-new' } };
+      signInAnonymously
+        .mockResolvedValueOnce({ data: { session: null }, error: new Error('504 timeout') })
+        .mockResolvedValueOnce({ data: { session: fresh }, error: null });
 
-    expect(session).toBeNull();
+      const promise = ensureAuthSession();
+      await vi.advanceTimersByTimeAsync(5_000); // first retry delay
+      const session = await promise;
+
+      expect(session).toBe(fresh);
+      expect(signInAnonymously).toHaveBeenCalledTimes(2);
+    });
+
+    it('gives up and returns null after exhausting all retries', async () => {
+      getSession.mockResolvedValue({ data: { session: null } });
+      signInAnonymously.mockResolvedValue({ data: { session: null }, error: new Error('504 timeout') });
+
+      const promise = ensureAuthSession();
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.advanceTimersByTimeAsync(10_000);
+      const session = await promise;
+
+      expect(session).toBeNull();
+      expect(signInAnonymously).toHaveBeenCalledTimes(3);
+    });
   });
 });
