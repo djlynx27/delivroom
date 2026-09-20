@@ -36,6 +36,7 @@ import {
   hashFile,
   recordUpload,
 } from '@/lib/screenshotDedup';
+import { createPacer } from '@/lib/requestPacing';
 import {
   computeEndedAt,
   normalizeStartedAt,
@@ -228,15 +229,23 @@ async function withAuthRetry<T>(step: () => Promise<T>): Promise<T> {
   }
 }
 
+// ~54/min, margin under analyze-screenshot's 60/min cap — processOne runs
+// strictly sequentially (no concurrency to throttle), but a fast
+// dedupe-hit/small-image cycle can still submit requests faster than 1/sec
+// on a large batch, confirmed on-device with a real 3714-file run.
+const paceAnalyzeCall = createPacer(1_100);
+
 async function analyzeOne(signedUrl: string, contentHash: string): Promise<AnalysisResultMinimal | null> {
+  await paceAnalyzeCall();
   const { data, error } = await supabase.functions.invoke('analyze-screenshot', {
     body: { image_url: signedUrl, auto_zone: true, content_hash: contentHash },
   });
   if (error) {
-    // analyze-screenshot's own handler never returns non-2xx (every failure
-    // path there degrades to 200 + a fallback analysis) — a 401 here can
-    // only come from the Functions gateway itself rejecting the JWT before
-    // the function even runs (verify_jwt), not from our function's code.
+    // analyze-screenshot now returns a real non-2xx for every retryable
+    // failure (rate limit, image fetch, Gemini call) — see eed257b. A 401
+    // here can only come from the Functions gateway itself rejecting the
+    // JWT before the function even runs (verify_jwt), not our function's
+    // own code (verify_jwt is off for this function).
     console.warn('[BulkScreenshotUploader] analyze-screenshot invoke failed', {
       status: (error as { context?: { status?: number } }).context?.status,
       message: error.message,
