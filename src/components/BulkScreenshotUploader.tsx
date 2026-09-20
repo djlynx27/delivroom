@@ -50,7 +50,6 @@ import {
 } from '@/lib/backgroundSync';
 import {
   onAppResume,
-  resolveFolderPathByFileName,
   resolveFolderPathByName,
   triggerImmediateBackgroundScan,
 } from '@/lib/capacitorScanner';
@@ -306,13 +305,18 @@ export function BulkScreenshotUploader() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Graphical folder picker replacing the old window.prompt text entry —
-  // one tap on "Changer de dossier" opens the system file browser directly
-  // (no intermediate dropdown/confirm step); picking any file inside the
-  // target folder derives and saves that folder immediately via
-  // resolveFolderPathByName/resolveFolderPathByFileName.
+  // Folder-name dialog replacing the old webkitdirectory file-picker trick —
+  // on Android WebView, a folder-flavored <input type="file"> always opens
+  // the media/image GRID picker (ACTION_GET_CONTENT-ish), never a real
+  // folder browser, confusing the driver. The only thing that flow ever
+  // extracted from a picked file was its parent folder NAME
+  // (webkitRelativePath.split('/')[0]) for resolveFolderPathByName — so
+  // just ask for that name directly instead of round-tripping through a
+  // misleading system picker.
   const [folderPickerResolve, setFolderPickerResolve] = useState<((path: string | null) => void) | null>(null);
-  const customFolderInputRef = useRef<HTMLInputElement>(null);
+  const [folderNameDialogOpen, setFolderNameDialogOpen] = useState(false);
+  const [folderNameInput, setFolderNameInput] = useState('maxymo');
+  const FOLDER_NAME_SHORTCUTS = ['maxymo', 'Screenshots', 'Lyft'];
   // @capacitor/filesystem's requestPermissions() doesn't actually re-query
   // Android when it's already (wrongly) cached as granted — confirmed on a
   // real device it returns "granted" instantly with no OS dialog even after
@@ -321,38 +325,36 @@ export function BulkScreenshotUploader() {
   // manually instead of pretending a tap can fix it.
   const [permissionHelpOpen, setPermissionHelpOpen] = useState(false);
 
-  // Opens the system file browser immediately — no dropdown, no confirm
-  // step. Resolves with the derived folder path once a file is picked (see
-  // handleCustomFolderPick), or null if the picker returns nothing.
+  // Opens the folder-name dialog. Resolves with the derived folder path once
+  // the driver confirms a name (see confirmFolderName), or null on cancel.
   function promptNativePath(): Promise<string | null> {
     return new Promise((resolve) => {
       setFolderPickerResolve(() => resolve);
-      customFolderInputRef.current?.click();
+      setFolderNameInput('maxymo');
+      setFolderNameDialogOpen(true);
     });
   }
 
-  async function handleCustomFolderPick(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    e.target.value = ''; // allow re-picking the same folder later
+  function cancelFolderNameDialog() {
     const resolve = folderPickerResolve;
+    setFolderNameDialogOpen(false);
     setFolderPickerResolve(null);
-    const first = files[0];
-    if (!first) {
+    resolve?.(null);
+  }
+
+  async function confirmFolderName() {
+    const resolve = folderPickerResolve;
+    const name = folderNameInput.trim();
+    setFolderNameDialogOpen(false);
+    setFolderPickerResolve(null);
+    if (!name) {
       resolve?.(null);
       return;
     }
-    // Chrome's own folder picker sets webkitRelativePath to "<folder>/<file>";
-    // some OEM file-chooser apps (confirmed: Samsung's, on the Android WebView
-    // generic document intent) return it empty instead — fall back to
-    // locating the picked file itself by name.
-    const leafName = first.webkitRelativePath?.split('/')[0];
-    const resolved = leafName
-      ? await resolveFolderPathByName(leafName)
-      : await resolveFolderPathByFileName(first.name);
-    const failedLabel = leafName || first.name;
+    const resolved = await resolveFolderPathByName(name);
     if (!resolved) {
       toast.error(
-        `"${failedLabel}" est hors de Pictures/DCIM/Download — l'auto-scan ne peut pas le suivre. Utilise l'import manuel "Dossier entier" pour ce dossier.`,
+        `"${name}" est hors de Pictures/DCIM/Download — l'auto-scan ne peut pas le suivre. Utilise l'import manuel "Dossier entier" pour ce dossier.`,
       );
       resolve?.(null);
       return;
@@ -1120,7 +1122,7 @@ export function BulkScreenshotUploader() {
               <label className="flex items-center justify-center gap-2 w-full h-20 rounded-lg border-2 border-dashed border-primary/30 bg-primary/5 cursor-pointer hover:border-primary/60 transition-colors">
                 <div className="flex flex-col items-center gap-1 text-primary/80">
                   <Folder className="w-5 h-5" />
-                  <span className="text-[10px]">Dossier entier</span>
+                  <span className="text-[10px]">Sélection multiple (dossier)</span>
                 </div>
                 <input
                   ref={folderInputRef}
@@ -1135,6 +1137,11 @@ export function BulkScreenshotUploader() {
                 />
               </label>
             </div>
+
+            <p className="text-[10px] text-muted-foreground -mt-1">
+              Android va ouvrir une grille de photos, pas un navigateur de dossiers — sélectionne
+              toutes les captures du dossier visé.
+            </p>
 
             {folderStats && (
               <p className="text-[10px] text-muted-foreground bg-background border border-border rounded-md p-2">
@@ -1254,17 +1261,47 @@ export function BulkScreenshotUploader() {
         )}
       </CardContent>
 
-      {/* Hidden always — promptNativePath() clicks this directly, no
-          intermediate dropdown/confirm dialog in between. */}
-      <input
-        ref={customFolderInputRef}
-        type="file"
-        multiple
-        webkitdirectory=""
-        directory=""
-        className="hidden"
-        onChange={(e) => void handleCustomFolderPick(e)}
-      />
+      <Dialog
+        open={folderNameDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) cancelFolderNameDialog();
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Quel est le nom de ton dossier ?</DialogTitle>
+            <DialogDescription>
+              Delivroom cherche ce nom dans Pictures/DCIM/Download — pas besoin d'ouvrir un
+              sélecteur de fichiers.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-wrap gap-1.5">
+            {FOLDER_NAME_SHORTCUTS.map((name) => (
+              <Button
+                key={name}
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setFolderNameInput(name)}
+              >
+                {name}
+              </Button>
+            ))}
+          </div>
+          <Input
+            value={folderNameInput}
+            onChange={(e) => setFolderNameInput(e.target.value)}
+            placeholder="maxymo"
+            className="h-9"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={cancelFolderNameDialog}>
+              Annuler
+            </Button>
+            <Button onClick={() => void confirmFolderName()}>Valider</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={permissionHelpOpen} onOpenChange={setPermissionHelpOpen}>
         <DialogContent>
