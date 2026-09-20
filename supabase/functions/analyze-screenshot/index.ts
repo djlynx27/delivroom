@@ -159,15 +159,14 @@ serve(async (req) => {
       url: req.url,
       method: req.method,
     });
-    // A non-2xx here makes supabase-js's functions.invoke() throw, which a
-    // bulk import loop (300+ screenshots) has to catch per-item anyway — so
-    // every other failure path in this function already degrades to 200 +
-    // a fallback analysis (see fallbackAnalysis below) instead of an HTTP
-    // error. Match that here too: this catch is only truly unexpected bugs
-    // (everything else already has its own handled fallback path), and the
-    // caller shouldn't need a different code path to parse a crash than any
-    // other failure reason.
-    return jsonResponse({ analysis: fallbackAnalysis(undefined, 'unexpected_error') });
+    // A non-2xx makes supabase-js's functions.invoke() throw, which a bulk
+    // import loop already has to catch per-item — every retryable failure
+    // path in this function (rate limit, image fetch, Gemini call) now
+    // returns one on purpose so the bulk uploader's existing retry-queue
+    // handles it, instead of silently marking a never-analyzed file 'done'
+    // (see the 429/502 responses above). Match that here: an unexpected bug
+    // is retryable too, arguably more so than the handled cases.
+    return jsonResponse({ analysis: fallbackAnalysis(undefined, 'unexpected_error') }, 500);
   }
 });
 
@@ -195,20 +194,36 @@ async function handleRequest(req: Request): Promise<Response> {
   }
 
   const client = getServiceClient(env);
-  if (client && (await isRateLimited(client, 'analyze-screenshot', 20))) {
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'rate_limited') });
+  // Was 20/min — a legitimate bulk-import batch (hundreds of screenshots,
+  // processed sequentially but each in a few seconds) blew straight past
+  // that on 2026-09-20 (504/640 files in one real batch got 'rate_limited'
+  // instead of a real Gemini analysis). 60/min still guards against a
+  // genuine runaway loop hammering the Gemini quota, without choking a
+  // normal historical-backlog import.
+  if (client && (await isRateLimited(client, 'analyze-screenshot', 60))) {
+    // 429, not 200: this IS a retryable failure, not a successful analysis
+    // that happens to be a fallback. Returning 200 here previously made
+    // supabase-js's functions.invoke() resolve as "success", so the bulk
+    // uploader marked the file 'done' and never retried it — the file's
+    // dedup key (name+size) then permanently hid it from every future scan
+    // even though it was never actually analyzed.
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'rate_limited') }, 429);
   }
   const zones = await loadZones(client);
 
   const fetched = await fetchImage(body.image_url);
   if (!fetched) {
     console.error('analyze-screenshot: failed to fetch image from', body.image_url);
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'image_fetch_failed') });
+    // Transient (network blip fetching from our own Storage) — retryable,
+    // same reasoning as the rate-limit 429 above.
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'image_fetch_failed') }, 502);
   }
 
   const geminiResult = await runGemini(env.geminiKey, fetched, body.zone_name, zones);
   if (!geminiResult.analysis) {
-    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, geminiResult.reason) });
+    // Both gemini_call_failed and gemini_invalid_json are transient/retryable
+    // — same reasoning as above.
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, geminiResult.reason) }, 502);
   }
 
   await resolveZoneIfNeeded(geminiResult.analysis, body, client, zones);
@@ -908,8 +923,9 @@ function fallbackAnalysis(
   };
 }
 
-function jsonResponse(data: unknown): Response {
+function jsonResponse(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
+    status,
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
