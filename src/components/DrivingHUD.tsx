@@ -31,6 +31,12 @@ interface DrivingHUDProps {
   returnCorridor?: { steps: ReturnCorridorStep[] } | null;
   /** Driver GPS position, forwarded to AddressSearchBox for proximity bias. */
   proximity?: { latitude: number; longitude: number };
+  /** False while GPS/scores are unconfirmed-live and the offline grace
+   * period hasn't elapsed — see useNavTrustState. Blocks NAVIGUER on the
+   * hero zone; manual address search stays available regardless. */
+  canTrustNav?: boolean;
+  /** Status text to show above NAVIGUER while `canTrustNav` is false. */
+  navTrustBadge?: string | null;
   onNavigate: (zone: DrivingHUDZone) => void;
   onExit: () => void;
 }
@@ -117,7 +123,7 @@ function HeroZoneDisplay({
   return (
     <>
       <div
-        className="text-5xl font-black text-center leading-tight font-display"
+        className="text-4xl sm:text-5xl font-black text-center leading-tight font-display line-clamp-2 overflow-hidden"
         style={{ color }}
         aria-label={`Meilleure zone: ${heroZone.name}`}
       >
@@ -217,6 +223,8 @@ export function DrivingHUD({
   speedKmh,
   returnCorridor,
   proximity,
+  canTrustNav = true,
+  navTrustBadge = null,
   onNavigate,
   onExit,
 }: DrivingHUDProps) {
@@ -231,7 +239,7 @@ export function DrivingHUD({
   }, []);
 
   function handleNavClick() {
-    if (!heroZone) return;
+    if (!heroZone || !canTrustNav) return;
     vibrate('navigation');
     onNavigate(heroZone);
   }
@@ -295,8 +303,8 @@ export function DrivingHUD({
         <ExitButton exitHint={exitHint} onClick={handleExitClick} />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center px-6 gap-2">
-        <Car className="w-9 h-9 opacity-30" style={{ color }} />
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 gap-2 overflow-hidden">
+        <Car className="w-9 h-9 opacity-30 flex-shrink-0" style={{ color }} />
         <HeroZoneDisplay
           heroZone={heroZone}
           heroSurge={heroSurge}
@@ -307,6 +315,12 @@ export function DrivingHUD({
       </div>
 
       <NextZonePill nextZone={nextZone} onNavigate={onNavigate} />
+
+      {navTrustBadge && (
+        <p className="px-6 text-center text-white/40 text-sm animate-pulse">
+          {navTrustBadge}
+        </p>
+      )}
 
       {/* ── Row 4: Earnings + Navigate CTA ── */}
       <div className="px-6 pb-10 flex gap-4">
@@ -324,7 +338,7 @@ export function DrivingHUD({
         {/* Navigate — PRIMARY action, maximum tap target */}
         <button
           onClick={handleNavClick}
-          disabled={!heroZone}
+          disabled={!heroZone || !canTrustNav}
           className="flex-1 rounded-2xl font-black text-2xl font-display active:scale-95 transition-transform disabled:opacity-30"
           style={{
             backgroundColor: color,

@@ -19,6 +19,11 @@ export interface UserLocationResult {
   status: UserLocationStatus;
   error: string | null;
   refresh: () => Promise<UserLocation | null>;
+  /** True once a fix has arrived from the live watch or a forced refresh —
+   * never true from the cold-start cached fix alone (see COLD_START_MAX_AGE_MS
+   * below). Callers that gate a driving decision (e.g. NAVIGUER) on GPS
+   * should require this, not just `location` being non-null. */
+  isLocationLive: boolean;
 }
 
 function getGeolocationErrorMessage(error: unknown) {
@@ -95,9 +100,15 @@ interface SharedLocationState {
   location: UserLocation | null;
   status: UserLocationStatus;
   error: string | null;
+  hasLiveFix: boolean;
 }
 
-let sharedState: SharedLocationState = { location: null, status: 'idle', error: null };
+let sharedState: SharedLocationState = {
+  location: null,
+  status: 'idle',
+  error: null,
+  hasLiveFix: false,
+};
 const sharedListeners = new Set<() => void>();
 let sharedWatchId: string | number | null = null;
 let sharedWatchStarting = false;
@@ -109,7 +120,7 @@ function notifySharedListeners() {
   for (const listener of sharedListeners) listener();
 }
 
-function applySharedLocation(nextLocation: UserLocation) {
+function applySharedLocation(nextLocation: UserLocation, live: boolean) {
   const now = Date.now();
 
   // Throttle updates to avoid UI flicker, but keep it responsive for driving
@@ -126,7 +137,12 @@ function applySharedLocation(nextLocation: UserLocation) {
 
   lastUpdateAt = now;
   latestLocation = nextLocation;
-  sharedState = { location: nextLocation, status: 'success', error: null };
+  sharedState = {
+    location: nextLocation,
+    status: 'success',
+    error: null,
+    hasLiveFix: sharedState.hasLiveFix || live,
+  };
   notifySharedListeners();
 }
 
@@ -152,7 +168,7 @@ async function refreshSharedLocation(
     const nextLocation = await requestCurrentPreciseLocation(
       allowCached ? { maximumAge: COLD_START_MAX_AGE_MS } : undefined
     );
-    applySharedLocation(nextLocation);
+    applySharedLocation(nextLocation, !allowCached);
     return nextLocation;
   } catch (err) {
     const message = getGeolocationErrorMessage(err);
@@ -180,13 +196,13 @@ function startSharedWatch() {
               sharedState = { ...sharedState, error: getGeolocationErrorMessage(err) };
               notifySharedListeners();
             } else if (pos) {
-              applySharedLocation(normalizePosition(pos));
+              applySharedLocation(normalizePosition(pos), true);
             }
           }
         );
       } else if (typeof navigator !== 'undefined' && navigator.geolocation) {
         sharedWatchId = navigator.geolocation.watchPosition(
-          (pos) => applySharedLocation(normalizePosition(pos)),
+          (pos) => applySharedLocation(normalizePosition(pos), true),
           (watchError) => {
             sharedState = { ...sharedState, error: getGeolocationErrorMessage(watchError) };
             notifySharedListeners();
@@ -248,7 +264,8 @@ export function useUserLocation(intervalMs = 10000): UserLocationResult {
     location: state.location,
     status: state.status,
     error: state.error,
-    refresh: refreshSharedLocation,
+    refresh: () => refreshSharedLocation(false),
+    isLocationLive: state.hasLiveFix,
   };
 }
 

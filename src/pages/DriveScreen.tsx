@@ -45,6 +45,7 @@ import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useNotifications } from '@/hooks/useNotifications';
 import { nearestEmergingHotspot, useEmergingHotspots } from '@/hooks/useEmergingHotspots';
+import { useNavTrustState } from '@/hooks/useNavTrustState';
 import { usePullToRefresh } from '@/hooks/usePullToRefresh';
 import { useCities } from '@/hooks/useSupabase';
 import { useTrips } from '@/hooks/useTrips';
@@ -159,7 +160,7 @@ export default function DriveScreen() {
   const { t } = useI18n();
   const [cityId, setCityId] = useCityId();
   const { data: cities = [] } = useCities();
-  const { location, status, error, refresh } = useUserLocation(15000);
+  const { location, status, error, refresh, isLocationLive } = useUserLocation(15000);
   // Same guard as NearestHotspot/useSmartZones: a cold or coarse GPS fix can
   // land the hero recommendation on a zone across a city boundary (e.g. a
   // stale `cityId` from localStorage still pointing at Longueuil while the
@@ -205,12 +206,17 @@ export default function DriveScreen() {
     zoneEventBadge,
     lyftSignalByZone,
     isLyftSyncing,
+    hasLiveScores,
   } = useDemandScores(cityId, {
     currentLat: location?.latitude ?? null,
     currentLng: location?.longitude ?? null,
     conservativePresence,
     demandWindow,
   });
+  const { canNavigate: canTrustNav, badge: navTrustBadge } = useNavTrustState(
+    isLocationLive,
+    hasLiveScores
+  );
   // Mounts the client-side alert pipeline (demand spikes, surge peak,
   // event/weather/drift alerts) AND — via its own effects — requests
   // Notification permission + registers the Web Push subscription once
@@ -404,8 +410,24 @@ export default function DriveScreen() {
     [rankedZones, driverMode]
   );
 
-  // Exclude airport from hero zone, but allow in next recommendations
-  const heroZone = modeZones.find((z) => z.type !== 'aéroport') ?? null;
+  // Airport is excluded from hero zone UNLESS the driver is physically on
+  // the grounds (e.g. just dropped off) -- recommending YUL as a destination
+  // from across town is a 25+ min deadhead on a guess, but once actually
+  // there it's fair game like any other zone.
+  const AIRPORT_HERO_GEOFENCE_KM = 1.5;
+  const airportZone = modeZones.find((z) => z.type === 'aéroport') ?? null;
+  const isAtAirport = Boolean(
+    airportZone &&
+      location &&
+      haversineKm(
+        location.latitude,
+        location.longitude,
+        airportZone.latitude,
+        airportZone.longitude
+      ) <= AIRPORT_HERO_GEOFENCE_KM
+  );
+  const heroZone =
+    modeZones.find((z) => isAtAirport || z.type !== 'aéroport') ?? null;
   // Next zones: include airport if present, but never as hero
   const nextZones = modeZones
     .filter((z) => !heroZone || z.id !== heroZone.id)
@@ -771,6 +793,8 @@ export default function DriveScreen() {
           heroSurge={heroSurge}
           earningsToday={todayEarnings}
           speedKmh={speedKmh}
+          canTrustNav={canTrustNav}
+          navTrustBadge={navTrustBadge}
           returnCorridor={resolveHudReturnCorridor(
             heroZone?.id,
             antiDeadhead,
@@ -838,7 +862,7 @@ export default function DriveScreen() {
             <>
               <div className="flex flex-col items-center text-center space-y-1">
                 <h1
-                  className={`font-display font-bold leading-tight break-words ${fullScreen ? 'text-[40px]' : 'text-[32px]'}`}
+                  className={`font-display font-bold leading-tight break-words line-clamp-2 overflow-hidden ${fullScreen ? 'text-[40px]' : 'text-[32px]'}`}
                 >
                   {heroZone.name}
                 </h1>
@@ -884,9 +908,15 @@ export default function DriveScreen() {
               </div>
 
               <div className="space-y-2 pt-2">
+                {navTrustBadge && (
+                  <p className="text-center text-[13px] font-body text-muted-foreground animate-pulse">
+                    {navTrustBadge}
+                  </p>
+                )}
                 <Button
                   onClick={() => navigateOneTap(heroNavTarget ?? heroZone)}
-                  className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90"
+                  disabled={!canTrustNav}
+                  className="w-full h-16 text-[18px] font-display font-bold gap-2 bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-30"
                 >
                   <Car className="w-6 h-6 flex-shrink-0" /> Naviguer
                 </Button>
@@ -898,8 +928,9 @@ export default function DriveScreen() {
                       heroNavTarget?.longitude ?? heroZone.longitude
                     )
                   }
+                  disabled={!canTrustNav}
                   variant="secondary"
-                  className="w-full h-16 text-[18px] font-display font-bold gap-2"
+                  className="w-full h-16 text-[18px] font-display font-bold gap-2 disabled:opacity-30"
                 >
                   <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
                 </Button>

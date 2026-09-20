@@ -198,11 +198,29 @@ export function useDemandScores(
     // invalidates by ['zones'|'zone-scores', cityId] as a query-key prefix.
     return [cityId, ...nearby.filter((id) => id !== cityId)];
   }, [options.currentLat, options.currentLng, cityId]);
-  const { data: zones = [], isLoading: zonesLoading } = useZones(cityIds);
+  const {
+    data: zones = [],
+    isLoading: zonesLoading,
+    dataUpdatedAt: zonesUpdatedAt,
+  } = useZones(cityIds);
   const { data: weather } = useWeather(cityId);
   const { data: events = [] } = useEvents(cityId);
   const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
-  const { data: dbScores = [], isLoading: scoresLoading } = useZoneScores(cityIds);
+  const {
+    data: dbScores = [],
+    isLoading: scoresLoading,
+    dataUpdatedAt: scoresUpdatedAt,
+  } = useZoneScores(cityIds);
+  // Cache-first hydration (useZones/useZoneScores' localStorage initialData)
+  // makes `isLoading` go false instantly on a cold start with a cache hit —
+  // it says nothing about whether that data has ever been confirmed by a
+  // live fetch. NAVIGUER-gating callers need that distinction (see
+  // feedback_stale_cache_nav_risk memory): a fetch completing after mount
+  // always yields a dataUpdatedAt newer than mount time, cache-seeded data
+  // never does.
+  const mountedAtRef = useRef(Date.now());
+  const hasLiveScores =
+    zonesUpdatedAt > mountedAtRef.current && scoresUpdatedAt > mountedAtRef.current;
   const { data: trafficSnapshots = [] } = useTomTomTraffic(cityId, zones);
   const { data: stmStatus } = useStmTransit();
   const { data: tripLogs = [] } = useTrips({ limit: 200, cityId, enabled: Boolean(cityId) });
@@ -931,5 +949,6 @@ export function useDemandScores(
     isLyftSyncing,
     stmStatus,
     surgeMap,
+    hasLiveScores,
   };
 }
