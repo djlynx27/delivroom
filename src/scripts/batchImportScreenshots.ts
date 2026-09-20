@@ -226,9 +226,12 @@ async function main() {
         body: { image_url: signed.signedUrl, auto_zone: true, content_hash: contentHash },
       });
       if (invokeErr) {
-        const context = (invokeErr as { context?: Response }).context;
-        const status = context?.status;
-        const body = context ? await context.clone().text().catch(() => '<unreadable>') : undefined;
+        const context = (invokeErr as { context?: unknown }).context;
+        const isResponse = context instanceof Response;
+        const status = isResponse ? context.status : undefined;
+        const body = isResponse
+          ? await context.clone().text().catch(() => '<unreadable>')
+          : ((context as { message?: string } | undefined)?.message ?? String(context));
         console.error(`[batch-import] analyze-screenshot status=${status} body=${body}`);
         throw invokeErr;
       }
