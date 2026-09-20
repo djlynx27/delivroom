@@ -109,6 +109,30 @@ function memoryStorage() {
   };
 }
 
+// Duplicated from src/integrations/supabase/client.ts's fetchWithTimeout
+// rather than imported: that module reads import.meta.env at the top
+// level, which is `undefined` under plain tsx execution (confirmed) and
+// would throw before this script ever ran. A real run without this proved
+// exactly why it's needed: a plain fetch with no timeout hung indefinitely
+// on the very first file, well past every server-side timeout, since
+// nothing here ever told it to give up.
+const REQUEST_TIMEOUT_MS = 15_000;
+const AUTH_REQUEST_TIMEOUT_MS = 60_000;
+const FUNCTIONS_REQUEST_TIMEOUT_MS = 90_000;
+
+function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  const timeoutMs = url.includes('/auth/v1/')
+    ? AUTH_REQUEST_TIMEOUT_MS
+    : url.includes('/functions/v1/')
+      ? FUNCTIONS_REQUEST_TIMEOUT_MS
+      : REQUEST_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  init?.signal?.addEventListener('abort', () => controller.abort());
+  return fetch(input, { ...init, signal: controller.signal }).finally(() => clearTimeout(timeoutId));
+}
+
 async function main() {
   const { dir, accessToken, refreshToken, filter } = parseArgs();
 
@@ -120,6 +144,7 @@ async function main() {
 
   const supabase = createClient<Database>(url, anonKey, {
     auth: { storage: memoryStorage(), persistSession: true, autoRefreshToken: true },
+    global: { fetch: fetchWithTimeout },
   });
 
   // Seeds the real driver's session -- autoRefreshToken keeps every

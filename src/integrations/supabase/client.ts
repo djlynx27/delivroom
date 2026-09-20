@@ -52,7 +52,13 @@ function isFunctionsRequest(input: RequestInfo | URL): boolean {
   return url.includes('/functions/v1/');
 }
 
-function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+// Exported for reuse by src/scripts/batchImportScreenshots.ts — that script
+// builds its own createClient() (needs a driver session token + Node-only
+// env vars this module's default export doesn't have) but must not lose
+// this timeout floor: confirmed on a real run that a plain fetch with none
+// hung indefinitely on the very first file, well past every server-side
+// timeout, since nothing here ever told it to give up.
+export function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const timeoutMs = isAuthRequest(input)
     ? AUTH_REQUEST_TIMEOUT_MS
     : isFunctionsRequest(input)
