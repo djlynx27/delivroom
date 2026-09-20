@@ -33,7 +33,7 @@ import { ensureShiftStarted } from '@/lib/activeShift';
 import { idleMinutes as computeIdleMinutes, loadIdleMap, markRide, type Platform as IdlePlatform } from '@/lib/platformIdle';
 import { getActiveTimeBoosts } from '@/lib/timeBoosts';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
-import { findExistingUpload, hashFile, recordUpload } from '@/lib/screenshotDedup';
+import { findExistingUpload, getAuthedUserId, hashFile, recordUpload } from '@/lib/screenshotDedup';
 import { recordRide as shiftRecordRide } from '@/lib/shiftTracker';
 import { triggerLearningRetrain } from '@/lib/triggerLearningRetrain';
 import { useQueryClient } from '@tanstack/react-query';
@@ -121,11 +121,10 @@ interface UploadedScreenshot {
 }
 
 async function uploadScreenshot(file: File): Promise<UploadedScreenshot> {
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) {
+  const userId = await getAuthedUserId();
+  if (!userId) {
     throw new Error('Authentification requise pour uploader un screenshot');
   }
-  const userId = authData.user.id;
   const objectPath = `${userId}/${Date.now()}-${sanitizeFilename(file.name)}`;
 
   const { error: uploadError } = await supabase.storage

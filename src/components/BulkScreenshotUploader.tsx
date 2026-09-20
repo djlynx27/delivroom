@@ -32,6 +32,7 @@ import {
   fileKey,
   findExistingFileNames,
   findExistingUpload,
+  getAuthedUserId,
   hashFile,
   recordUpload,
 } from '@/lib/screenshotDedup';
@@ -173,11 +174,11 @@ interface AnalysisResultMinimal {
 }
 
 async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: string }> {
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) {
+  const userId = await getAuthedUserId();
+  if (!userId) {
     throw new Error('Authentification requise');
   }
-  const objectPath = `${authData.user.id}/${Date.now()}-${sanitizeFilename(file.name)}`;
+  const objectPath = `${userId}/${Date.now()}-${sanitizeFilename(file.name)}`;
   const { error: uploadErr } = await supabase.storage
     .from('driver-screenshots')
     .upload(objectPath, file, { contentType: file.type, upsert: false });
@@ -189,6 +190,30 @@ async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: s
     throw signErr ?? new Error('Impossible de générer une URL signée');
   }
   return { signedUrl: signed.signedUrl, objectPath };
+}
+
+function looksLikeAuthError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/authentification requise/i.test(msg)) return true;
+  const status =
+    (err as { status?: number | string; statusCode?: number | string })?.status ??
+    (err as { statusCode?: number | string })?.statusCode;
+  return String(status) === '401';
+}
+
+/** One retry, with a forced session refresh in between, for a step that
+ * failed with an auth-shaped error mid-batch. getAuthedUserId already
+ * refreshes proactively before every upload, so this only catches the rare
+ * residual case: a token that expires mid-flight during a very long batch,
+ * or an edge function's own JWT check failing transiently. */
+async function withAuthRetry<T>(step: () => Promise<T>): Promise<T> {
+  try {
+    return await step();
+  } catch (err) {
+    if (!looksLikeAuthError(err)) throw err;
+    await supabase.auth.refreshSession();
+    return await step();
+  }
 }
 
 async function analyzeOne(signedUrl: string, contentHash: string): Promise<AnalysisResultMinimal | null> {
@@ -576,11 +601,13 @@ export function BulkScreenshotUploader() {
       }
 
       updateItem(item.id, { status: 'uploading' });
-      const uploaded = await uploadOne(item.file);
+      const uploaded = await withAuthRetry(() => uploadOne(item.file));
       updateItem(item.id, { filePath: uploaded.objectPath });
 
       updateItem(item.id, { status: 'analyzing' });
-      const analysis = await analyzeOne(uploaded.signedUrl, contentHash);
+      const analysis = await withAuthRetry(() =>
+        analyzeOne(uploaded.signedUrl, contentHash),
+      );
 
       await recordUpload({
         contentHash,

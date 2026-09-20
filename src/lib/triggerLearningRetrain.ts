@@ -41,7 +41,9 @@ async function fetchRecentRealTrips(): Promise<TripWithZone[]> {
 
 export async function triggerLearningRetrain(savedCount: number): Promise<void> {
   if (savedCount <= 0) return;
-  const toastId = toast.loading(`Apprentissage IA (${savedCount} nouvelle(s) course(s))…`);
+  const toastId = toast.loading(
+    `Import terminé (${savedCount}) → Sync Supabase…`,
+  );
 
   const failed: string[] = [];
   for (const fn of LEARNING_FUNCTIONS) {
@@ -50,6 +52,11 @@ export async function triggerLearningRetrain(savedCount: number): Promise<void> 
     } catch (err) {
       console.error(`[retrain] ${fn.name} failed:`, err);
       failed.push(fn.label);
+    }
+    if (fn.name === 'score-calculator') {
+      toast.loading('Sync Supabase ✓ → Analyse IA…', { id: toastId });
+    } else if (fn.name === 'ai-score-analysis') {
+      toast.loading('Analyse IA ✓ → Entraînement des modèles…', { id: toastId });
     }
   }
 
@@ -64,7 +71,9 @@ export async function triggerLearningRetrain(savedCount: number): Promise<void> 
 
   const totalSteps = LEARNING_FUNCTIONS.length + 1;
   if (failed.length === 0) {
-    toast.success('Apprentissage IA mis à jour', { id: toastId });
+    toast.success('Import → Sync Supabase → Analyse IA → Modèles mis à jour 🚀', {
+      id: toastId,
+    });
   } else if (failed.length < totalSteps) {
     toast.error(`Échec partiel (${failed.join(', ')}), le reste est à jour`, { id: toastId });
   } else {

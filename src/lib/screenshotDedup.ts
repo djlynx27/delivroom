@@ -70,6 +70,28 @@ export function fileKey(name: string, size: number): string {
   return `${name}::${size}`;
 }
 
+/**
+ * Resolves the current user id for an authenticated write, refreshing the
+ * session once if it's missing/expired before giving up. Uses getSession()
+ * (reads the locally persisted/auto-refreshed session, no network call)
+ * instead of getUser() (a network round-trip to the auth server) — a bulk
+ * batch previously called getUser() once per file (hundreds of times per
+ * run), and any transient hiccup on that one specific call surfaced as a
+ * false "Authentification requise", even though the real upload/analyze
+ * calls would have worked fine with the same valid session.
+ */
+export async function getAuthedUserId(): Promise<string | null> {
+  const { data } = await supabase.auth.getSession();
+  let session = data.session;
+  const expired =
+    session?.expires_at != null && session.expires_at * 1000 < Date.now();
+  if (!session || expired) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    session = refreshed.session;
+  }
+  return session?.user?.id ?? null;
+}
+
 export interface RecordUploadInput {
   contentHash: string;
   filePath: string;
@@ -89,8 +111,7 @@ export interface RecordUploadInput {
 export async function recordUpload(
   input: RecordUploadInput,
 ): Promise<string | null> {
-  const { data: authData } = await supabase.auth.getUser();
-  const userId = authData.user?.id;
+  const userId = await getAuthedUserId();
   if (!userId) {
     console.warn('[screenshotDedup] no auth user, skipping record');
     return null;
