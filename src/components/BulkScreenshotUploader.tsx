@@ -182,7 +182,19 @@ async function uploadOne(file: File): Promise<{ signedUrl: string; objectPath: s
   const { error: uploadErr } = await supabase.storage
     .from('driver-screenshots')
     .upload(objectPath, file, { contentType: file.type, upsert: false });
-  if (uploadErr) throw uploadErr;
+  if (uploadErr) {
+    // Diagnostic for the "401 despite a resolved userId" case — distinct
+    // from getAuthedUserId's own "no userId at all" warning. Storage errors
+    // carry their HTTP status as `.statusCode` (string) or `.status`.
+    console.warn('[BulkScreenshotUploader] storage upload failed', {
+      status:
+        (uploadErr as { statusCode?: string; status?: number }).statusCode ??
+        (uploadErr as { status?: number }).status,
+      message: uploadErr.message,
+      objectPath,
+    });
+    throw uploadErr;
+  }
   const { data: signed, error: signErr } = await supabase.storage
     .from('driver-screenshots')
     .createSignedUrl(objectPath, 300);
@@ -220,7 +232,17 @@ async function analyzeOne(signedUrl: string, contentHash: string): Promise<Analy
   const { data, error } = await supabase.functions.invoke('analyze-screenshot', {
     body: { image_url: signedUrl, auto_zone: true, content_hash: contentHash },
   });
-  if (error) throw error;
+  if (error) {
+    // analyze-screenshot's own handler never returns non-2xx (every failure
+    // path there degrades to 200 + a fallback analysis) — a 401 here can
+    // only come from the Functions gateway itself rejecting the JWT before
+    // the function even runs (verify_jwt), not from our function's code.
+    console.warn('[BulkScreenshotUploader] analyze-screenshot invoke failed', {
+      status: (error as { context?: { status?: number } }).context?.status,
+      message: error.message,
+    });
+    throw error;
+  }
   return (data as { analysis?: AnalysisResultMinimal })?.analysis ?? null;
 }
 

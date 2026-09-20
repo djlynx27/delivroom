@@ -1,6 +1,7 @@
 import { ensureAuthSession } from '@/hooks/useAnonAuth';
 import { supabase } from '@/integrations/supabase/client';
 import type { Json } from '@/integrations/supabase/types';
+import type { Session } from '@supabase/supabase-js';
 
 export interface ExistingUpload {
   id: string;
@@ -89,16 +90,40 @@ export function fileKey(name: string, size: number): string {
  * go through ensureAuthSession() instead, which shares useAnonAuth's own
  * in-flight sign-in rather than racing a second one.
  */
+type AuthRecoveryPath = 'ensureAuthSession' | 'refreshSession' | 'existing';
+
+function pickAuthRecoveryPath(session: Session | null): AuthRecoveryPath {
+  if (!session) return 'ensureAuthSession';
+  if (session.expires_at != null && session.expires_at * 1000 < Date.now()) {
+    return 'refreshSession';
+  }
+  return 'existing';
+}
+
+// Diagnostic for the exact "Authentification requise" case reported on a
+// real 1200+ file batch — captures which recovery path was taken and why it
+// still came up empty, instead of guessing again.
+function warnNoUserId(path: AuthRecoveryPath, hadInitialSession: boolean, session: Session | null) {
+  console.warn('[screenshotDedup] getAuthedUserId: no user id resolved', {
+    path,
+    hadInitialSession,
+    isAnonymous: session?.user?.is_anonymous ?? null,
+  });
+}
+
 export async function getAuthedUserId(): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
   let session = data.session;
-  if (!session) {
+  const path = pickAuthRecoveryPath(session);
+  if (path === 'ensureAuthSession') {
     session = await ensureAuthSession();
-  } else if (session.expires_at != null && session.expires_at * 1000 < Date.now()) {
+  } else if (path === 'refreshSession') {
     const { data: refreshed } = await supabase.auth.refreshSession();
     session = refreshed.session;
   }
-  return session?.user?.id ?? null;
+  const userId = session?.user?.id ?? null;
+  if (!userId) warnNoUserId(path, !!data.session, session);
+  return userId;
 }
 
 export interface RecordUploadInput {
