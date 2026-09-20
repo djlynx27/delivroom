@@ -49,7 +49,17 @@ interface ParsedArgs {
   dir: string;
   accessToken: string;
   refreshToken: string;
+  filter: string;
 }
+
+// Mirrors BulkScreenshotUploader.tsx's DEFAULT_FILTER — the pulled folders
+// (Pictures/Screenshots, DCIM/Screenshots especially) hold every screenshot
+// on the device, not just rideshare ones (confirmed on a real pull: Android
+// system/launcher/permission-dialog/other-app screenshots mixed in). The
+// app never sends those to Gemini because its own nameFilter excludes them
+// first; this script must do the same instead of burning Gemini quota and
+// rate-limit budget on irrelevant images. Pass --filter "" to disable.
+const DEFAULT_NAME_FILTER = 'maxymo';
 
 function parseArgs(): ParsedArgs {
   const args = process.argv.slice(2);
@@ -60,13 +70,14 @@ function parseArgs(): ParsedArgs {
   const dir = get('--dir');
   const accessToken = get('--access-token');
   const refreshToken = get('--refresh-token');
+  const filter = get('--filter') ?? DEFAULT_NAME_FILTER;
   if (!dir || !accessToken || !refreshToken) {
     console.error(
-      'Usage: tsx src/scripts/batchImportScreenshots.ts --dir <path> --access-token <token> --refresh-token <token>',
+      'Usage: tsx src/scripts/batchImportScreenshots.ts --dir <path> --access-token <token> --refresh-token <token> [--filter maxymo]',
     );
     process.exit(1);
   }
-  return { dir, accessToken, refreshToken };
+  return { dir, accessToken, refreshToken, filter };
 }
 
 async function walkImageFiles(dir: string): Promise<string[]> {
@@ -99,7 +110,7 @@ function memoryStorage() {
 }
 
 async function main() {
-  const { dir, accessToken, refreshToken } = parseArgs();
+  const { dir, accessToken, refreshToken, filter } = parseArgs();
 
   const url = process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -126,8 +137,14 @@ async function main() {
   console.log(`[batch-import] authentifié en tant que ${userId}`);
 
   console.log(`[batch-import] scan de ${dir}...`);
-  const files = await walkImageFiles(dir);
-  console.log(`[batch-import] ${files.length} fichier(s) image trouvé(s)`);
+  const allFiles = await walkImageFiles(dir);
+  const needle = filter.trim().toLowerCase();
+  const files = needle
+    ? allFiles.filter((f) => path.basename(f).toLowerCase().includes(needle))
+    : allFiles;
+  console.log(
+    `[batch-import] ${allFiles.length} fichier(s) image trouvé(s), ${files.length} après filtre "${filter}"`,
+  );
 
   const hashByFile = new Map<string, string>();
   for (const file of files) {
