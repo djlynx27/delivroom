@@ -88,6 +88,7 @@ Versionnées dans `supabase/migrations/` — voir le dossier pour la liste et le
 - `git push --no-verify` sauf urgence documentée
 - Modifier code hors scope — `// FIXME(claude): description` à la place
 - Migrations SQL modifiées après application sur prod
+- Cache-first (localStorage `initialData`, GPS `maximumAge`) sans signal de fraîcheur exposé à l'UI — si le chauffeur peut agir dessus (NAVIGUER, choix de zone), la donnée cache doit être visiblement "non confirmée" tant qu'un fetch/fix live n'a pas remplacé le cache (retour terrain post-`df76d3d`, voir memory `feedback_stale_cache_nav_risk`)
 
 ---
 
