@@ -1,14 +1,21 @@
 // shiftGeoWatcher — background geofencing + 15-min arrival timer.
 //
-// Starts a real Android foreground service (via
+// Runs a real Android foreground service (via
 // @capacitor-community/background-geolocation, NOT the already-installed
 // @capacitor/background-runner — that one is WorkManager-backed with a
 // 15-minute minimum interval floor and no persistent notification, wrong
-// tool for a real-time geofence + precise countdown) tied to the shift
-// lifecycle (useShiftGeoWatcher.ts starts/stops it on
-// 'delivroom:shift-changed'). Keeps firing its location callback even after
-// the app is swiped from Recents, which is the whole point: the driver is
-// constantly tabbed away into Lyft/Uber/Maxymo during a real shift.
+// tool for a real-time geofence + precise countdown). Keeps firing its
+// location callback even after the app is swiped from Recents, which is the
+// whole point: the driver is constantly tabbed away into Lyft/Uber/Maxymo
+// during a real shift.
+//
+// Runs continuously for the whole app session, not just during a shift —
+// see docs/superpowers/specs/2026-09-20-idle-foreground-service-design.md.
+// useShiftGeoWatcher.ts calls ensureWatcherMode('idle'|'shift') on mount and
+// on every 'delivroom:shift-changed' event; a mode switch is a
+// removeWatcher + addWatcher pair (the plugin has no live-reconfigure API),
+// which swaps the persistent notification's text in place without visibly
+// tearing down the foreground service.
 //
 // State (current nearest zone + when it was entered) is persisted via
 // @capacitor/preferences rather than localStorage, which the plugin's
@@ -46,6 +53,7 @@ export const ZONE_STAY_TIMER_MS = 15 * 60_000;
 
 const PREFS_STATE_KEY = 'delivroom_shift_geo_state';
 const PREFS_WATCHER_ID_KEY = 'delivroom_shift_geo_watcher_id';
+const PREFS_MODE_KEY = 'delivroom_geo_watcher_mode';
 export const PREFS_HERO_ZONE_KEY = 'delivroom_hero_zone_id';
 const PREFS_CAPTURED_ZONE_KEY = 'delivroom_shift_geo_captured_zone';
 const TRIGGER_CAPTURE_ACTION = 'com.delivroom.TRIGGER_NEARBY_CAPTURE';
@@ -350,33 +358,75 @@ async function ensureShiftWatcherPermissions(): Promise<boolean> {
   return true;
 }
 
-export async function startShiftWatcher(): Promise<void> {
+export type WatcherMode = 'idle' | 'shift';
+
+// Interval is hardcoded 1s server-side in the plugin's Android service —
+// only distanceFilter is tunable from JS, so "low frequency" means "large
+// enough to skip GPS noise while parked/idle between fares", not a longer
+// poll interval.
+const IDLE_WATCHER_OPTIONS = {
+  backgroundTitle: 'Delivroom',
+  backgroundMessage: 'Actif — en veille',
+  requestPermissions: true,
+  distanceFilter: 250,
+};
+
+const SHIFT_WATCHER_OPTIONS = {
+  backgroundTitle: 'Delivroom Shift Tracker Actif',
+  backgroundMessage: 'Suivi de zone en cours pour tes suggestions de repositionnement.',
+  requestPermissions: true,
+  distanceFilter: 30,
+};
+
+function watcherOptionsFor(mode: WatcherMode) {
+  return mode === 'shift' ? SHIFT_WATCHER_OPTIONS : IDLE_WATCHER_OPTIONS;
+}
+
+/** Starts or reconfigures the single foreground-service watcher to match
+ * `mode`, reusing the exact same location callback / geofence state machine
+ * in both modes. The plugin has no live-reconfigure API, so a real mode
+ * change is a removeWatcher + addWatcher pair — cheap and, since the
+ * plugin's Android service reuses one fixed notification id, invisible to
+ * the driver beyond the notification text updating. */
+export async function ensureWatcherMode(mode: WatcherMode): Promise<void> {
   if (!Capacitor.isNativePlatform()) {
-    log('startShiftWatcher: skipped, not a native platform');
+    log('ensureWatcherMode: skipped, not a native platform');
     return;
   }
 
   try {
-    const { value: existingId } = await Preferences.get({ key: PREFS_WATCHER_ID_KEY });
-    if (existingId) {
-      log('startShiftWatcher: already running, watcherId=', existingId);
+    const [{ value: existingId }, { value: currentMode }] = await Promise.all([
+      Preferences.get({ key: PREFS_WATCHER_ID_KEY }),
+      Preferences.get({ key: PREFS_MODE_KEY }),
+    ]);
+
+    if (existingId && currentMode === mode) {
+      log('ensureWatcherMode: already running in mode', mode);
       return;
     }
 
     const permsGranted = await ensureShiftWatcherPermissions();
     if (!permsGranted) {
-      log('startShiftWatcher: aborting, notification permission not granted');
+      log('ensureWatcherMode: aborting, notification permission not granted');
       return;
     }
 
-    log('startShiftWatcher: calling addWatcher');
+    // Reconcile any previous watcher first, whether this is a real mode
+    // switch or a stale id left over from a JS crash that never reached its
+    // own cleanup — removeWatcher on an id the native side no longer
+    // recognizes is a harmless no-op on the plugin side.
+    if (existingId) {
+      try {
+        await BackgroundGeolocation.removeWatcher({ id: existingId });
+        log('ensureWatcherMode: removed previous watcherId=', existingId);
+      } catch (err) {
+        logError('ensureWatcherMode: removeWatcher failed', err);
+      }
+    }
+
+    log('ensureWatcherMode: calling addWatcher for mode', mode);
     const watcherId = await BackgroundGeolocation.addWatcher(
-      {
-        backgroundTitle: 'Delivroom Shift Tracker Actif',
-        backgroundMessage: 'Suivi de zone en cours pour tes suggestions de repositionnement.',
-        requestPermissions: true,
-        distanceFilter: 30,
-      },
+      watcherOptionsFor(mode),
       (position, error) => {
         if (error) {
           logError('addWatcher callback error', error);
@@ -386,33 +436,23 @@ export async function startShiftWatcher(): Promise<void> {
         void onLocation(position.latitude, position.longitude);
       }
     );
-    await Preferences.set({ key: PREFS_WATCHER_ID_KEY, value: watcherId });
-    log('startShiftWatcher: started, watcherId=', watcherId);
+    await Promise.all([
+      Preferences.set({ key: PREFS_WATCHER_ID_KEY, value: watcherId }),
+      Preferences.set({ key: PREFS_MODE_KEY, value: mode }),
+    ]);
+    log('ensureWatcherMode: started, mode=', mode, 'watcherId=', watcherId);
+
+    // A real shift ending (not a cold-boot-into-idle, which has nothing to
+    // clear) drops the geofence state, same as stopShiftWatcher() did
+    // before — stale zone-stay/capture state from a previous shift must not
+    // silently carry into the next one.
+    if (currentMode === 'shift' && mode === 'idle') {
+      await writeState(null);
+      await writeCaptureState(null);
+    }
   } catch (err) {
     // Permission denied or plugin unavailable — foreground-only notifications
     // (useNotifications.ts) remain the fallback.
-    logError('startShiftWatcher failed', err);
-  }
-}
-
-export async function stopShiftWatcher(): Promise<void> {
-  if (!Capacitor.isNativePlatform()) return;
-  try {
-    const { value: existingId } = await Preferences.get({ key: PREFS_WATCHER_ID_KEY });
-    if (!existingId) {
-      log('stopShiftWatcher: nothing to stop');
-      return;
-    }
-    try {
-      await BackgroundGeolocation.removeWatcher({ id: existingId });
-      log('stopShiftWatcher: removed watcherId=', existingId);
-    } catch (err) {
-      logError('stopShiftWatcher: removeWatcher failed', err);
-    }
-    await Preferences.remove({ key: PREFS_WATCHER_ID_KEY });
-    await writeState(null);
-    await writeCaptureState(null);
-  } catch (err) {
-    logError('stopShiftWatcher failed', err);
+    logError('ensureWatcherMode failed', err);
   }
 }

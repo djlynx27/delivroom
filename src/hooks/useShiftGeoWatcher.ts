@@ -1,6 +1,7 @@
-// useShiftGeoWatcher — starts/stops the background geofencing foreground
-// service (shiftGeoWatcher.ts) in step with "is a shift active", and wires
-// the "GO →" notification tap handler once per app launch.
+// useShiftGeoWatcher — keeps the background geofencing foreground service
+// (shiftGeoWatcher.ts) in the right mode ('shift' when active, 'idle'
+// otherwise — never stopped, see ensureWatcherMode), and wires the "GO →"
+// notification tap handler once per app launch.
 //
 // "Active" has two independent sources, and both must be watched:
 // - Local (activeShift.ts / 'delivroom:shift-changed'): manual "Démarrer un
@@ -17,9 +18,8 @@ import { useEffect } from 'react';
 import { useShift } from '@/hooks/useShift';
 import { isShiftActive } from '@/lib/activeShift';
 import {
+  ensureWatcherMode,
   registerShiftGeoTapHandler,
-  startShiftWatcher,
-  stopShiftWatcher,
 } from '@/lib/shiftGeoWatcher';
 
 export function useShiftGeoWatcher(): void {
@@ -33,7 +33,10 @@ export function useShiftGeoWatcher(): void {
   useEffect(() => {
     const sync = () => {
       const active = serverActive || isShiftActive();
-      void (active ? startShiftWatcher() : stopShiftWatcher());
+      // No shift: idle mode keeps a low-frequency foreground service alive
+      // for the whole app session (cold-start prevention), not stopped —
+      // see docs/superpowers/specs/2026-09-20-idle-foreground-service-design.md.
+      void ensureWatcherMode(active ? 'shift' : 'idle');
     };
 
     sync();
