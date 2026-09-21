@@ -7,6 +7,7 @@ import { Toaster as Sonner } from '@/components/ui/sonner';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { I18nProvider } from '@/contexts/I18nContext';
 import { useAnonAuth } from '@/hooks/useAnonAuth';
+import { useStoragePersistence } from '@/hooks/useStoragePersistence';
 import * as Sentry from '@sentry/react';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Loader2 } from 'lucide-react';
@@ -207,6 +208,9 @@ function AppContent() {
   // Fire-and-forget: kicks off the anon sign-in handshake and its own
   // silent background retries. Never gates rendering — see useAnonAuth.ts.
   useAnonAuth();
+  // Requests persistent storage so the anon session (IndexedDB/localStorage)
+  // isn't evicted under memory pressure — see storagePersistence.ts.
+  useStoragePersistence();
   // Hide NearestHotspot on Today screen since hero card already shows best zone + distance
   const showNearestHotspot =
     location.pathname !== '/today' &&
