@@ -1,3 +1,4 @@
+import { createNativeStorage } from '@/lib/nativeStorage';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from './types';
 
@@ -79,8 +80,11 @@ export const supabase =
   SUPABASE_URL && SUPABASE_ANON_KEY
     ? createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
         auth: {
-          storage:
-            typeof localStorage !== 'undefined' ? localStorage : undefined,
+          // Native builds: SharedPreferences via @capacitor/preferences,
+          // immune to the WebView storage eviction under memory pressure
+          // that was silently resetting the anonymous driver identity. Web
+          // builds: unchanged, plain localStorage. See nativeStorage.ts.
+          storage: createNativeStorage(),
           persistSession: true,
           autoRefreshToken: true,
         },
