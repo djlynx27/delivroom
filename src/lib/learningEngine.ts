@@ -561,6 +561,16 @@ export function deriveLearningInsights(
   const predictions: PredictionRecord[] = [];
 
   for (const trip of sortedTrips) {
+    // A trip without a resolved zone has no valid FK target in `zones` —
+    // the 'unknown' fallback in getTripLearningContext is fine for in-memory
+    // stats but must never reach emaMap/beliefMap, since those get upserted
+    // straight into ema_patterns/zone_beliefs and 'unknown' isn't a real
+    // zones.id (confirmed live: 22 zone-less trips broke every "Sync
+    // Supabase" attempt with a zone_id FK violation, 2026-09-20).
+    if (!trip.zone_id) {
+      continue;
+    }
+
     const context = getTripLearningContext(trip);
     if (context.hours <= 0) {
       continue;
