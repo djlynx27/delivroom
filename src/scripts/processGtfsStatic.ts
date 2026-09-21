@@ -81,8 +81,9 @@ async function readZipTextEntries(
 // comma-split.
 function parseCsv(text: string): Record<string, string>[] {
   const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((l) => l.length > 0);
-  if (lines.length === 0) return [];
-  const headers = lines[0].split(',').map((h) => h.trim());
+  const headerLine = lines[0];
+  if (headerLine === undefined) return [];
+  const headers = headerLine.split(',').map((h) => h.trim());
   return lines.slice(1).map((line) => {
     const cells = line.split(',');
     return Object.fromEntries(headers.map((h, i) => [h, (cells[i] ?? '').trim()]));
@@ -123,12 +124,17 @@ function parseAgencyId(agencyCsv: string | undefined): string | null {
 function parseMajorStops(stopsCsv: string): RawStop[] {
   return parseCsv(stopsCsv)
     .filter((row) => MAJOR_STOP_PATTERN.test(row.stop_name ?? ''))
-    .map((row) => ({
-      stopId: row.stop_id,
-      name: row.stop_name,
-      latitude: Number.parseFloat(row.stop_lat),
-      longitude: Number.parseFloat(row.stop_lon),
-    }))
+    .flatMap((row): RawStop[] => {
+      if (!row.stop_id || !row.stop_name) return [];
+      return [
+        {
+          stopId: row.stop_id,
+          name: row.stop_name,
+          latitude: Number.parseFloat(row.stop_lat ?? ''),
+          longitude: Number.parseFloat(row.stop_lon ?? ''),
+        },
+      ];
+    })
     .filter((s) => Number.isFinite(s.latitude) && Number.isFinite(s.longitude));
 }
 
@@ -163,8 +169,10 @@ function groupAndMapStops(agencyId: string, stops: readonly RawStop[], zones: re
     const match = nearestZone(latitude, longitude, zones);
     const inRange = match && match.distanceM <= MAX_ZONE_DISTANCE_M;
 
+    // group is never empty: byCanonicalName only ever holds groups that
+    // received at least one push (see the loop above).
     rows.push({
-      stopId: group[0].stopId,
+      stopId: group[0]!.stopId,
       stopIds: group.map((s) => s.stopId),
       name: canonicalName,
       agencyId,

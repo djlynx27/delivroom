@@ -322,7 +322,6 @@ export function ShiftTracker() {
   useEffect(() => {
     const onShiftChanged = () => {
       setActiveShift(loadActiveShift());
-      setNow(new Date());
     };
     window.addEventListener('delivroom:shift-changed', onShiftChanged);
     return () =>

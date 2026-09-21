@@ -100,10 +100,19 @@ export function findQuietestQuadrant(grid: DriverGrid): {
   count: number;
 } {
   let bestIndex = 0;
+  let bestCount = grid[0] ?? 0;
   for (let i = 1; i < grid.length; i++) {
-    if (grid[i] < grid[bestIndex]) bestIndex = i;
+    const count = grid[i];
+    if (count !== undefined && count < bestCount) {
+      bestIndex = i;
+      bestCount = count;
+    }
   }
-  return { quadrant: QUADRANT_LABELS[bestIndex], index: bestIndex, count: grid[bestIndex] };
+  return {
+    quadrant: QUADRANT_LABELS[bestIndex] ?? 'center',
+    index: bestIndex,
+    count: bestCount,
+  };
 }
 
 function clampOffsetMeters(distanceMeters: number): number {

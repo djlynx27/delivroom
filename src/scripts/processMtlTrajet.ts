@@ -88,7 +88,7 @@ function makeAggregator(zones: readonly ZoneRow[]) {
 
     const agg = byZone.get(match.zone.id);
     if (!agg) return; // unreachable: byZone is seeded from the same `zones` list nearestZone matches against
-    agg.hourlyDepartures[hour]++;
+    agg.hourlyDepartures[hour] = (agg.hourlyDepartures[hour] ?? 0) + 1;
     agg.totalDepartures++;
     matched++;
   }

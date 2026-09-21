@@ -5,6 +5,7 @@ import {
 import type { Zone } from '@/hooks/useSupabase';
 import type { TripWithZone } from '@/hooks/useTrips';
 import { makeLocalDate } from '@/test/dateTestUtils';
+import { TRIP_DEFAULTS } from '@/test/tripFixtures';
 import { describe, expect, it } from 'vitest';
 
 const zones: Zone[] = [
@@ -29,6 +30,7 @@ const zones: Zone[] = [
 ];
 
 const completeTrip: TripWithZone = {
+  ...TRIP_DEFAULTS,
   id: 'trip-1',
   created_at: '2026-03-20T00:00:00.000Z',
   distance_km: 12,

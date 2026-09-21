@@ -42,7 +42,7 @@ function formatUpdated(iso: string, locale: string): string {
 /** Default pick's price (board.slots[0]) — the reference every other card's
  * detour badge is judged against. Pulled out of GasScreen to keep the
  * optional-chaining branches off its own complexity count. */
-function getDefaultPickPrice(board: GasBoard | undefined): number | null {
+function getDefaultPickPrice(board: GasBoard | null | undefined): number | null {
   return board?.slots[0]?.station.price ?? null;
 }
 

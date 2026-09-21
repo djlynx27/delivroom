@@ -54,7 +54,7 @@ describe('ensureWatcherMode', () => {
   it('starts an idle watcher on first call', async () => {
     await ensureWatcherMode('idle');
     expect(addWatcher).toHaveBeenCalledTimes(1);
-    expect(addWatcher.mock.calls[0][0]).toMatchObject({ distanceFilter: 250 });
+    expect(addWatcher.mock.calls[0]?.[0]).toMatchObject({ distanceFilter: 250 });
     expect(removeWatcher).not.toHaveBeenCalled();
   });
 
@@ -70,7 +70,7 @@ describe('ensureWatcherMode', () => {
     await ensureWatcherMode('shift');
     expect(removeWatcher).toHaveBeenCalledWith({ id: 'watcher-1' });
     expect(addWatcher).toHaveBeenCalledTimes(2);
-    expect(addWatcher.mock.calls[1][0]).toMatchObject({ distanceFilter: 30 });
+    expect(addWatcher.mock.calls[1]?.[0]).toMatchObject({ distanceFilter: 30 });
   });
 
   it('reconciles a stale persisted watcher id even for a same-mode cold boot', async () => {

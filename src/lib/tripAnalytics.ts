@@ -283,6 +283,7 @@ export function aggregateTripAnalytics(
       revenue: metrics.revenue,
       rides: metrics.rides,
       hours: metrics.hours,
+      revenuePerHour: metrics.revenuePerHour,
     };
   });
   const platformSeries = buildRankedSeries(

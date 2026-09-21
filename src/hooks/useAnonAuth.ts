@@ -40,15 +40,16 @@ async function signInAnonymouslyWithRetry(): Promise<Session | null> {
     const { data: signedIn, error } = await supabase.auth.signInAnonymously();
     if (!error) return signedIn.session;
 
-    if (attempt >= SIGN_IN_RETRY_DELAYS_MS.length) {
+    const delayMs = SIGN_IN_RETRY_DELAYS_MS[attempt];
+    if (delayMs === undefined) {
       console.warn('[useAnonAuth] signInAnonymously failed after retries', error);
       return null;
     }
     console.warn(
-      `[useAnonAuth] signInAnonymously failed, retrying in ${SIGN_IN_RETRY_DELAYS_MS[attempt]}ms`,
+      `[useAnonAuth] signInAnonymously failed, retrying in ${delayMs}ms`,
       error,
     );
-    await sleep(SIGN_IN_RETRY_DELAYS_MS[attempt]);
+    await sleep(delayMs);
   }
 }
 

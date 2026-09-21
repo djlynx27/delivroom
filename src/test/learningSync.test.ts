@@ -18,6 +18,7 @@ import {
   syncShiftLearning,
 } from '@/lib/learningSync';
 import { DEFAULT_WEIGHTS } from '@/lib/scoringEngine';
+import { TRIP_DEFAULTS } from '@/test/tripFixtures';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -60,6 +61,7 @@ function makeInsertChain(error: Error | null = null, sessionId = 42) {
 
 const trips: TripWithZone[] = [
   {
+    ...TRIP_DEFAULTS,
     id: '1',
     created_at: '2026-03-15T22:00:00.000Z',
     distance_km: 12,
@@ -77,6 +79,7 @@ const trips: TripWithZone[] = [
     zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
   },
   {
+    ...TRIP_DEFAULTS,
     id: '2',
     created_at: '2026-03-16T07:00:00.000Z',
     distance_km: 10,
@@ -346,6 +349,7 @@ describe('buildUserPingMatchRpcArgs', () => {
 
 describe('encodeContextVector — platform and zone type branches', () => {
   const makeTrip = (overrides: Partial<TripWithZone>): TripWithZone => ({
+    ...TRIP_DEFAULTS,
     id: 't1',
     created_at: '2026-03-15T22:00:00.000Z',
     distance_km: 10,
@@ -427,6 +431,7 @@ describe('encodeContextVector — platform and zone type branches', () => {
 describe('buildShiftPersistencePayload — date filtering', () => {
   const trips: TripWithZone[] = [
     {
+      ...TRIP_DEFAULTS,
       id: '1',
       created_at: '2026-03-15T22:00:00.000Z',
       distance_km: 12,
@@ -444,6 +449,7 @@ describe('buildShiftPersistencePayload — date filtering', () => {
       zones: { name: 'Centre Bell', current_score: 60, type: 'événements' },
     },
     {
+      ...TRIP_DEFAULTS,
       id: '2',
       created_at: '2026-03-18T07:00:00.000Z',
       distance_km: 8,
@@ -493,6 +499,7 @@ describe('buildShiftPersistencePayload — date filtering', () => {
 
 const sharedTrips: TripWithZone[] = [
   {
+    ...TRIP_DEFAULTS,
     id: 'a1',
     created_at: '2026-03-15T22:00:00.000Z',
     distance_km: 12,

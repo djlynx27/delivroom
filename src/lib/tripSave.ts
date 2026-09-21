@@ -79,7 +79,7 @@ export function resolveNextNavigationWaypoint(
     return waypoints.find((w) => w.type === 'pickup') ?? null;
   }
   const stops = waypoints.filter((w) => w.type === 'stop');
-  if (stopsVisited < stops.length) return stops[stopsVisited];
+  if (stopsVisited < stops.length) return stops[stopsVisited] ?? null;
   return waypoints.find((w) => w.type === 'dropoff') ?? null;
 }
 

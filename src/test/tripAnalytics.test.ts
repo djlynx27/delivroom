@@ -6,10 +6,12 @@ import {
   summarizeTrackedSessions,
   summarizeTrips,
 } from '@/lib/tripAnalytics';
+import { SESSION_DEFAULTS, TRIP_DEFAULTS } from '@/test/tripFixtures';
 import { describe, expect, it } from 'vitest';
 
 const sessions = [
   {
+    ...SESSION_DEFAULTS,
     id: 1,
     created_at: '2026-03-15T12:10:00',
     started_at: '2026-03-15T08:00:00',
@@ -22,6 +24,7 @@ const sessions = [
     user_id: null,
   },
   {
+    ...SESSION_DEFAULTS,
     id: 2,
     created_at: '2026-03-16T16:10:00',
     started_at: '2026-03-16T12:00:00',
@@ -37,6 +40,7 @@ const sessions = [
 
 const trips: TripWithZone[] = [
   {
+    ...TRIP_DEFAULTS,
     id: '1',
     created_at: '2026-03-15T08:00:00',
     distance_km: 12,
@@ -54,6 +58,7 @@ const trips: TripWithZone[] = [
     zones: { name: 'Downtown' },
   },
   {
+    ...TRIP_DEFAULTS,
     id: '2',
     created_at: '2026-03-16T18:00:00',
     distance_km: 9,
@@ -71,6 +76,7 @@ const trips: TripWithZone[] = [
     zones: { name: 'Plateau' },
   },
   {
+    ...TRIP_DEFAULTS,
     id: '3',
     created_at: '2026-03-16T22:00:00',
     distance_km: 6,
@@ -133,6 +139,7 @@ describe('trip analytics', () => {
       revenue: 0,
       rides: 0,
       hours: 0,
+      revenuePerHour: 0,
     });
   });
 
@@ -188,6 +195,7 @@ describe('trip analytics', () => {
     // started_at is NOT NULL in the real schema — this simulates a corrupt
     // row defensively, which is exactly what this test exercises.
     const incompleteSession = {
+      ...SESSION_DEFAULTS,
       id: 99,
       created_at: '2026-03-17T10:00:00',
       started_at: null as unknown as string,
@@ -214,6 +222,7 @@ describe('trip analytics', () => {
   it('skips sessions that do not overlap the query window', () => {
     // Session ran 08:00–12:00, query window is 14:00–20:00 → no overlap
     const pastSession = {
+      ...SESSION_DEFAULTS,
       id: 98,
       created_at: '2026-03-17T08:00:00',
       started_at: '2026-03-17T08:00:00',

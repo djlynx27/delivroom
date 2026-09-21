@@ -812,10 +812,9 @@ export function useDemandScores(
       // (the only screen this app now scrapes -- Wait Times/Recent Demand
       // are deliberately not captured, see docs/ingest-lyft-screenshots-macrodroid.md)
       // falls back to a lighter competition-only nudge.
-      const hasFullRealtimeSignal =
+      const realtimeCheckedScore =
         lyftSignal?.estimatedWaitMin != null &&
-        lyftSignal?.nearbyDriversCount != null;
-      const realtimeCheckedScore = hasFullRealtimeSignal
+        lyftSignal?.nearbyDriversCount != null
         ? applyLyftRealtimeBoost(realityCheckedScore, {
             demandScore: lyftSignal.demandLevel,
             waitTimeMin: lyftSignal.estimatedWaitMin,

@@ -65,7 +65,16 @@ export async function findExistingFileNames(
     console.error('[screenshotDedup] bulk filename lookup failed:', error);
     return new Set();
   }
-  return new Set((data ?? []).map((r) => fileKey(r.file_name, r.file_size_bytes)));
+  const hasNameAndSize = (
+    r: { file_name: string | null; file_size_bytes: number | null }
+  ): r is { file_name: string; file_size_bytes: number } =>
+    r.file_name != null && r.file_size_bytes != null;
+
+  return new Set(
+    (data ?? [])
+      .filter(hasNameAndSize)
+      .map((r) => fileKey(r.file_name, r.file_size_bytes))
+  );
 }
 
 export function fileKey(name: string, size: number): string {

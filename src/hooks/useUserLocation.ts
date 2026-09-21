@@ -258,7 +258,7 @@ function getSharedLocationSnapshot(): SharedLocationState {
  * shared native watchPosition (see above) already pushes updates as the fix
  * changes, so a per-consumer polling interval on top of it was redundant. */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function useUserLocation(intervalMs = 10000): UserLocationResult {
+export function useUserLocation(_intervalMs = 10000): UserLocationResult {
   const state = useSyncExternalStore(subscribeToSharedLocation, getSharedLocationSnapshot);
   return {
     location: state.location,

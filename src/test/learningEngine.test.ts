@@ -4,10 +4,12 @@ import {
   derivePostShiftSummary,
 } from '@/lib/learningEngine';
 import { DEFAULT_WEIGHTS } from '@/lib/scoringEngine';
+import { TRIP_DEFAULTS } from '@/test/tripFixtures';
 import { describe, expect, it } from 'vitest';
 
 const trips: TripWithZone[] = [
   {
+    ...TRIP_DEFAULTS,
     id: '1',
     created_at: '2026-03-15T22:00:00.000Z',
     distance_km: 12,
@@ -25,6 +27,7 @@ const trips: TripWithZone[] = [
     zones: { name: 'Centre Bell', current_score: 60 },
   },
   {
+    ...TRIP_DEFAULTS,
     id: '2',
     created_at: '2026-03-16T07:00:00.000Z',
     distance_km: 10,
@@ -42,6 +45,7 @@ const trips: TripWithZone[] = [
     zones: { name: 'Station Berri-UQAM', current_score: 53 },
   },
   {
+    ...TRIP_DEFAULTS,
     id: '3',
     created_at: '2026-03-17T22:00:00.000Z',
     distance_km: 13,
@@ -190,6 +194,7 @@ function makeTrip(
   const startedAt = new Date(date);
   const endedAt = new Date(startedAt.getTime() + durationHours * 3_600_000);
   return {
+    ...TRIP_DEFAULTS,
     id,
     created_at: date,
     distance_km: 10,
@@ -307,6 +312,7 @@ function makeDeadheadTrip(
   const startedAt = new Date(date);
   const endedAt = new Date(startedAt.getTime() + 3_600_000);
   return {
+    ...TRIP_DEFAULTS,
     id,
     created_at: date,
     distance_km: tripDistanceKm,
@@ -371,6 +377,7 @@ describe('deriveLearningInsights — time-of-day window on topLearnedZones', () 
     const startedAt = new Date(isoStartedAt);
     const endedAt = new Date(startedAt.getTime() + 3_600_000);
     return {
+      ...TRIP_DEFAULTS,
       id,
       created_at: isoStartedAt,
       distance_km: 10,
@@ -441,6 +448,7 @@ describe('deriveLearningInsights — topLearnedZones Bayesian smoothing', () => 
     startedAt.setUTCDate(startedAt.getUTCDate() + weekOffset * 7);
     const endedAt = new Date(startedAt.getTime() + durationMin * 60_000);
     return {
+      ...TRIP_DEFAULTS,
       id,
       created_at: startedAt.toISOString(),
       distance_km: 8,
