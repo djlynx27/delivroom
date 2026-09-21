@@ -8,7 +8,7 @@ import {
 } from '@/hooks/useEvents';
 import { useStmTransit } from '@/hooks/useStmTransit';
 import type { Zone } from '@/hooks/useSupabase';
-import { useZones } from '@/hooks/useSupabase';
+import { useZoneBeliefs, useZones } from '@/hooks/useSupabase';
 import {
   getRelevantTmEvents,
   useTicketmasterEvents,
@@ -36,7 +36,10 @@ import { getObservedZoneScore } from '@/lib/observedScore';
 import {
   applyLyftRealtimeBoost,
   applyNearbyDriversCompetitionNudge,
+  applyTemporalWindowFactor,
+  computeExplorationBonus,
   DEMAND_WINDOW_MINUTES,
+  findZoneBelief,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
   type DemandWindow,
@@ -67,6 +70,7 @@ export interface ScoreFactors {
   habitSimilarity?: number;
   habitSuccessRate?: number;
   realityCapPoints?: number;
+  explorationBonusPoints?: number;
 }
 
 interface UseDemandScoresOptions {
@@ -203,6 +207,8 @@ export function useDemandScores(
     isLoading: zonesLoading,
     dataUpdatedAt: zonesUpdatedAt,
   } = useZones(cityIds);
+  const zoneIds = useMemo(() => zones.map((zone) => zone.id), [zones]);
+  const { data: zoneBeliefs = [] } = useZoneBeliefs(zoneIds);
   const { data: weather } = useWeather(cityId);
   const { data: events = [] } = useEvents(cityId);
   const { data: tmEvents = [] } = useTicketmasterEvents(cityId);
@@ -822,7 +828,28 @@ export function useDemandScores(
             )
           : realityCheckedScore;
 
-      boostedScores.set(zone.id, realtimeCheckedScore);
+      // Applied here, after every other adjustment and regardless of
+      // whether the base score above came from the DB cron
+      // (recalculate_zone_scores) or the client fallback
+      // (scoreAllZonesWithLearning) — this is the one point both paths
+      // converge, so it's the only place these two need to live to
+      // actually affect what the driver sees.
+      const temporalAdjustedScore = applyTemporalWindowFactor(
+        realtimeCheckedScore,
+        zone,
+        now
+      );
+      const belief = findZoneBelief(zoneBeliefs, zone.id, now);
+      const explorationBonusPoints = computeExplorationBonus(
+        temporalAdjustedScore,
+        belief?.posteriorVariance
+      );
+      const finalScore = Math.min(
+        100,
+        temporalAdjustedScore + explorationBonusPoints
+      );
+
+      boostedScores.set(zone.id, finalScore);
       boostedFactors.set(zone.id, {
         ...(boostedFactors.get(zone.id) ?? {
           hasWeatherBoost: false,
@@ -838,6 +865,7 @@ export function useDemandScores(
         habitSimilarity: habitSignal?.averageSimilarity,
         habitSuccessRate: habitSignal?.averageSuccessScore,
         realityCapPoints: Math.max(0, habitBoost.score - realityCheckedScore),
+        explorationBonusPoints: Math.round(explorationBonusPoints * 10) / 10,
       });
     }
 
@@ -845,6 +873,7 @@ export function useDemandScores(
   }, [
     zones,
     dbScores,
+    zoneBeliefs,
     now,
     weatherCondition,
     eventBoosts,

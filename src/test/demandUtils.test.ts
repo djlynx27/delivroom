@@ -208,6 +208,9 @@ const MOCK_ZONE: Zone = {
   current_score: 50,
   territory: null,
   updated_at: '',
+  event_id: null,
+  is_temporal: false,
+  active_windows: [],
 };
 
 describe('createSimulatedSlotForTime', () => {

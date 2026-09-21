@@ -4,6 +4,7 @@ import type {
   TablesInsert,
   TablesUpdate,
 } from '@/integrations/supabase/types';
+import type { ZoneBelief } from '@/lib/scoringEngine';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 export type City = Tables<'cities'>;
@@ -93,6 +94,33 @@ export function useZones(cityIds: string | string[]) {
     staleTime: 5 * 60 * 1000, // consider fresh for 5 min
     refetchInterval: 5 * 60 * 1000, // auto-refresh every 5 min
     refetchOnWindowFocus: true, // re-fetch when user returns to tab
+  });
+}
+
+// Feeds computeExplorationBonus in scoringEngine.ts — zone_beliefs is
+// written on every learning sync (learningSync.ts) but was otherwise never
+// read back; this is that read path.
+export function useZoneBeliefs(zoneIds: string[]) {
+  return useQuery({
+    queryKey: ['zone_beliefs', ...zoneIds],
+    queryFn: async (): Promise<ZoneBelief[]> => {
+      const { data, error } = await supabase
+        .from('zone_beliefs')
+        .select('zone_id, day_of_week, hour_block, prior_mean, prior_variance, observation_count')
+        .in('zone_id', zoneIds);
+      if (error) throw error;
+      return (data ?? []).map((row) => ({
+        zoneId: row.zone_id,
+        dayOfWeek: row.day_of_week,
+        slotIndex: row.hour_block,
+        posteriorMean: row.prior_mean,
+        posteriorVariance: row.prior_variance,
+        observationCount: row.observation_count,
+      }));
+    },
+    enabled: zoneIds.length > 0,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
   });
 }
 

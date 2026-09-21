@@ -22,6 +22,9 @@ const zones: Zone[] = [
     address: null,
     category: null,
     territory: null,
+    event_id: null,
+    is_temporal: false,
+    active_windows: [],
   },
 ];
 

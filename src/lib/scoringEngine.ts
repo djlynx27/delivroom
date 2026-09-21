@@ -56,6 +56,20 @@ export interface ScoringContext {
   demandWindow?: DemandWindow;
 }
 
+/** Mirrors learningEngine.ts's ZoneBelief shape without importing it —
+ * learningEngine.ts is React/Vite-side application logic (imports
+ * useTrips), while this file is the pure scoring core also consumed by
+ * tests; duplicating this one small interface avoids a layering
+ * inversion for a single shared shape. */
+export interface ZoneBelief {
+  zoneId: string;
+  dayOfWeek: number;
+  slotIndex: number;
+  posteriorMean: number;
+  posteriorVariance: number;
+  observationCount: number;
+}
+
 // ── Market Radar: demand time-window filter ───────────────────────────────
 export type DemandWindow = '5m' | '30m' | '1h';
 
@@ -113,12 +127,16 @@ const BASE_SCORES: Record<string, number> = {
 //   17:00–19:00: metro 70-85, gare centrale 80
 //   19:00–23:00: nightlife 75-90, events 80-95
 //   23:00–00:00: nightlife 70-85, airport 55
-interface TimeRule {
+/** Shared by TimeRule and ActiveWindow so timeInRange/dayMatches work on both. */
+interface TimeWindow {
   days: number[]; // 0=Sun..6=Sat, empty = any day
   startHour: number;
   startMin: number;
   endHour: number;
   endMin: number;
+}
+
+interface TimeRule extends TimeWindow {
   multipliers: Record<string, number>;
 }
 
@@ -244,10 +262,82 @@ const TIME_RULES: TimeRule[] = [
   },
 ];
 
-// Medical shift changes - special handling
-const MEDICAL_SHIFT_HOURS = [7, 15, 19, 23];
+// ── Temporal (POI) zones ──────────────────────────────────────────────
+// Data-driven replacement for the old hardcoded MEDICAL_SHIFT_HOURS
+// special-case: any zone tagged is_temporal gets its active_windows
+// applied instead of the static TIME_RULES/BASE_SCORES curve alone, so a
+// hospital, CEGEP, or school can be provisioned (src/scripts/addZone.ts)
+// without touching this file. See the 20260921120000 migration for the
+// CHUM/Cité-de-la-Santé windows that preserve the old behavior exactly.
+export interface ActiveWindow extends TimeWindow {
+  weight_multiplier: number;
+}
 
-function timeInRange(hour: number, min: number, rule: TimeRule): boolean {
+// Outside every active window, a temporal zone's score is suppressed so it
+// doesn't pollute the heatmap outside its real relevance window (same
+// shape as OFF_PEAK_COMMERCIAL_PENALTY below, applied via zone tagging
+// instead of zone.type).
+const TEMPORAL_OFF_WINDOW_PENALTY = 0.3;
+
+function isActiveWindow(value: unknown): value is ActiveWindow {
+  if (!value || typeof value !== 'object') return false;
+  const w = value as Record<string, unknown>;
+  return (
+    Array.isArray(w.days) &&
+    w.days.every((d) => typeof d === 'number') &&
+    typeof w.startHour === 'number' &&
+    typeof w.startMin === 'number' &&
+    typeof w.endHour === 'number' &&
+    typeof w.endMin === 'number' &&
+    typeof w.weight_multiplier === 'number'
+  );
+}
+
+export function parseActiveWindows(value: unknown): ActiveWindow[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(isActiveWindow);
+}
+
+function getActiveWindowMultiplier(
+  windows: ActiveWindow[],
+  hour: number,
+  min: number,
+  dayOfWeek: number
+): number | null {
+  for (const window of windows) {
+    if (dayMatches(dayOfWeek, window) && timeInRange(hour, min, window)) {
+      return window.weight_multiplier;
+    }
+  }
+  return null;
+}
+
+/**
+ * Applied once, at the single point every score source converges
+ * (useDemandScores.ts's universal post-processing loop) — a temporal
+ * zone's score is boosted inside its active window and suppressed
+ * (TEMPORAL_OFF_WINDOW_PENALTY) outside it, regardless of whether the
+ * base score came from the DB cron (recalculate_zone_scores) or the
+ * client fallback (scoreAllZonesWithLearning). Non-temporal zones pass
+ * through unchanged.
+ */
+export function applyTemporalWindowFactor(
+  score: number,
+  zone: { is_temporal?: boolean | null; active_windows?: unknown },
+  now: Date
+): number {
+  if (!zone.is_temporal) return score;
+  const windows = parseActiveWindows(zone.active_windows);
+  const multiplier = getActiveWindowMultiplier(
+    windows,
+    now.getHours(),
+    now.getMinutes(),
+    now.getDay()
+  );
+  return score * (multiplier !== null ? multiplier : TEMPORAL_OFF_WINDOW_PENALTY);
+}
+
+function timeInRange(hour: number, min: number, rule: TimeWindow): boolean {
   const t = hour * 60 + min;
   const s = rule.startHour * 60 + rule.startMin;
   const e = rule.endHour * 60 + rule.endMin;
@@ -256,7 +346,7 @@ function timeInRange(hour: number, min: number, rule: TimeRule): boolean {
   return t >= s && t < e;
 }
 
-function dayMatches(dayOfWeek: number, rule: TimeRule): boolean {
+function dayMatches(dayOfWeek: number, rule: TimeWindow): boolean {
   if (rule.days.length === 0) return true;
   if (rule.days.includes(dayOfWeek)) return true;
   // Midnight-crossing rules (e.g. Fri/Sat 22:00–03:00) logically belong to the
@@ -285,6 +375,11 @@ interface ZoneProfile {
    * standard retail closing. */
   isClosed?: (hour: number, dayOfWeek: number) => boolean;
 }
+
+// Unrelated to the deleted MEDICAL_SHIFT_HOURS multiplier block above (now
+// replaced by is_temporal/active_windows) — this is the separate named-curve
+// shape CHUM/Cité-de-la-Santé's ZONE_PROFILES entries blend in below.
+const MEDICAL_SHIFT_CURVE_HOURS = [7, 15, 19, 23];
 
 const ZONE_PROFILES: Record<string, ZoneProfile> = {
   // MONTRÉAL
@@ -318,7 +413,7 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
   },
   'CHUM Hôpital': {
     pattern: (h) => {
-      if (MEDICAL_SHIFT_HOURS.includes(h)) return 7;
+      if (MEDICAL_SHIFT_CURVE_HOURS.includes(h)) return 7;
       return 3;
     },
   },
@@ -382,7 +477,7 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
   },
   'Hôpital Cité-de-la-Santé': {
     pattern: (h) => {
-      if (MEDICAL_SHIFT_HOURS.includes(h)) return 7;
+      if (MEDICAL_SHIFT_CURVE_HOURS.includes(h)) return 7;
       return 3;
     },
   },
@@ -434,6 +529,8 @@ export interface ScoreFactors {
   learningSimilarity?: number;
   /** Revenu moyen/h historique sur des contextes similaires */
   learningAvgEarningsPerHour?: number;
+  /** Points ajoutés par le bonus d'exploration Bayésien (zone_beliefs) */
+  explorationBonusPoints?: number;
 }
 
 function clamp01(value: number): number {
@@ -500,19 +597,6 @@ function computeTimePatternBase(
   }
 
   baseScore *= bestMultiplier;
-
-  if (zone.type === 'médical') {
-    for (const shiftHour of MEDICAL_SHIFT_HOURS) {
-      const diff = Math.abs(hour - shiftHour);
-      if (
-        diff === 0 ||
-        (diff === 1 && (shiftHour > hour ? min >= 30 : min <= 30))
-      ) {
-        baseScore *= 1.3;
-        break;
-      }
-    }
-  }
 
   const profile = ZONE_PROFILES[zone.name];
   if (profile) {
@@ -690,6 +774,8 @@ export function calculateDemandFactors(
     latitude?: number;
     longitude?: number;
     current_score?: number | null;
+    is_temporal?: boolean | null;
+    active_windows?: unknown;
   },
   now: Date,
   weather: WeatherCondition | null,
@@ -759,6 +845,53 @@ export function getWeatherMultiplier(weather: WeatherCondition | null): number {
   return 1.0;
 }
 
+// ── Bayesian exploration bonus ────────────────────────────────────────
+// zone_beliefs (posterior mean/variance per zone/day/15-min-slot) is
+// written on every learning sync (learningSync.ts) but was never read
+// back — the engine always exploited the best-known zone and never
+// nudged toward an under-sampled one. This closes the loop: high
+// variance (few/no recent observations for this exact slot) raises the
+// bonus, but it's capped as a PERCENTAGE of the zone's own pre-bonus
+// score (not a flat point cap), so an unknown zone can never leapfrog a
+// genuinely strong, well-known one — a 90-scoring hotspot allows at most
+// +13.5, a 40-scoring unknown zone allows at most +6.
+export const EXPLORATION_BONUS_MAX_PCT = 0.15;
+const EXPLORATION_VARIANCE_SCALE = 0.35;
+// Mirrors learningEngine.ts's DEFAULT_PRIOR_VARIANCE — an unseen zone
+// (no belief row at all) gets the same "wide prior, max uncertainty"
+// treatment a fresh zone_beliefs row would have.
+const DEFAULT_PRIOR_VARIANCE = 100;
+
+const SLOTS_PER_HOUR = 4;
+
+function getSlotIndex(date: Date): number {
+  return date.getHours() * SLOTS_PER_HOUR + Math.floor(date.getMinutes() / 15);
+}
+
+export function computeExplorationBonus(
+  preBonusScore: number,
+  posteriorVariance: number | undefined
+): number {
+  const variance = posteriorVariance ?? DEFAULT_PRIOR_VARIANCE;
+  const rawBonus = Math.sqrt(Math.max(0, variance)) * EXPLORATION_VARIANCE_SCALE;
+  const cap = Math.max(0, preBonusScore) * EXPLORATION_BONUS_MAX_PCT;
+  return Math.min(rawBonus, cap);
+}
+
+export function findZoneBelief(
+  beliefs: ZoneBelief[] | undefined,
+  zoneId: string | null | undefined,
+  now: Date
+): ZoneBelief | undefined {
+  if (!beliefs || !zoneId) return undefined;
+  const dayOfWeek = now.getDay();
+  const slotIndex = getSlotIndex(now);
+  return beliefs.find(
+    (b) =>
+      b.zoneId === zoneId && b.dayOfWeek === dayOfWeek && b.slotIndex === slotIndex
+  );
+}
+
 // ── Main scoring function ─────────────────────────────────────────────
 export function computeDemandScore(
   zone: {
@@ -768,6 +901,8 @@ export function computeDemandScore(
     latitude?: number;
     longitude?: number;
     current_score?: number | null;
+    is_temporal?: boolean | null;
+    active_windows?: unknown;
   },
   now: Date,
   weather: WeatherCondition | null,

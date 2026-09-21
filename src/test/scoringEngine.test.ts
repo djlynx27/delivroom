@@ -1,17 +1,23 @@
 import type { ZoneHistory } from '@/lib/aiAgents';
 import type { Zone } from '@/hooks/useSupabase';
 import {
+  applyTemporalWindowFactor,
   calculateDemandFactors,
   calculateWeightedDemandScore,
   computeDemandScore,
   computeEventBoostPoints,
+  computeExplorationBonus,
   DEFAULT_WEIGHTS,
+  EXPLORATION_BONUS_MAX_PCT,
+  findZoneBelief,
   getWeatherMultiplier,
   reweightZonesByDriverMode,
   scoreAllZones,
   scoreAllZonesWithLearning,
   type ActiveEventBoost,
+  type ActiveWindow,
   type WeatherCondition,
+  type ZoneBelief,
 } from '@/lib/scoringEngine';
 import { makeLocalDate } from '@/test/dateTestUtils';
 import { describe, expect, it } from 'vitest';
@@ -170,6 +176,9 @@ describe('scoreAllZones', () => {
       category: null,
       current_score: null,
       territory: null,
+      event_id: null,
+      is_temporal: false,
+      active_windows: [],
     },
     {
       id: 'z2',
@@ -185,6 +194,9 @@ describe('scoreAllZones', () => {
       category: null,
       current_score: null,
       territory: null,
+      event_id: null,
+      is_temporal: false,
+      active_windows: [],
     },
   ];
 
@@ -240,6 +252,9 @@ describe('scoreAllZonesWithLearning', () => {
       category: null,
       current_score: null,
       territory: null,
+      event_id: null,
+      is_temporal: false,
+      active_windows: [],
     },
     {
       id: 'z2',
@@ -255,6 +270,9 @@ describe('scoreAllZonesWithLearning', () => {
       category: null,
       current_score: null,
       territory: null,
+      event_id: null,
+      is_temporal: false,
+      active_windows: [],
     },
   ];
 
@@ -1262,5 +1280,160 @@ describe('computeEventBoostPoints — Gaussian decay', () => {
       },
     ]);
     expect(points).toBe(0);
+  });
+});
+
+describe('computeExplorationBonus', () => {
+  it('caps the bonus at EXPLORATION_BONUS_MAX_PCT of the pre-bonus score for a low-scoring unknown zone', () => {
+    const preBonusScore = 20;
+    const bonus = computeExplorationBonus(preBonusScore, 100); // 100 = DEFAULT_PRIOR_VARIANCE (unseen zone)
+    expect(bonus).toBeCloseTo(preBonusScore * EXPLORATION_BONUS_MAX_PCT, 5);
+  });
+
+  it('never exceeds EXPLORATION_BONUS_MAX_PCT of the pre-bonus score, even at max known variance', () => {
+    const preBonusScore = 90; // a real hotspot's score
+    const bonus = computeExplorationBonus(preBonusScore, 100);
+    expect(bonus).toBeLessThanOrEqual(preBonusScore * EXPLORATION_BONUS_MAX_PCT);
+    // A hotspot at 90 can gain at most +13.5 — nowhere near enough to be
+    // eclipsed by an unknown zone starting from a much lower base score.
+    expect(bonus).toBeLessThan(13.5);
+  });
+
+  it('returns ~0 for a well-known zone (variance near 0)', () => {
+    const bonus = computeExplorationBonus(90, 0.1);
+    expect(bonus).toBeLessThan(0.5);
+  });
+
+  it('treats a missing belief (undefined variance) the same as DEFAULT_PRIOR_VARIANCE (100)', () => {
+    const withUndefined = computeExplorationBonus(50, undefined);
+    const withDefault = computeExplorationBonus(50, 100);
+    expect(withUndefined).toBeCloseTo(withDefault, 5);
+  });
+
+  it('scales up with variance (more uncertainty -> bigger bonus, before the cap binds)', () => {
+    const low = computeExplorationBonus(90, 4);
+    const high = computeExplorationBonus(90, 36);
+    expect(high).toBeGreaterThan(low);
+  });
+});
+
+describe('findZoneBelief', () => {
+  const now = new Date('2026-03-18T07:05:00'); // Wednesday, slotIndex = 7*4 + 0 = 28
+
+  it('finds the belief matching zoneId/dayOfWeek/slotIndex exactly', () => {
+    const beliefs: ZoneBelief[] = [
+      {
+        zoneId: 'z1',
+        dayOfWeek: 3,
+        slotIndex: 28,
+        posteriorMean: 30,
+        posteriorVariance: 50,
+        observationCount: 5,
+      },
+    ];
+    expect(findZoneBelief(beliefs, 'z1', now)?.posteriorVariance).toBe(50);
+  });
+
+  it('returns undefined when no belief matches this zone/day/slot', () => {
+    const beliefs: ZoneBelief[] = [
+      {
+        zoneId: 'z1',
+        dayOfWeek: 2, // wrong day
+        slotIndex: 28,
+        posteriorMean: 30,
+        posteriorVariance: 50,
+        observationCount: 5,
+      },
+    ];
+    expect(findZoneBelief(beliefs, 'z1', now)).toBeUndefined();
+  });
+
+  it('returns undefined when beliefs is undefined or zoneId is missing', () => {
+    expect(findZoneBelief(undefined, 'z1', now)).toBeUndefined();
+    expect(findZoneBelief([], null, now)).toBeUndefined();
+  });
+});
+
+describe('applyTemporalWindowFactor', () => {
+  const window: ActiveWindow = {
+    days: [],
+    startHour: 14,
+    startMin: 30,
+    endHour: 16,
+    endMin: 30,
+    weight_multiplier: 1.3,
+  };
+
+  it('passes the score through unchanged for a non-temporal zone', () => {
+    const score = applyTemporalWindowFactor(
+      50,
+      { is_temporal: false, active_windows: [window] },
+      new Date('2026-03-18T12:00:00')
+    );
+    expect(score).toBe(50);
+  });
+
+  it('applies the window multiplier inside an active window', () => {
+    const score = applyTemporalWindowFactor(
+      50,
+      { is_temporal: true, active_windows: [window] },
+      new Date('2026-03-18T15:00:00')
+    );
+    expect(score).toBeCloseTo(50 * 1.3, 5);
+  });
+
+  it('applies the off-window penalty outside every active window', () => {
+    const score = applyTemporalWindowFactor(
+      50,
+      { is_temporal: true, active_windows: [window] },
+      new Date('2026-03-18T12:00:00')
+    );
+    expect(score).toBeCloseTo(50 * 0.3, 5); // TEMPORAL_OFF_WINDOW_PENALTY
+  });
+
+  // Regression: these are the exact windows the
+  // 20260921120000_zone_exploration_and_temporal.sql migration seeds for
+  // CHUM Hôpital / Hôpital Cité-de-la-Santé, derived from the old
+  // MEDICAL_SHIFT_HOURS = [7, 15, 19, 23] diff===0/diff===1+:30 logic. This
+  // must keep producing the same boosted/not-boosted boundary the old
+  // hardcoded block did.
+  const chumWindows: ActiveWindow[] = [
+    { days: [], startHour: 6, startMin: 30, endHour: 8, endMin: 30, weight_multiplier: 1.3 },
+    { days: [], startHour: 14, startMin: 30, endHour: 16, endMin: 30, weight_multiplier: 1.3 },
+    { days: [], startHour: 18, startMin: 30, endHour: 20, endMin: 30, weight_multiplier: 1.3 },
+    { days: [], startHour: 22, startMin: 30, endHour: 0, endMin: 30, weight_multiplier: 1.3 },
+  ];
+  const chumZone = { is_temporal: true, active_windows: chumWindows };
+
+  it('boosts at 7:00 shift change (old MEDICAL_SHIFT_HOURS behavior)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T07:00:00'))).toBeCloseTo(65, 5);
+  });
+
+  it('does not boost just before the 6:30 window opens', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T06:29:00'))).toBeCloseTo(15, 5);
+  });
+
+  it('boosts right at 6:30 (window start, inclusive)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T06:30:00'))).toBeCloseTo(65, 5);
+  });
+
+  it('no longer boosts at 8:30 (window end, exclusive)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T08:30:00'))).toBeCloseTo(15, 5);
+  });
+
+  it('boosts across the midnight wrap (22:30-00:30 window, e.g. 23:00)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T23:00:00'))).toBeCloseTo(65, 5);
+  });
+
+  it('boosts just after midnight inside the wrapped window (00:29)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-19T00:29:00'))).toBeCloseTo(65, 5);
+  });
+
+  it('stops boosting once the wrapped window closes (00:30)', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-19T00:30:00'))).toBeCloseTo(15, 5);
+  });
+
+  it('does not boost at plain midday (12:00), matching the old always-3x-curve non-shift hours', () => {
+    expect(applyTemporalWindowFactor(50, chumZone, new Date('2026-03-18T12:00:00'))).toBeCloseTo(15, 5);
   });
 });

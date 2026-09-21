@@ -1319,6 +1319,24 @@ export type Database = {
         }
         Relationships: []
       }
+      yul_flight_stats: {
+        Row: {
+          fetched_at: string
+          id: string
+          incoming_flights_count: number | null
+        }
+        Insert: {
+          fetched_at?: string
+          id?: string
+          incoming_flights_count?: number | null
+        }
+        Update: {
+          fetched_at?: string
+          id?: string
+          incoming_flights_count?: number | null
+        }
+        Relationships: []
+      }
       zone_beliefs: {
         Row: {
           day_of_week: number
@@ -1513,6 +1531,7 @@ export type Database = {
       }
       zones: {
         Row: {
+          active_windows: Json
           address: string | null
           base_score: number | null
           category: string | null
@@ -1521,6 +1540,7 @@ export type Database = {
           current_score: number | null
           event_id: string | null
           id: string
+          is_temporal: boolean
           latitude: number
           longitude: number
           name: string
@@ -1529,6 +1549,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          active_windows?: Json
           address?: string | null
           base_score?: number | null
           category?: string | null
@@ -1537,6 +1558,7 @@ export type Database = {
           current_score?: number | null
           event_id?: string | null
           id: string
+          is_temporal?: boolean
           latitude: number
           longitude: number
           name: string
@@ -1545,6 +1567,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          active_windows?: Json
           address?: string | null
           base_score?: number | null
           category?: string | null
@@ -1553,6 +1576,7 @@ export type Database = {
           current_score?: number | null
           event_id?: string | null
           id?: string
+          is_temporal?: boolean
           latitude?: number
           longitude?: number
           name?: string
@@ -1704,6 +1728,13 @@ export type Database = {
         Args: { p_dow: number; p_hour_slot: number; p_zone_id: string }
         Returns: number
       }
+      get_surge_baselines_bulk: {
+        Args: { p_dow: number; p_hour_slot: number; p_zone_ids: string[] }
+        Returns: {
+          baseline: number
+          zone_id: string
+        }[]
+      }
       get_weight_calibration_summary: {
         Args: { p_limit?: number }
         Returns: {
@@ -1760,15 +1791,15 @@ export type Database = {
     }
     Enums: {
       zone_type:
-        | "mÃ©tro"
+        | "métro"
         | "commercial"
-        | "rÃ©sidentiel"
+        | "résidentiel"
         | "nightlife"
-        | "aÃ©roport"
+        | "aéroport"
         | "transport"
-        | "mÃ©dical"
-        | "universitÃ©"
-        | "Ã©vÃ©nements"
+        | "médical"
+        | "université"
+        | "événements"
         | "tourisme"
     }
     CompositeTypes: {
@@ -1898,15 +1929,15 @@ export const Constants = {
   public: {
     Enums: {
       zone_type: [
-        "mÃ©tro",
+        "métro",
         "commercial",
-        "rÃ©sidentiel",
+        "résidentiel",
         "nightlife",
-        "aÃ©roport",
+        "aéroport",
         "transport",
-        "mÃ©dical",
-        "universitÃ©",
-        "Ã©vÃ©nements",
+        "médical",
+        "université",
+        "événements",
         "tourisme",
       ],
     },
