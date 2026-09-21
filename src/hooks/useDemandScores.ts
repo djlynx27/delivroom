@@ -98,6 +98,20 @@ function logScoreCalculatorIssue(...args: unknown[]) {
   }
 }
 
+// scores.final_score/weather_boost/event_boost are Postgres NUMERIC(6,2)
+// columns -- PostgREST serializes NUMERIC as a JSON string ("69.00", not
+// 69) to avoid float precision loss, but the generated Supabase types
+// still (incorrectly) claim `number | null`. tsc can't catch this: the
+// type is a lie about the runtime shape. Left uncoerced, `+` on these
+// values silently does string concatenation instead of addition anywhere
+// downstream (e.g. "69.00" + 3.2 -> "69.003.2" -> NaN), which is exactly
+// what produced the garbled zone-score display bug. Coerce once, here, at
+// the boundary where these columns enter the app.
+export function toFiniteNumber(value: number | string | null | undefined, fallback: number): number {
+  const n = typeof value === 'string' ? Number(value) : value;
+  return typeof n === 'number' && Number.isFinite(n) ? n : fallback;
+}
+
 export function applyOvernightRealityCap({
   score,
   zoneType,
@@ -704,9 +718,12 @@ export function useDemandScores(
       for (const zone of zones) {
         const dbRow = dbScoreMap.get(zone.id);
         if (dbRow) {
-          const finalScore = dbRow.final_score ?? zone.current_score ?? 50;
-          const weatherBoost = dbRow.weather_boost ?? 0;
-          const eventBoost = dbRow.event_boost ?? 0;
+          const finalScore = toFiniteNumber(
+            dbRow.final_score,
+            toFiniteNumber(zone.current_score, 50)
+          );
+          const weatherBoost = toFiniteNumber(dbRow.weather_boost, 0);
+          const eventBoost = toFiniteNumber(dbRow.event_boost, 0);
           scores.set(zone.id, finalScore);
           factors.set(zone.id, {
             hasWeatherBoost: weatherBoost > 0,
@@ -843,9 +860,11 @@ export function useDemandScores(
         temporalAdjustedScore,
         belief?.posteriorVariance
       );
-      const finalScore = Math.min(
-        100,
-        temporalAdjustedScore + explorationBonusPoints
+      // Final safety net: the displayed score must always be a clamped,
+      // rounded integer regardless of anything upstream (a DB numeric
+      // column read as a string, a NaN from an unexpected input, etc.).
+      const finalScore = Math.round(
+        Math.min(100, Math.max(0, temporalAdjustedScore + explorationBonusPoints))
       );
 
       boostedScores.set(zone.id, finalScore);

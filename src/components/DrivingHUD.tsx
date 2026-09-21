@@ -131,14 +131,20 @@ function HeroZoneDisplay({
       </div>
 
       {/* key={score} remounts the node so the pop animation replays whenever
-          the score itself changes, not on every unrelated re-render. */}
+          the score itself changes, not on every unrelated re-render.
+          Defensive rendering: score is always a clamped 0-100 integer by
+          the time it reaches here (see useDemandScores.ts's toFiniteNumber
+          and the final Math.round/clamp), but max-w-full + truncate +
+          responsive sizing (text-7xl on narrow phones, text-9xl from sm up)
+          are a last-resort guard so a malformed value can never blow out
+          the card's width instead of just looking wrong. */}
       <div
         key={score}
-        className="text-9xl font-black tabular-nums leading-none animate-spring-pop"
+        className="max-w-full truncate text-7xl sm:text-9xl font-black tabular-nums leading-none animate-spring-pop"
         style={{ color }}
-        aria-label={`Score: ${score} sur 100`}
+        aria-label={`Score: ${Math.round(score)} sur 100`}
       >
-        {score}
+        {Math.round(score)}
       </div>
       <div className="text-white/30 text-2xl font-semibold">/100</div>
 
