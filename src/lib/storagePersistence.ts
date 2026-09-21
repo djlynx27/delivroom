@@ -17,7 +17,11 @@ export async function requestPersistentStorage(): Promise<PersistenceResult> {
   try {
     const persisted = await navigator.storage.persist();
     if (persisted) {
-      console.info('[storagePersistence] persisted: true');
+      // console.info never reaches `adb logcat` on this Capacitor/WebView
+      // build — only warn/error do (see project memory
+      // project_android_debug_logcat_gotchas). Deliberately warn-level for
+      // a success case so on-device verification actually works.
+      console.warn('[storagePersistence] persisted: true');
       return 'granted';
     }
     console.warn('[storagePersistence] persisted: false');
