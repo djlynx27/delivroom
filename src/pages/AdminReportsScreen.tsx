@@ -1,3 +1,4 @@
+import { LabOnly } from '@/components/BuildTargetGates';
 import { DailyReports } from '@/components/DailyReports';
 import { EarningsReport } from '@/components/EarningsReport';
 import { ExperimentalShiftComparison } from '@/components/ExperimentalShiftComparison';
@@ -40,7 +41,9 @@ export default function AdminReportsScreen() {
       </div>
 
       <DailyReports />
-      <ExperimentalShiftComparison />
+      <LabOnly>
+        <ExperimentalShiftComparison />
+      </LabOnly>
     </AdminPageShell>
   );
 }
