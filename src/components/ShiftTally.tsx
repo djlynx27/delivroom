@@ -8,9 +8,10 @@ import {
   type NetRateStatus,
   readShiftTarget,
   resetShift,
+  type ShiftStats,
   writeShiftTarget,
 } from '@/lib/shiftTracker';
-import { Clock, DollarSign, Gauge, MapPin, RotateCcw, TrendingUp } from 'lucide-react';
+import { Clock, DollarSign, Gauge, MapPin, RotateCcw, ShieldCheck, Target, TrendingUp } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 /**
@@ -70,50 +71,7 @@ export function ShiftTally() {
             <RotateCcw className="w-3 h-3 text-muted-foreground" />
           </Button>
         </div>
-        <div className="grid grid-cols-4 gap-1 text-center">
-          <Stat
-            icon={<DollarSign className="w-3 h-3" />}
-            label="Total $"
-            value={`$${stats.totalFare.toFixed(0)}`}
-          />
-          <Stat
-            icon={<TrendingUp className="w-3 h-3" />}
-            label="$/h vrai"
-            value={stats.trueHourlyRate != null ? `$${stats.trueHourlyRate.toFixed(0)}` : '—'}
-            emphasis
-          />
-          <Stat
-            icon={<MapPin className="w-3 h-3" />}
-            label="Km"
-            value={stats.totalKm.toFixed(0)}
-          />
-          <Stat
-            icon={<Clock className="w-3 h-3" />}
-            label="Heures"
-            value={stats.wallHours.toFixed(1)}
-          />
-        </div>
-        <div className="grid grid-cols-3 gap-1 text-center">
-          <Stat
-            icon={<TrendingUp className="w-3 h-3" />}
-            label="$/h net"
-            value={stats.netHourlyRate != null ? `$${stats.netHourlyRate.toFixed(0)}` : '—'}
-            emphasis
-            status={stats.netHourlyRate != null ? netRateStatus : undefined}
-          />
-          <Stat
-            icon={<MapPin className="w-3 h-3" />}
-            label="$/km net"
-            value={stats.netPerKm != null ? `$${stats.netPerKm.toFixed(2)}` : '—'}
-          />
-          <Stat
-            icon={<Gauge className="w-3 h-3" />}
-            label="Temps mort"
-            value={stats.deadTimePct != null ? `${stats.deadTimePct.toFixed(0)}%` : '—'}
-            emphasis={deadheadHigh}
-            status={deadheadHigh ? 'bad' : undefined}
-          />
-        </div>
+        <CombatStatsGrid stats={stats} netRateStatus={netRateStatus} deadheadHigh={deadheadHigh} />
         <TargetPacingBar
           netFare={stats.netFare}
           target={target}
@@ -127,6 +85,66 @@ export function ShiftTally() {
         />
       </CardContent>
     </Card>
+  );
+}
+
+function CombatStatsGrid({
+  stats,
+  netRateStatus,
+  deadheadHigh,
+}: {
+  stats: ShiftStats;
+  netRateStatus: NetRateStatus;
+  deadheadHigh: boolean;
+}) {
+  return (
+    <>
+      <div className="grid grid-cols-4 gap-1 text-center">
+        <Stat icon={<DollarSign className="w-3 h-3" />} label="Total $" value={`$${stats.totalFare.toFixed(0)}`} />
+        <Stat
+          icon={<TrendingUp className="w-3 h-3" />}
+          label="$/h vrai"
+          value={stats.trueHourlyRate != null ? `$${stats.trueHourlyRate.toFixed(0)}` : '—'}
+          emphasis
+        />
+        <Stat icon={<MapPin className="w-3 h-3" />} label="Km" value={stats.totalKm.toFixed(0)} />
+        <Stat icon={<Clock className="w-3 h-3" />} label="Heures" value={stats.wallHours.toFixed(1)} />
+      </div>
+      <div className="grid grid-cols-3 gap-1 text-center">
+        <Stat
+          icon={<TrendingUp className="w-3 h-3" />}
+          label="$/h net"
+          value={stats.netHourlyRate != null ? `$${stats.netHourlyRate.toFixed(0)}` : '—'}
+          emphasis
+          status={stats.netHourlyRate != null ? netRateStatus : undefined}
+        />
+        <Stat
+          icon={<MapPin className="w-3 h-3" />}
+          label="$/km net"
+          value={stats.netPerKm != null ? `$${stats.netPerKm.toFixed(2)}` : '—'}
+        />
+        <Stat
+          icon={<Gauge className="w-3 h-3" />}
+          label="Temps mort"
+          value={stats.deadTimePct != null ? `${stats.deadTimePct.toFixed(0)}%` : '—'}
+          emphasis={deadheadHigh}
+          status={deadheadHigh ? 'bad' : undefined}
+        />
+      </div>
+      <div className="grid grid-cols-2 gap-1 text-center">
+        <Stat
+          icon={<Target className="w-3 h-3" />}
+          label="% Accepté"
+          value={stats.acceptanceRate != null ? `${stats.acceptanceRate.toFixed(0)}%` : '—'}
+        />
+        <Stat
+          icon={<ShieldCheck className="w-3 h-3" />}
+          label="Trash évités"
+          value={String(stats.trashAvoidedCount)}
+          emphasis={stats.trashAvoidedCount > 0}
+        />
+      </div>
+    </>
   );
 }
 
@@ -156,14 +174,18 @@ function TargetPacingBar({
   const pacingPct = target > 0 ? Math.min(100, (netFare / target) * 100) : 0;
 
   return (
-    <div className="flex items-center gap-2 pt-1">
-      <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${PACING_BAR_COLOR[netRateStatus]}`}
-          style={{ width: `${pacingPct}%` }}
-        />
-      </div>
-      {editingTarget ? (
+    <div className="space-y-1 pt-1">
+      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+        🎯 Objectif $ net du jour
+      </span>
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-3 rounded-full bg-white/10 overflow-hidden">
+          <div
+            className={`h-full rounded-full ${PACING_BAR_COLOR[netRateStatus]}`}
+            style={{ width: `${pacingPct}%` }}
+          />
+        </div>
+        {editingTarget ? (
         <input
           autoFocus
           type="number"
@@ -187,6 +209,7 @@ function TargetPacingBar({
           ${netFare.toFixed(0)}/${target.toFixed(0)}
         </button>
       )}
+      </div>
     </div>
   );
 }

@@ -61,9 +61,20 @@ export interface ShiftRide {
   platform: string;    // 'lyft' | 'uber' | etc.
 }
 
+/** A logged accept/decline action from QuickDecideWidget — not every verdict
+ * recompute, only an explicit driver tap. Powers the acceptance-rate and
+ * trash-offers-avoided combat stats. */
+export interface OfferDecision {
+  ts: number;
+  verdict: 'take' | 'skip' | 'meh';
+  action: 'accepted' | 'declined';
+  fare: number;
+}
+
 export interface ShiftTally {
   startedAt: number;
   rides: ShiftRide[];
+  decisions?: OfferDecision[];
 }
 
 function todayBucket(): string {
@@ -107,6 +118,13 @@ export function recordRide(ride: Omit<ShiftRide, 'ts'>): ShiftTally {
   return tally;
 }
 
+export function recordDecision(decision: Omit<OfferDecision, 'ts'>): ShiftTally {
+  const tally = loadShift();
+  (tally.decisions ??= []).push({ ts: Date.now(), ...decision });
+  saveShift(tally);
+  return tally;
+}
+
 export function resetShift(): ShiftTally {
   const fresh = { startedAt: Date.now(), rides: [] };
   saveShift(fresh);
@@ -138,10 +156,26 @@ export interface ShiftStats {
    * 100 * (1 - activeHours / wallHours). Null before there's enough wall
    * time to make the ratio meaningful. */
   deadTimePct: number | null;
+  /** % of logged decisions (accept + decline taps) that were accepted.
+   * Null until at least one decision has been logged. */
+  acceptanceRate: number | null;
+  /** Count of decisions where the algo said 'skip' AND the driver declined —
+   * a confirmed good call, not just any decline. */
+  trashAvoidedCount: number;
+}
+
+function decisionStats(decisions: OfferDecision[]): Pick<ShiftStats, 'acceptanceRate' | 'trashAvoidedCount'> {
+  const accepted = decisions.filter((d) => d.action === 'accepted').length;
+  const declined = decisions.filter((d) => d.action === 'declined').length;
+  return {
+    acceptanceRate: accepted + declined > 0 ? (100 * accepted) / (accepted + declined) : null,
+    trashAvoidedCount: decisions.filter((d) => d.verdict === 'skip' && d.action === 'declined').length,
+  };
 }
 
 export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
   const rides = tally.rides;
+  const decisions = decisionStats(tally.decisions ?? []);
   if (rides.length === 0) {
     return {
       rideCount: 0,
@@ -157,6 +191,7 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
       netHourlyRate: null,
       netPerKm: null,
       deadTimePct: null,
+      ...decisions,
     };
   }
 
@@ -183,5 +218,6 @@ export function computeStats(tally: ShiftTally, now = Date.now()): ShiftStats {
       wallHours > 0.05
         ? Math.max(0, Math.min(100, 100 * (1 - activeHours / wallHours)))
         : null,
+    ...decisions,
   };
 }

@@ -10,9 +10,9 @@ import { Input } from '@/components/ui/input';
 import { useHaptics } from '@/hooks/useHaptics';
 import { markRide } from '@/lib/platformIdle';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
-import { recordRide } from '@/lib/shiftTracker';
+import { recordDecision, recordRide } from '@/lib/shiftTracker';
 import { getRecognition, isVoiceSupported, parseVoiceTranscript, speak } from '@/lib/voiceDecision';
-import { Check, Eraser, Mic, ThumbsDown, ThumbsUp, Zap } from 'lucide-react';
+import { Check, Eraser, Mic, ThumbsDown, ThumbsUp, X, Zap } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -235,9 +235,19 @@ export function QuickDecideWidget() {
       rideMin: parseFloat(rideMin) || null,
       platform,
     });
+    recordDecision({ verdict: decision?.verdict ?? 'meh', action: 'accepted', fare: fareNum });
     markRide(platform);
     window.dispatchEvent(new CustomEvent('delivroom:shift-updated'));
     toast.success(`Course $${fareNum.toFixed(2)} ajoutée au shift`);
+    clear();
+  }
+
+  function declineOffer() {
+    const fareNum = parseFloat(fare);
+    if (!Number.isFinite(fareNum) || fareNum <= 0 || !decision) return;
+    recordDecision({ verdict: decision.verdict, action: 'declined', fare: fareNum });
+    window.dispatchEvent(new CustomEvent('delivroom:shift-updated'));
+    toast.info('Offre refusée — notée');
     clear();
   }
 
@@ -308,15 +318,25 @@ export function QuickDecideWidget() {
 
         {decision && <VerdictPanel decision={decision} />}
 
-        {decision && decision.verdict !== 'meh' && (
-          <Button
-            onClick={() => logRideToShift('lyft')}
-            variant="outline"
-            className="w-full gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
-          >
-            <Check className="w-4 h-4" />
-            J'ai pris cette course — log au shift
-          </Button>
+        {decision && (
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              onClick={() => logRideToShift('lyft')}
+              variant="outline"
+              className="gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
+            >
+              <Check className="w-4 h-4" />
+              J'ai pris cette course
+            </Button>
+            <Button
+              onClick={declineOffer}
+              variant="outline"
+              className="gap-2 border-red-500/40 text-red-300 hover:bg-red-500/10"
+            >
+              <X className="w-4 h-4" />
+              Je refuse
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>
