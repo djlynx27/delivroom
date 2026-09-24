@@ -123,6 +123,10 @@
                 android:value="@string/fallbackType" />
 
             
+                <meta-data
+                    android:name="android.support.customtabs.trusted.METADATA_SHARE_TARGET"
+                    android:resource="@string/shareTarget"/>
+            
 
             
 
@@ -133,6 +137,24 @@
 
             
 
+            
+                <intent-filter>
+                    
+                        <action android:name="android.intent.action.SEND" />
+                    
+                        <action android:name="android.intent.action.SEND_MULTIPLE" />
+                    
+                    <category android:name="android.intent.category.DEFAULT" />
+                    
+                        <data android:mimeType="image/jpeg" />
+                    
+                        <data android:mimeType="image/png" />
+                    
+                        <data android:mimeType="image/webp" />
+                    
+                        <data android:mimeType="image/*" />
+                    
+                </intent-filter>
             
 
             <intent-filter>
