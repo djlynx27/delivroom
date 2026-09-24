@@ -41,8 +41,8 @@ export function ShiftTally() {
     };
   }, []);
 
-  if (stats.rideCount === 0) {
-    return null; // Don't take up screen space before the first ride
+  if (stats.rideCount === 0 && stats.trashAvoidedCount === 0 && stats.acceptanceRate === null) {
+    return null; // Don't take up screen space before the first ride or decision
   }
 
   const netRateStatus =

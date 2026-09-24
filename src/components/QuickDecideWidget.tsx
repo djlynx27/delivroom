@@ -10,10 +10,11 @@ import { Input } from '@/components/ui/input';
 import { useHaptics } from '@/hooks/useHaptics';
 import { markRide } from '@/lib/platformIdle';
 import { decideRideOffer, type Decision } from '@/lib/rideDecision';
+import { type ParsedOffer, recognizeOfferImage } from '@/lib/ocrOffer';
 import { recordDecision, recordRide } from '@/lib/shiftTracker';
 import { getRecognition, isVoiceSupported, parseVoiceTranscript, speak } from '@/lib/voiceDecision';
-import { Check, Eraser, Mic, ThumbsDown, ThumbsUp, X, Zap } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Camera, Check, Eraser, Mic, ThumbsDown, ThumbsUp, X, Zap } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 /**
@@ -70,17 +71,31 @@ function QuickDecideHeaderActions({
   voiceAvail,
   listening,
   onVoice,
+  scanning,
+  onScanClick,
   showReset,
   onReset,
 }: {
   voiceAvail: boolean;
   listening: boolean;
   onVoice: () => void;
+  scanning: boolean;
+  onScanClick: () => void;
   showReset: boolean;
   onReset: () => void;
 }) {
   return (
     <div className="flex items-center gap-1">
+      <Button
+        size="sm"
+        variant="outline"
+        className={`h-7 gap-1 text-xs ${scanning ? 'animate-pulse' : ''}`}
+        onClick={onScanClick}
+        disabled={scanning}
+      >
+        <Camera className="w-3 h-3" />
+        {scanning ? 'Lecture…' : 'Scan'}
+      </Button>
       {voiceAvail && (
         <Button
           size="sm"
@@ -154,6 +169,8 @@ export function QuickDecideWidget() {
   const { vibrate } = useHaptics();
   const [listening, setListening] = useState(false);
   const voiceAvail = isVoiceSupported();
+  const [scanning, setScanning] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const decision: Decision | null = useMemo(() => {
     const fareNum = parseFloat(fare);
@@ -251,6 +268,33 @@ export function QuickDecideWidget() {
     clear();
   }
 
+  function applyParsedOffer(parsed: ParsedOffer) {
+    if (parsed.fare != null) setFare(String(parsed.fare));
+    if (parsed.rideKm != null) setRideKm(String(parsed.rideKm));
+    if (parsed.rideMin != null) setRideMin(String(parsed.rideMin));
+    if (parsed.pickupKm != null) setPickupKm(String(parsed.pickupKm));
+    if (parsed.pickupMin != null) setPickupMin(String(parsed.pickupMin));
+  }
+
+  async function handleScanFile(file: File | undefined) {
+    if (!file) return;
+    setScanning(true);
+    try {
+      const parsed = await recognizeOfferImage(file);
+      const readable = parsed.fare != null || parsed.rideKm != null || parsed.rideMin != null;
+      if (!readable) {
+        toast.error('Capture illisible — remplis manuellement');
+        return;
+      }
+      applyParsedOffer(parsed);
+      toast.success('Offre lue — vérifie les champs');
+    } catch {
+      toast.error('Échec de la lecture — remplis manuellement');
+    } finally {
+      setScanning(false);
+    }
+  }
+
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-2">
@@ -258,10 +302,23 @@ export function QuickDecideWidget() {
           <span className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-primary" /> Décider en 3 sec
           </span>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={(e) => {
+              void handleScanFile(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
           <QuickDecideHeaderActions
             voiceAvail={voiceAvail}
             listening={listening}
             onVoice={startVoice}
+            scanning={scanning}
+            onScanClick={() => fileInputRef.current?.click()}
             showReset={Boolean(fare || rideKm || rideMin)}
             onReset={clear}
           />
