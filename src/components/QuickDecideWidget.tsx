@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useHaptics } from '@/hooks/useHaptics';
+import { recordHypraCall } from '@/lib/hypraCalls';
 import { markRide } from '@/lib/platformIdle';
 import {
   decideRideOffer,
@@ -286,6 +287,19 @@ export function QuickDecideWidget() {
     clear();
   }
 
+  // Hypra cards carry no fare, so this bypasses logRideToShift (which needs
+  // one) and keeps $0 "rides" out of the shift tally — see lib/hypraCalls.ts.
+  function logHypraCall() {
+    const km = parseFloat(pickupKm);
+    if (!Number.isFinite(km) || km <= 0) return;
+    recordHypraCall({ pickupKm: km, mode: hypraMode });
+    recordDecision({ verdict: decision?.verdict ?? 'meh', action: 'accepted', fare: 0 });
+    markRide('hypra');
+    window.dispatchEvent(new CustomEvent('delivroom:shift-updated'));
+    toast.success(`Appel Hypra noté — pickup ${km} km`);
+    clear();
+  }
+
   function declineOffer() {
     if (!decision) return;
     const fareNum = parseFloat(fare) || 0; // Hypra card: no fare to log
@@ -445,6 +459,17 @@ export function QuickDecideWidget() {
         />
 
         {decision && <VerdictPanel decision={decision} />}
+
+        {isHypra && parseFloat(pickupKm) > 0 && (
+          <Button
+            onClick={logHypraCall}
+            variant="outline"
+            className="w-full gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
+          >
+            <Check className="w-4 h-4" />
+            J'ai pris cet appel Hypra
+          </Button>
+        )}
 
         {decision && (
           <div className="grid grid-cols-2 gap-2">
