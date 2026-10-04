@@ -45,7 +45,17 @@ export interface RideOfferContext {
   /** Overrides for the dynamic $/km floor below (gas price, consumption,
    * wear, safety margin) — omit any field to keep its Santa Fe 2018 default. */
   vehicleCost?: VehicleCostConfig;
+  /** True when the offer comes from Hypra (taxi dispatch) — enables the hard
+   * pickup-distance cap below. */
+  isHypra?: boolean;
 }
+
+// Hypra dispatches by wide zone, not by radius, and taxi clients have no
+// cancellation penalty — beyond this approach distance the no-show ("lapin")
+// risk makes the offer a net loss regardless of fare. Field-observed
+// threshold, not a measured stat.
+// ponytail: single constant; tune from nav_events/decline logs once real data exists.
+export const MAX_HYPRA_PICKUP_KM = 3.5;
 
 export interface VehicleCostConfig {
   /** CAD per litre of regular gas. Default $1.70. */
@@ -203,6 +213,18 @@ export function decideRideOffer(ctx: RideOfferContext): Decision {
     totalTimeMin: totalTime || null,
     totalDistKm: totalDist > 0 ? round2(totalDist) : null,
   };
+
+  // Hard cap: Hypra pickup too far → forced skip, whatever the fare says.
+  if (ctx.isHypra && pickupDist > MAX_HYPRA_PICKUP_KM) {
+    return {
+      verdict: 'skip',
+      confidence: 100,
+      reasoning: [
+        `Pickup trop loin (> ${MAX_HYPRA_PICKUP_KM} km) : ${pickupDist.toFixed(1)} km — risque élevé de lapin`,
+      ],
+      metrics,
+    };
+  }
 
   // Need at minimum earnings + ride distance OR time to decide
   if (!earnings || (rideDist === 0 && rideTime === 0)) {

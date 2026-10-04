@@ -166,6 +166,8 @@ export function QuickDecideWidget() {
   const [rideMin, setRideMin] = useState('');
   const [pickupKm, setPickupKm] = useState('');
   const [pickupMin, setPickupMin] = useState('');
+  // Not reset by clear(): the driver stays on the same platform between offers.
+  const [isHypra, setIsHypra] = useState(false);
   const { vibrate } = useHaptics();
   const [listening, setListening] = useState(false);
   const voiceAvail = isVoiceSupported();
@@ -184,8 +186,9 @@ export function QuickDecideWidget() {
       pickupDistKm: parseFloat(pickupKm) || 0,
       rideTimeMin: Number.isFinite(rideMinNum) ? rideMinNum : null,
       rideDistKm: Number.isFinite(rideKmNum) ? rideKmNum : null,
+      isHypra,
     });
-  }, [fare, rideKm, rideMin, pickupKm, pickupMin]);
+  }, [fare, rideKm, rideMin, pickupKm, pickupMin, isHypra]);
 
   // Buzz once when the verdict flips between take / skip / meh
   const [lastVerdict, setLastVerdict] = useState<string | null>(null);
@@ -229,6 +232,7 @@ export function QuickDecideWidget() {
           pickupDistKm: parsed.pickupKm ?? 0,
           rideTimeMin: parsed.rideMin,
           rideDistKm: parsed.rideKm,
+          isHypra,
         });
         if (d.verdict === 'take') speak('Accepte !');
         else if (d.verdict === 'skip') speak('Refuse.');
@@ -243,7 +247,7 @@ export function QuickDecideWidget() {
     rec.start();
   }
 
-  function logRideToShift(platform: 'lyft' | 'uber' | 'hypra' | 'imoove' | 'doordash' = 'lyft') {
+  function logRideToShift(platform: 'lyft' | 'uber' | 'hypra' | 'imoove' | 'doordash' = isHypra ? 'hypra' : 'lyft') {
     const fareNum = parseFloat(fare);
     if (!Number.isFinite(fareNum) || fareNum <= 0) return;
     recordRide({
@@ -325,6 +329,23 @@ export function QuickDecideWidget() {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        <div className="grid grid-cols-2 gap-2">
+          {(['Lyft', 'Hypra'] as const).map((name) => {
+            const active = (name === 'Hypra') === isHypra;
+            return (
+              <Button
+                key={name}
+                type="button"
+                size="sm"
+                variant={active ? 'default' : 'outline'}
+                aria-pressed={active}
+                onClick={() => setIsHypra(name === 'Hypra')}
+              >
+                {name}
+              </Button>
+            );
+          })}
+        </div>
         <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
             <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Tarif $</label>
@@ -378,7 +399,7 @@ export function QuickDecideWidget() {
         {decision && (
           <div className="grid grid-cols-2 gap-2">
             <Button
-              onClick={() => logRideToShift('lyft')}
+              onClick={() => logRideToShift()}
               variant="outline"
               className="gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
             >

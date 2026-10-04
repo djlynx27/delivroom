@@ -193,3 +193,19 @@ describe('decideRideOffer — idle-time decay integration', () => {
     expect(d.reasoning.join(' ')).toMatch(/plancher strict/);
   });
 });
+
+describe('decideRideOffer — cap pickup Hypra', () => {
+  const base = { earnings: 30, pickupTimeMin: 10, rideTimeMin: 20, rideDistKm: 12 };
+
+  it('force skip quand Hypra et pickup > 3.5 km, même avec un excellent tarif', () => {
+    const d = decideRideOffer({ ...base, pickupDistKm: 4, isHypra: true });
+    expect(d.verdict).toBe('skip');
+    expect(d.confidence).toBe(100);
+    expect(d.reasoning[0]).toContain('lapin');
+  });
+
+  it('ne bloque pas à exactement 3.5 km, ni sur Lyft au-delà', () => {
+    expect(decideRideOffer({ ...base, pickupDistKm: 3.5, isHypra: true }).confidence).not.toBe(100);
+    expect(decideRideOffer({ ...base, pickupDistKm: 6, isHypra: false }).reasoning[0]).not.toContain('lapin');
+  });
+});
