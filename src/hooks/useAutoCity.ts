@@ -150,6 +150,5 @@ export function useAutoCity(
     lastAutoCityRef.current = detectedCityId;
     pendingCityRef.current = null;
     setCityId(detectedCityId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentCityId, userLat, userLng, setCityId, refreshKey]);
 }

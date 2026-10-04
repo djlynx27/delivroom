@@ -702,7 +702,6 @@ export function BulkScreenshotUploader() {
       for (const item of list) {
         if (item.status === 'skipped') continue;
         if (item.status === 'done' || item.status === 'duplicate' || item.status === 'failed') continue;
-        // eslint-disable-next-line no-await-in-loop
         await processOne(item);
       }
       flushPendingItemPatches();
