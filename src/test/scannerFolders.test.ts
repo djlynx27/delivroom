@@ -7,7 +7,8 @@ describe('getScanPaths', () => {
     const paths = getScanPaths();
     expect(paths).toContain('Pictures/Screenshots');
     expect(paths).toContain('Pictures/Lyft');
-    expect(paths).toContain('Pictures/Maxymo');
+    // Field-confirmed (adb-pulled 2026-09-24): Maxymo writes to lowercase Pictures/maxymo/lyft.
+    expect(paths).toContain('Pictures/maxymo/lyft');
   });
 });
 
