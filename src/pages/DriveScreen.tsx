@@ -52,7 +52,13 @@ import { useTrips } from '@/hooks/useTrips';
 import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserLocation';
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
-import { findNearestZone, rankByProximityPenalizedScore } from '@/lib/zoneMatch';
+import { isLabBuild } from '@/lib/env';
+import {
+  DISTANCE_PENALTY_PER_KM,
+  findNearestZone,
+  MAX_HERO_ZONE_DISTANCE_KM,
+  rankByProximityPenalizedScore,
+} from '@/lib/zoneMatch';
 import {
   getConservativePresencePreference,
   getDriverFingerprint,
@@ -388,7 +394,14 @@ export default function DriveScreen() {
       };
     });
 
-    return rankByProximityPenalizedScore(location.latitude, location.longitude, scoredZones);
+    return rankByProximityPenalizedScore(
+      location.latitude,
+      location.longitude,
+      scoredZones,
+      MAX_HERO_ZONE_DISTANCE_KM,
+      DISTANCE_PENALTY_PER_KM,
+      isLabBuild() // taxi bias is Lab-only; commercial keeps the original order
+    );
   }, [zones, scores, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
 
   const marketRadarZones = useMemo(

@@ -7,6 +7,7 @@ import { MAX_GPS_ZONE_KM } from '@/lib/tripSave';
 export interface ZoneLike {
   latitude: number;
   longitude: number;
+  type?: string | null;
 }
 
 // Shared by both foreground code (useNotifications.ts) and the background
@@ -44,6 +45,26 @@ export const MAX_HERO_ZONE_DISTANCE_KM = 7;
 // displayed `score` is never touched — this only affects ranking order).
 export const DISTANCE_PENALTY_PER_KM = 3;
 
+// Lab-only taxi bias (display ranking order only — never the learning model,
+// never the displayed score). Real `zones.type` values are French; hubs =
+// transit, airport, medical/hospital and event venues. [À VÉRIFIER contre la
+// DB live: valeurs déduites du seed/tests, Supabase MCP non authentifié.]
+export const TAXI_HUB_ZONE_TYPES: readonly string[] = ['métro', 'transport', 'aéroport', 'médical', 'événements'];
+// ESTIMATED_LAB_BIAS: To be calibrated via nav_events
+export const TAXI_HUB_LAB_MULTIPLIER = 1.1;
+// ESTIMATED_LAB_BIAS: To be calibrated via nav_events
+// Approaches past this distance get their score scaled down (stricter than
+// learningEngine's DEADHEAD_PENALTY_FACTOR 0.85, which is left untouched).
+export const DEADHEAD_LAB_THRESHOLD_KM = 4;
+export const DEADHEAD_LAB_FACTOR = 0.75;
+
+function labAdjustedScore(score: number, type: string | null | undefined, distKm: number): number {
+  let adjusted = score;
+  if (type && TAXI_HUB_ZONE_TYPES.includes(type)) adjusted *= TAXI_HUB_LAB_MULTIPLIER;
+  if (distKm > DEADHEAD_LAB_THRESHOLD_KM) adjusted *= DEADHEAD_LAB_FACTOR;
+  return adjusted;
+}
+
 export type ScoredZone<T> = T & { score: number };
 export type DistanceRankedZone<T> = ScoredZone<T> & { distKm: number };
 
@@ -51,15 +72,19 @@ export type DistanceRankedZone<T> = ScoredZone<T> & { distKm: number };
  * Filters zones to `maxDistanceKm` of the origin, then ranks them by
  * `score - distKm * penaltyPerKm` (ties broken by distance) rather than raw
  * score — so a farther zone needs a real demand edge, not a marginal one,
- * to outrank a closer one.
+ * to outrank a closer one. `labTaxiBias` (Lab build only) additionally boosts
+ * taxi hub types and scales down far approaches — see constants above.
  */
 export function rankByProximityPenalizedScore<T extends ZoneLike>(
   originLat: number,
   originLng: number,
   zones: ScoredZone<T>[],
   maxDistanceKm: number = MAX_HERO_ZONE_DISTANCE_KM,
-  penaltyPerKm: number = DISTANCE_PENALTY_PER_KM
+  penaltyPerKm: number = DISTANCE_PENALTY_PER_KM,
+  labTaxiBias: boolean = false
 ): DistanceRankedZone<T>[] {
+  const rankOf = (z: DistanceRankedZone<T>) =>
+    (labTaxiBias ? labAdjustedScore(z.score, z.type, z.distKm) : z.score) - z.distKm * penaltyPerKm;
   return zones
     .map((z) => ({
       ...z,
@@ -67,8 +92,6 @@ export function rankByProximityPenalizedScore<T extends ZoneLike>(
     }))
     .filter((z) => z.distKm <= maxDistanceKm)
     .sort((a, b) => {
-      const rankA = a.score - a.distKm * penaltyPerKm;
-      const rankB = b.score - b.distKm * penaltyPerKm;
-      return rankB - rankA || a.distKm - b.distKm;
+      return rankOf(b) - rankOf(a) || a.distKm - b.distKm;
     });
 }

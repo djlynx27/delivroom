@@ -66,3 +66,27 @@ describe('rankByProximityPenalizedScore', () => {
     expect(ranked[0]?.id).toBe('closer');
   });
 });
+
+describe('rankByProximityPenalizedScore — Lab taxi bias', () => {
+  const origin = { lat: 45.588, lng: -73.589 };
+  // ~2.4km away, both: same distance so only the type bonus can reorder them.
+  const plain = { id: 'plain', latitude: 45.599762, longitude: -73.563115, score: 60, type: 'résidentiel' };
+  const hub = { id: 'hub', latitude: 45.599762, longitude: -73.563115, score: 56, type: 'métro' };
+
+  it('commercial (default) ranking ignores zone type', () => {
+    expect(rankByProximityPenalizedScore(origin.lat, origin.lng, [hub, plain])[0]?.id).toBe('plain');
+  });
+
+  it('lab bias lets a transit hub (+10%) outrank a slightly busier plain zone', () => {
+    const ranked = rankByProximityPenalizedScore(origin.lat, origin.lng, [plain, hub], 7, 3, true);
+    expect(ranked[0]?.id).toBe('hub');
+    expect(ranked[0]?.score).toBe(56); // displayed score untouched
+  });
+
+  it('lab bias scales down a ~4.5km approach so a nearer zone wins', () => {
+    const near = { id: 'near', latitude: 45.599762, longitude: -73.563115, score: 68, type: 'résidentiel' };
+    const far = { id: 'far', latitude: 45.5895, longitude: -73.531, score: 90, type: 'résidentiel' };
+    expect(rankByProximityPenalizedScore(origin.lat, origin.lng, [near, far])[0]?.id).toBe('far');
+    expect(rankByProximityPenalizedScore(origin.lat, origin.lng, [near, far], 7, 3, true)[0]?.id).toBe('near');
+  });
+});
