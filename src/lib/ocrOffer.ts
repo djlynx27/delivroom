@@ -89,7 +89,8 @@ function findRateSpan(text: string): { start: number; end: number } {
 /** Hypra offer card (calibrated on real captures, 2026-10-02): no ride leg and
  * no taximeter fare — only a dispatch fee ("2.00 $"), a pickup time and a
  * single "11.94 kilometer(s)" figure, read here as the PICKUP distance (the
- * card shows no destination). [À VÉRIFIER sur un trajet réel: km = approche]. */
+ * card shows no destination; confirmed by the driver 2026-10-04). The "2.00 $" is a
+ * fixed dispatch fee, not the fare — deliberately ignored. */
 function parseHypraCard(text: string): ParsedOffer | null {
   if (!/billing type|central bonjour/i.test(text)) return null;
   const match = text.match(/(\d+(?:[.,]\d+)?)\s*kilometer/i);
