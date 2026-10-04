@@ -32,7 +32,7 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
 import { computeEventBoost } from './eventBoost.ts';
-import { computeYulFlightBoost } from './yulFlightBoost.ts';
+import { computeYulFlightBoost, isYulSnapshotFresh } from './yulFlightBoost.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -343,7 +343,13 @@ async function fetchYulIncomingFlights(): Promise<number | null> {
     const data = (await res.json()) as { data?: unknown[] };
     return Array.isArray(data.data) ? data.data.length : null;
   } catch (err) {
-    console.warn('fetchYulIncomingFlights failed:', err);
+    // Deno fetch errors embed the full request URL, which carries access_key --
+    // never log the raw error.
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(
+      'fetchYulIncomingFlights failed:',
+      message.replace(/access_key=[^&\s)"']+/gi, 'access_key=***')
+    );
     return null;
   }
 }
@@ -508,9 +514,21 @@ serve(async (req) => {
     // 3b. Live YUL arrivals signal — feeds a boost applied only to
     // 'aéroport'-type zones below (step 4). null (no key / fetch failure)
     // means no boost, same score as before this feature existed.
-    const yulIncomingFlights = await fetchYulIncomingFlights();
+    // Reuse the persisted snapshot while fresh (quota + abuse guard, see
+    // isYulSnapshotFresh); only a live fetch refreshes fetched_at.
+    const { data: yulSnapshot } = await supabase
+      .from('yul_flight_stats')
+      .select('incoming_flights_count, fetched_at')
+      .eq('id', 'yul')
+      .maybeSingle();
+    const yulCacheFresh =
+      yulSnapshot?.incoming_flights_count != null &&
+      isYulSnapshotFresh(yulSnapshot.fetched_at, now.getTime());
+    const yulIncomingFlights: number | null = yulCacheFresh
+      ? yulSnapshot.incoming_flights_count
+      : await fetchYulIncomingFlights();
     const yulFlightBoost = computeYulFlightBoost(yulIncomingFlights);
-    if (yulIncomingFlights != null) {
+    if (!yulCacheFresh && yulIncomingFlights != null) {
       // Best-effort persistence for client display — never blocks scoring.
       await supabase
         .from('yul_flight_stats')
