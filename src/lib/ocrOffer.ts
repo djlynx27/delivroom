@@ -36,6 +36,8 @@ export interface ParsedOffer {
   pickupMin: number | null;
   rideKm: number | null;
   rideMin: number | null;
+  /** Set only when the text is a Hypra (taxi dispatch) offer card. */
+  isHypra?: boolean;
 }
 
 interface Leg {
@@ -84,10 +86,25 @@ function findRateSpan(text: string): { start: number; end: number } {
   return { start: rateMatch.index!, end: rateMatch.index! + rateMatch[0].length };
 }
 
+/** Hypra offer card (calibrated on real captures, 2026-10-02): no ride leg and
+ * no taximeter fare — only a dispatch fee ("2.00 $"), a pickup time and a
+ * single "11.94 kilometer(s)" figure, read here as the PICKUP distance (the
+ * card shows no destination). [À VÉRIFIER sur un trajet réel: km = approche]. */
+function parseHypraCard(text: string): ParsedOffer | null {
+  if (!/billing type|central bonjour/i.test(text)) return null;
+  const match = text.match(/(\d+(?:[.,]\d+)?)\s*kilometer/i);
+  if (!match) return null;
+  const km = parseFloat(match[1]!.replace(',', '.'));
+  const plausible = Number.isFinite(km) && km <= MAX_PLAUSIBLE_LEG_KM;
+  return { fare: null, pickupKm: plausible ? km : null, pickupMin: null, rideKm: null, rideMin: null, isHypra: true };
+}
+
 /** Pure text parser — exported separately from the OCR call so it's testable
  * without a real image/worker. */
 export function parseOfferText(rawText: string): ParsedOffer {
   const text = rawText.replace(/\s+/g, ' ');
+  const hypra = parseHypraCard(text);
+  if (hypra) return hypra;
   const rateSpan = findRateSpan(text);
   const fare = extractFare(text, rateSpan.start);
   const legs = extractLegs(text, rateSpan.end);

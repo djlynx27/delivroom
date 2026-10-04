@@ -104,3 +104,18 @@ describe('parseOfferText', () => {
     });
   });
 });
+
+describe('parseOfferText — Hypra card (real capture shape)', () => {
+  const card = (km: string) =>
+    `15 s CENTRAL BONJOUR 2.00 $ Taxi ${km} kilometer(s) Billing Type: Taximeter Payment: To the driver Vehicle Type : Sedan 13:08 Zone:MT 52** Rue Jean-Talon O, Montréal`;
+
+  it('lit la distance comme pickupKm et marque isHypra', () => {
+    expect(parseOfferText(card('11.94'))).toEqual({
+      fare: null, pickupKm: 11.94, pickupMin: null, rideKm: null, rideMin: null, isHypra: true,
+    });
+  });
+
+  it('rejette une distance à décimale perdue (1194 km)', () => {
+    expect(parseOfferText(card('1194')).pickupKm).toBeNull();
+  });
+});

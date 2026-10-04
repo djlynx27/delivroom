@@ -9,7 +9,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { useHaptics } from '@/hooks/useHaptics';
 import { markRide } from '@/lib/platformIdle';
-import { decideRideOffer, type Decision } from '@/lib/rideDecision';
+import { decideRideOffer, MAX_HYPRA_PICKUP_KM, type Decision } from '@/lib/rideDecision';
 import { type ParsedOffer, recognizeOfferImage } from '@/lib/ocrOffer';
 import { recordDecision, recordRide } from '@/lib/shiftTracker';
 import { getRecognition, isVoiceSupported, parseVoiceTranscript, speak } from '@/lib/voiceDecision';
@@ -178,6 +178,18 @@ export function QuickDecideWidget() {
     const fareNum = parseFloat(fare);
     const rideKmNum = parseFloat(rideKm);
     const rideMinNum = parseFloat(rideMin);
+    // Hypra cards carry no fare/ride leg — the pickup cap must fire on its own.
+    const pickupKmNum = parseFloat(pickupKm);
+    if (isHypra && pickupKmNum > MAX_HYPRA_PICKUP_KM) {
+      return decideRideOffer({
+        earnings: null,
+        pickupTimeMin: null,
+        pickupDistKm: pickupKmNum,
+        rideTimeMin: null,
+        rideDistKm: null,
+        isHypra,
+      });
+    }
     if (!Number.isFinite(fareNum) || fareNum <= 0) return null;
     if (!Number.isFinite(rideKmNum) && !Number.isFinite(rideMinNum)) return null;
     return decideRideOffer({
@@ -264,8 +276,8 @@ export function QuickDecideWidget() {
   }
 
   function declineOffer() {
-    const fareNum = parseFloat(fare);
-    if (!Number.isFinite(fareNum) || fareNum <= 0 || !decision) return;
+    if (!decision) return;
+    const fareNum = parseFloat(fare) || 0; // Hypra card: no fare to log
     recordDecision({ verdict: decision.verdict, action: 'declined', fare: fareNum });
     window.dispatchEvent(new CustomEvent('delivroom:shift-updated'));
     toast.info('Offre refusée — notée');
@@ -273,6 +285,7 @@ export function QuickDecideWidget() {
   }
 
   function applyParsedOffer(parsed: ParsedOffer) {
+    if (parsed.isHypra) setIsHypra(true);
     if (parsed.fare != null) setFare(String(parsed.fare));
     if (parsed.rideKm != null) setRideKm(String(parsed.rideKm));
     if (parsed.rideMin != null) setRideMin(String(parsed.rideMin));
@@ -285,13 +298,18 @@ export function QuickDecideWidget() {
     setScanning(true);
     try {
       const parsed = await recognizeOfferImage(file);
-      const readable = parsed.fare != null || parsed.rideKm != null || parsed.rideMin != null;
+      const readable =
+        parsed.fare != null || parsed.rideKm != null || parsed.rideMin != null || (parsed.isHypra && parsed.pickupKm != null);
       if (!readable) {
         toast.error('Capture illisible — remplis manuellement');
         return;
       }
       applyParsedOffer(parsed);
-      toast.success('Offre lue — vérifie les champs');
+      if (parsed.isHypra && (parsed.pickupKm ?? Infinity) <= MAX_HYPRA_PICKUP_KM) {
+        toast.success(`Hypra : pickup ${parsed.pickupKm} km — dans la limite (≤ ${MAX_HYPRA_PICKUP_KM} km)`);
+      } else {
+        toast.success('Offre lue — vérifie les champs');
+      }
     } catch {
       toast.error('Échec de la lecture — remplis manuellement');
     } finally {
