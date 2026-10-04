@@ -125,13 +125,17 @@ export function pickPlatform(): Platform {
 // (daytime vs. quiet off-peak) is split 80/20. Exported, with both rolls
 // injectable, so the distribution can be sanity-checked in a test without
 // hitting Supabase or relying on Math.random().
+// Thu/Fri/Sat -- a Set keeps pickPeriod under the lint complexity budget
+// with identical behaviour (no range check, so non-integer days still miss).
+const NIGHTLIFE_DAYS: ReadonlySet<number> = new Set([4, 5, 6]);
+
 export function pickPeriod(
   dayOfWeek: number,
   roll: number,
   daytimeRoll: number = Math.random()
 ): Period {
   const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
-  const isNightlifeDay = dayOfWeek === 4 || dayOfWeek === 5 || dayOfWeek === 6;
+  const isNightlifeDay = NIGHTLIFE_DAYS.has(dayOfWeek);
 
   if (isWeekday && roll < 0.25) return 'rush_am';
   if (isWeekday && roll < 0.5) return 'rush_pm';

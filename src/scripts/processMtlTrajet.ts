@@ -32,6 +32,12 @@ const DEFAULT_ZIP_PATH = 'D:/documents/Transport dataset/trajets_mtl_trajet_2017
 const OUTPUT_PATH = new URL('../data/zoneDemandWeights.json', import.meta.url);
 const PROGRESS_EVERY = 200_000;
 
+function logProgress(processed: number): void {
+  if (processed % PROGRESS_EVERY === 0) {
+    console.log(`... ${processed.toLocaleString('fr-CA')} trajets traités`);
+  }
+}
+
 // MultiLineString/LineString coordinates nest arbitrarily deep before
 // reaching a [lng, lat] pair; descend into [0] until we hit one.
 function firstPoint(coordinates: unknown): [number, number] | null {
@@ -68,9 +74,7 @@ function makeAggregator(zones: readonly ZoneRow[]) {
 
   function add(feature: TrajetFeature) {
     processed++;
-    if (processed % PROGRESS_EVERY === 0) {
-      console.log(`... ${processed.toLocaleString('fr-CA')} trajets traités`);
-    }
+    logProgress(processed);
 
     const origin = firstPoint(feature.geometry?.coordinates);
     const hour = departureHour(feature.properties?.starttime ?? '');
