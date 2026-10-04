@@ -48,6 +48,8 @@ export interface RideOfferContext {
   /** True when the offer comes from Hypra (taxi dispatch) — enables the hard
    * pickup-distance cap below. */
   isHypra?: boolean;
+  /** Pickup cap in km for Hypra offers — defaults to the strict cap. */
+  hypraMaxPickupKm?: number;
 }
 
 // Hypra dispatches by wide zone, not by radius, and taxi clients have no
@@ -55,7 +57,12 @@ export interface RideOfferContext {
 // risk makes the offer a net loss regardless of fare. Field-observed
 // threshold, not a measured stat.
 // ponytail: single constant; tune from nav_events/decline logs once real data exists.
-export const MAX_HYPRA_PICKUP_KM = 3.5;
+// Two driver-selectable modes: strict (peak hours / hot zones, local calls
+// abound) and large (off-peak, so the board isn't refused 100%). Above the
+// strict cap the driver must phone the client right after accepting.
+export const HYPRA_PICKUP_CAPS = { strict: 3.5, large: 5 } as const;
+export type HypraPickupMode = keyof typeof HYPRA_PICKUP_CAPS;
+export const MAX_HYPRA_PICKUP_KM = HYPRA_PICKUP_CAPS.strict;
 
 export interface VehicleCostConfig {
   /** CAD per litre of regular gas. Default $1.70. */
@@ -215,12 +222,13 @@ export function decideRideOffer(ctx: RideOfferContext): Decision {
   };
 
   // Hard cap: Hypra pickup too far → forced skip, whatever the fare says.
-  if (ctx.isHypra && pickupDist > MAX_HYPRA_PICKUP_KM) {
+  const hypraCap = ctx.hypraMaxPickupKm ?? MAX_HYPRA_PICKUP_KM;
+  if (ctx.isHypra && pickupDist > hypraCap) {
     return {
       verdict: 'skip',
       confidence: 100,
       reasoning: [
-        `Pickup trop loin (> ${MAX_HYPRA_PICKUP_KM} km) : ${pickupDist.toFixed(1)} km — risque élevé de lapin`,
+        `Pickup trop loin (> ${hypraCap} km) : ${pickupDist.toFixed(1)} km — risque élevé de lapin`,
       ],
       metrics,
     };

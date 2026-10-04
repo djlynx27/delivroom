@@ -9,7 +9,13 @@ import {
 import { Input } from '@/components/ui/input';
 import { useHaptics } from '@/hooks/useHaptics';
 import { markRide } from '@/lib/platformIdle';
-import { decideRideOffer, MAX_HYPRA_PICKUP_KM, type Decision } from '@/lib/rideDecision';
+import {
+  decideRideOffer,
+  HYPRA_PICKUP_CAPS,
+  MAX_HYPRA_PICKUP_KM,
+  type Decision,
+  type HypraPickupMode,
+} from '@/lib/rideDecision';
 import { type ParsedOffer, recognizeOfferImage } from '@/lib/ocrOffer';
 import { recordDecision, recordRide } from '@/lib/shiftTracker';
 import { getRecognition, isVoiceSupported, parseVoiceTranscript, speak } from '@/lib/voiceDecision';
@@ -168,6 +174,8 @@ export function QuickDecideWidget() {
   const [pickupMin, setPickupMin] = useState('');
   // Not reset by clear(): the driver stays on the same platform between offers.
   const [isHypra, setIsHypra] = useState(false);
+  const [hypraMode, setHypraMode] = useState<HypraPickupMode>('strict');
+  const hypraCap = HYPRA_PICKUP_CAPS[hypraMode];
   const { vibrate } = useHaptics();
   const [listening, setListening] = useState(false);
   const voiceAvail = isVoiceSupported();
@@ -180,7 +188,7 @@ export function QuickDecideWidget() {
     const rideMinNum = parseFloat(rideMin);
     // Hypra cards carry no fare/ride leg — the pickup cap must fire on its own.
     const pickupKmNum = parseFloat(pickupKm);
-    if (isHypra && pickupKmNum > MAX_HYPRA_PICKUP_KM) {
+    if (isHypra && pickupKmNum > hypraCap) {
       return decideRideOffer({
         earnings: null,
         pickupTimeMin: null,
@@ -188,6 +196,7 @@ export function QuickDecideWidget() {
         rideTimeMin: null,
         rideDistKm: null,
         isHypra,
+        hypraMaxPickupKm: hypraCap,
       });
     }
     if (!Number.isFinite(fareNum) || fareNum <= 0) return null;
@@ -199,8 +208,9 @@ export function QuickDecideWidget() {
       rideTimeMin: Number.isFinite(rideMinNum) ? rideMinNum : null,
       rideDistKm: Number.isFinite(rideKmNum) ? rideKmNum : null,
       isHypra,
+      hypraMaxPickupKm: hypraCap,
     });
-  }, [fare, rideKm, rideMin, pickupKm, pickupMin, isHypra]);
+  }, [fare, rideKm, rideMin, pickupKm, pickupMin, isHypra, hypraCap]);
 
   // Buzz once when the verdict flips between take / skip / meh
   const [lastVerdict, setLastVerdict] = useState<string | null>(null);
@@ -245,6 +255,7 @@ export function QuickDecideWidget() {
           rideTimeMin: parsed.rideMin,
           rideDistKm: parsed.rideKm,
           isHypra,
+          hypraMaxPickupKm: hypraCap,
         });
         if (d.verdict === 'take') speak('Accepte !');
         else if (d.verdict === 'skip') speak('Refuse.');
@@ -305,8 +316,8 @@ export function QuickDecideWidget() {
         return;
       }
       applyParsedOffer(parsed);
-      if (parsed.isHypra && (parsed.pickupKm ?? Infinity) <= MAX_HYPRA_PICKUP_KM) {
-        toast.success(`Hypra : pickup ${parsed.pickupKm} km — dans la limite (≤ ${MAX_HYPRA_PICKUP_KM} km)`);
+      if (parsed.isHypra && (parsed.pickupKm ?? Infinity) <= hypraCap) {
+        toast.success(`Hypra : pickup ${parsed.pickupKm} km — dans la limite (≤ ${hypraCap} km)`);
       } else {
         toast.success('Offre lue — vérifie les champs');
       }
@@ -364,6 +375,27 @@ export function QuickDecideWidget() {
             );
           })}
         </div>
+        {isHypra && (
+          <div className="grid grid-cols-2 gap-2">
+            {(Object.keys(HYPRA_PICKUP_CAPS) as HypraPickupMode[]).map((mode) => (
+              <Button
+                key={mode}
+                type="button"
+                size="sm"
+                variant={hypraMode === mode ? 'default' : 'outline'}
+                aria-pressed={hypraMode === mode}
+                onClick={() => setHypraMode(mode)}
+              >
+                {mode === 'strict' ? 'Strict' : 'Large'} ≤ {HYPRA_PICKUP_CAPS[mode]} km
+              </Button>
+            ))}
+          </div>
+        )}
+        {isHypra && parseFloat(pickupKm) > MAX_HYPRA_PICKUP_KM && parseFloat(pickupKm) <= hypraCap && (
+          <div role="alert" className="rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-sm text-amber-300">
+            Pickup {pickupKm} km : si tu acceptes, appelle le client tout de suite pour valider qu'il est prêt.
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-2">
           <div className="space-y-1">
             <label className="text-[10px] uppercase tracking-wide text-muted-foreground">Tarif $</label>

@@ -209,3 +209,18 @@ describe('decideRideOffer — cap pickup Hypra', () => {
     expect(decideRideOffer({ ...base, pickupDistKm: 6, isHypra: false }).reasoning[0]).not.toContain('lapin');
   });
 });
+
+describe('decideRideOffer — mode Large Hypra (hypraMaxPickupKm)', () => {
+  const base = { earnings: 30, pickupTimeMin: 10, rideTimeMin: 20, rideDistKm: 12, isHypra: true };
+
+  it('4.5 km : skip en strict (défaut), toléré avec cap 5', () => {
+    expect(decideRideOffer({ ...base, pickupDistKm: 4.5 }).reasoning[0]).toContain('lapin');
+    expect(decideRideOffer({ ...base, pickupDistKm: 4.5, hypraMaxPickupKm: 5 }).reasoning[0]).not.toContain('lapin');
+  });
+
+  it('5.5 km : skip même en mode large, avec le cap dans le message', () => {
+    const d = decideRideOffer({ ...base, pickupDistKm: 5.5, hypraMaxPickupKm: 5 });
+    expect(d.verdict).toBe('skip');
+    expect(d.reasoning[0]).toContain('> 5 km');
+  });
+});
