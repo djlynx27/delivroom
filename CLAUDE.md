@@ -38,6 +38,19 @@ dans `tripSave.ts` = 25km, réutilisé par `findNearestZone` dans
 `useNotifications.ts`). N'importe quel futur nearest-neighbor sur `zones`
 doit suivre ce pattern plutôt que ré-introduire un lookup sans plafond.
 
+### Deux versions : Delivroom Lab vs DailyVroom (précisé 2026-10-04)
+
+Même codebase, deux **build targets** (`VITE_APP_TARGET`, voir `src/lib/env.ts`) :
+
+| | Delivroom Lab | DailyVroom |
+|---|---|---|
+| Rôle | Expérimental / R&D (algos, zones, prototypes) | Public / commercial, chauffeurs MTL/Laval/Rive-Sud |
+| Build | `npm run build:apk` → `vite build --mode lab` (`.env.lab`), APK natif perso | `vite build` (Vercel), défaut sans flag |
+| Branding / domaine | — | « DailyVroom » (manifest), `delivroom.vercel.app` |
+| Gating UI | `<LabOnly>` | `<CommercialOnly>` (`src/components/BuildTargetGates.tsx`) |
+
+⚠️ « DailyVroom » n'est PAS un nom périmé (ancienne règle corrigée). Supabase (`hibzhsjgipybfihhzpxr`) et Vercel sont **uniques** pour les deux builds — pas d'env Dev/Prod séparé dans le code. Feature expérimentale → derrière `<LabOnly>` ; chemin commercial = zéro breaking change, RLS intact.
+
 ### Plateformes chauffeur
 
 Lyft, Hypra (Taxi Express Plan F), Imoove
