@@ -48,3 +48,8 @@ deno.lock
 
 # CI artifacts téléchargés localement
 artifacts/
+
+# Artefacts de build Android / signature (ne jamais commiter)
+*.apk
+*.idsig
+*.keystore.*
