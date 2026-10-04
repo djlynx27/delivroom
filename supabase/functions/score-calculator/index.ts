@@ -18,7 +18,10 @@
 //   7. Update zone.current_score for fast reads
 //
 // Secrets required (set via `supabase secrets set`):
-//   GEMINI_API_KEY  — optional, enables AI scoring enhancement
+//   GEMINI_API_KEY          — optional, enables AI scoring enhancement
+//   AVIATIONSTACK_API_KEY   — optional, enables the YUL live-arrivals boost
+//                             (falls back to no boost, same zone score as
+//                             before, when absent)
 // Auto-injected by Supabase runtime:
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 // ──────────────────────────────────────────────────────────────────────────────
@@ -29,6 +32,7 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
 import { computeEventBoost } from './eventBoost.ts';
+import { computeYulFlightBoost } from './yulFlightBoost.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -315,6 +319,35 @@ async function fetchWeather(lat: number, lon: number): Promise<Weather> {
   };
 }
 
+// ── YUL live arrivals signal ──────────────────────────────────────────────────
+// Same query shape as api/yul-flights.ts (arr_iata=YUL, flight_status=active)
+// so the two stay consistent, but this runs server-side against the
+// score-calculator's own Deno secret rather than the Vercel route's.
+// Returns null on any failure/missing key -- callers must treat that as "no
+// boost", never as zero arrivals.
+async function fetchYulIncomingFlights(): Promise<number | null> {
+  const apiKey = Deno.env.get('AVIATIONSTACK_API_KEY');
+  if (!apiKey) return null;
+
+  try {
+    const params = new URLSearchParams({
+      access_key: apiKey,
+      arr_iata: 'YUL',
+      flight_status: 'active',
+      limit: '100',
+    });
+    const res = await fetch(
+      `https://api.aviationstack.com/v1/flights?${params.toString()}`
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data?: unknown[] };
+    return Array.isArray(data.data) ? data.data.length : null;
+  } catch (err) {
+    console.warn('fetchYulIncomingFlights failed:', err);
+    return null;
+  }
+}
+
 // ── Optional Gemini enhancement ───────────────────────────────────────────────
 // Sends all zones in a single batched prompt to minimize API cost.
 // Returns a map of zone_id → adjusted score (0–100) or null if unavailable.
@@ -472,6 +505,24 @@ serve(async (req) => {
 
     const events: Event[] = (activeEvents ?? []) as Event[];
 
+    // 3b. Live YUL arrivals signal — feeds a boost applied only to
+    // 'aéroport'-type zones below (step 4). null (no key / fetch failure)
+    // means no boost, same score as before this feature existed.
+    const yulIncomingFlights = await fetchYulIncomingFlights();
+    const yulFlightBoost = computeYulFlightBoost(yulIncomingFlights);
+    if (yulIncomingFlights != null) {
+      // Best-effort persistence for client display — never blocks scoring.
+      await supabase
+        .from('yul_flight_stats')
+        .upsert(
+          { id: 'yul', incoming_flights_count: yulIncomingFlights, fetched_at: now.toISOString() },
+          { onConflict: 'id' }
+        )
+        .then(({ error }) => {
+          if (error) console.warn('yul_flight_stats upsert failed:', error.message);
+        });
+    }
+
     // 4. Compute baseline scores for all zones. Each zone uses ITS city's
     //    weather, scaled by a zone-type-aware multiplier (airport spikes
     //    in storms, university dips in extreme heat, etc.).
@@ -514,7 +565,9 @@ serve(async (req) => {
         100,
         Math.max(0, Math.round(rawScore * 100) / 100)
       );
-      const eventBoostVal = computeEventBoost(zone, events);
+      const eventBoostVal =
+        computeEventBoost(zone, events) +
+        (zone.type === 'aéroport' ? yulFlightBoost : 0);
       const finalScore = Math.min(
         100,
         Math.max(0, Math.round(rawScore + eventBoostVal + weatherBoostVal))
@@ -664,6 +717,8 @@ serve(async (req) => {
           ),
         },
         activeEvents: events.length,
+        yulIncomingFlights,
+        yulFlightBoost,
       }),
       {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
