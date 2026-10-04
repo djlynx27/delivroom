@@ -203,7 +203,7 @@ function HeroZoneContent({
   return (
     <div className="flex items-start justify-between gap-3">
       <div className="flex-1 min-w-0">
-        <h2 className="text-[28px] font-display font-bold leading-tight break-words">
+        <h2 className="text-[28px] font-display font-bold leading-tight break-words line-clamp-2 overflow-hidden">
           {heroZone.name}
         </h2>
         <span className="text-[16px] text-muted-foreground capitalize block mt-0.5">
