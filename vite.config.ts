@@ -219,8 +219,10 @@ export default defineConfig(({ mode }) => {
         },
         includeAssets: ['favicon.ico', 'pwa-icon-192.png', 'pwa-icon-512.png'],
         manifest: {
-          name: 'DailyVroom',
-          short_name: 'DailyVroom',
+          // Lab build (VITE_APP_TARGET=lab, e.g. a 2nd Vercel project) gets its
+          // own name so both PWAs can sit side by side on a home screen.
+          name: env.VITE_APP_TARGET === 'lab' ? 'Delivroom Lab' : 'DailyVroom',
+          short_name: env.VITE_APP_TARGET === 'lab' ? 'DV Lab' : 'DailyVroom',
           description: 'Optimise tes trajets, booste tes revenus.',
           theme_color: '#0a0a1a',
           background_color: '#0a0a1a',
