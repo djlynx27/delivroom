@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { calibrationCooldownRemainingSeconds } from './calibrationCooldown.ts';
+import { enforceMinTripsFloor } from './minTrips.ts';
 
 /**
  * weight-calibrator — Edge Function Delivroom
@@ -323,7 +324,8 @@ serve(async (req: Request) => {
       min_trips?: number;
     };
     const days = toPositiveInteger(body.days, 14);
-    const minTrips = toPositiveInteger(body.min_trips, 10);
+    // Caller-controlled -> floored server-side (see minTrips.ts): never < 10.
+    const minTrips = enforceMinTripsFloor(toPositiveInteger(body.min_trips, 10));
 
     const since = new Date(
       Date.now() - days * 24 * 60 * 60 * 1000
