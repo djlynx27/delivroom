@@ -33,7 +33,7 @@ const BackgroundGeolocation = registerPlugin<BackgroundGeolocationPlugin>(
   'BackgroundGeolocation'
 );
 import { supabase } from '@/integrations/supabase/client';
-import { findNearestZone } from '@/lib/zoneMatch';
+import { findNearestZone, rankByProximityPenalizedScore } from '@/lib/zoneMatch';
 import DelivroomBroadcast from '@/lib/delivroomBroadcast';
 
 const LOG_TAG = '[ShiftGeoWatcher]';
@@ -244,7 +244,7 @@ async function runCaptureTrigger(
   return { heroZoneId, shouldCapture };
 }
 
-async function notifyBestAlternate(currentZoneId: string) {
+async function notifyBestAlternate(currentZoneId: string, lat: number, lng: number) {
   try {
     const perm = await LocalNotifications.checkPermissions();
     if (perm.display !== 'granted') {
@@ -256,11 +256,14 @@ async function notifyBestAlternate(currentZoneId: string) {
     }
 
     const zones = await fetchZonesLite();
-    const best = zones
-      .filter((z) => z.id !== currentZoneId && z.current_score != null)
-      .sort((a, b) => (b.current_score ?? 0) - (a.current_score ?? 0))[0];
+    // Same distance-penalized ranking as DriveScreen's hero zone — a global
+    // max(current_score) sent Laval drivers to Longueuil across the bridge.
+    const candidates = zones.flatMap((z) =>
+      z.id !== currentZoneId && z.current_score != null ? [{ ...z, score: z.current_score }] : []
+    );
+    const best = rankByProximityPenalizedScore(lat, lng, candidates)[0];
     if (!best) {
-      log('notifyBestAlternate: no alternate zone with a score found');
+      log('notifyBestAlternate: no alternate zone with a score within range');
       return;
     }
 
@@ -301,7 +304,7 @@ async function onLocation(lat: number, lng: number) {
     });
 
     if (shouldNotify && nearest) {
-      await notifyBestAlternate(nearest.id);
+      await notifyBestAlternate(nearest.id, lat, lng);
     }
   } catch (err) {
     logError('onLocation failed', err);
