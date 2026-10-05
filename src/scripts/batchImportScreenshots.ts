@@ -211,7 +211,13 @@ async function main() {
   const pending = files.filter(
     (f) => !knownHashes.has(hashByFile.get(f)!) && (!preAnalyses || preAnalyses.has(path.basename(f))),
   );
-  console.log(`[batch-import] ${pending.length} nouveau(x) fichier(s) à analyser (${files.length - pending.length} déjà en base)`);
+  const alreadyInDb = files.filter((f) => knownHashes.has(hashByFile.get(f)!)).length;
+  const noAnalysis = files.length - pending.length - alreadyInDb;
+  console.log(
+    `[batch-import] ${pending.length} nouveau(x) fichier(s) à analyser (${alreadyInDb} déjà en base` +
+      (noAnalysis > 0 ? `, ${noAnalysis} sans analyse dans le JSON` : '') +
+      ')',
+  );
 
   const pace = createPacer(ANALYZE_PACE_MS);
   let done = 0;
