@@ -80,6 +80,17 @@ export const DEADHEAD_PENALTY_FACTOR = 0.85;
 const MAX_EXPECTED_EARNINGS_PER_HOUR = 60;
 const DEFAULT_PRIOR_MEAN = 25;
 const DEFAULT_PRIOR_VARIANCE = 100;
+// Variance floor on the PRIOR of every Bayesian update (process noise). Without
+// it the posterior variance only ever shrinks (~obsVar/n), so after a few dozen
+// observations in a slot new data barely moves the mean and the belief can't
+// follow real demand shifts (season, events). With the floor, the gain on a
+// real observation is never below MIN_VARIANCE / (MIN_VARIANCE + OBSERVATION_VARIANCE)
+// = 4/40 = 10% (2.6% for synthetic seed data). It is applied to the prior, not
+// the stored posterior, so the posterior mean math stays exact and legacy rows
+// with an already-collapsed variance un-stick on their next update.
+// ESTIMATED: 4.0 (~2 pts std-dev) is a chosen prudent value, to be calibrated
+// once there is enough real data.
+export const MIN_VARIANCE = 4.0;
 const OBSERVATION_VARIANCE = 36;
 // Synthetic trips (seedSyntheticTrips.ts) seed a baseline before real data
 // exists. A wider variance = less confidence, so the Bayesian posterior
@@ -131,12 +142,13 @@ function updateEma(current: number, observation: number, alpha = 0.3) {
   return alpha * observation + (1 - alpha) * current;
 }
 
-function updateBayesianBelief(
+export function updateBayesianBelief(
   priorMean: number,
-  priorVariance: number,
+  rawPriorVariance: number,
   observation: number,
   observationVariance = OBSERVATION_VARIANCE
 ) {
+  const priorVariance = Math.max(rawPriorVariance, MIN_VARIANCE);
   const posteriorVariance = 1 / (1 / priorVariance + 1 / observationVariance);
   const posteriorMean =
     posteriorVariance *
