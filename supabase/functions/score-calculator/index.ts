@@ -32,6 +32,7 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { montrealDayOfWeek, montrealHour } from '../_shared/time.ts';
 import { computeEventBoost } from './eventBoost.ts';
+import { freshnessRemainingSeconds } from './scoreFreshness.ts';
 import { computeYulFlightBoost, isYulSnapshotFresh } from './yulFlightBoost.ts';
 
 const corsHeaders = {
@@ -458,6 +459,34 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     );
+
+    // Freshness guard (see scoreFreshness.ts): skip the whole run — no writes,
+    // no weather/Gemini calls — if the newest score row is under 5 min old.
+    // Fails open: on a query error we just compute as before.
+    const { data: latestScore, error: latestScoreError } = await supabase
+      .from('scores')
+      .select('calculated_at')
+      .order('calculated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestScoreError) {
+      console.error('freshness check failed, computing anyway', latestScoreError);
+    }
+    const ttlRemaining = freshnessRemainingSeconds(
+      latestScore?.calculated_at,
+      Date.now()
+    );
+    if (ttlRemaining > 0) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          status: 'skipped',
+          reason: 'fresh_cache',
+          ttl_remaining_seconds: ttlRemaining,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Parse optional request body
     let zoneIds: string[] | null = null;
