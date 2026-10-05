@@ -1,6 +1,7 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
+import { calibrationCooldownRemainingSeconds } from './calibrationCooldown.ts';
 
 /**
  * weight-calibrator — Edge Function Delivroom
@@ -286,6 +287,37 @@ serve(async (req: Request) => {
     }
 
     // ── POST: calibrate weights ───────────────────────────────────────────────
+    // Cooldown (see calibrationCooldown.ts): one calibration per 6h, so repeated
+    // public POSTs can't ratchet the weights to their bounds. Only rows written by
+    // this function count (triggered_by 'post_shift' = column default; the client
+    // sync writes 'manual_sync'). Spoofable via the open insert policy, but the
+    // worst case is a 6h lock-out. Fails open on a query error.
+    const { data: lastCalibration, error: lastCalibrationError } = await supabase
+      .from('weight_history')
+      .select('created_at')
+      .eq('triggered_by', 'post_shift')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (lastCalibrationError) {
+      console.error('[weight-calibrator] cooldown check failed, calibrating anyway', lastCalibrationError);
+    }
+    const cooldownRemaining = calibrationCooldownRemainingSeconds(
+      lastCalibration?.created_at,
+      Date.now()
+    );
+    if (cooldownRemaining > 0) {
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          status: 'skipped',
+          reason: 'cooldown',
+          ttl_remaining_seconds: cooldownRemaining,
+        }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     const body = (await req.json().catch(() => ({}))) as {
       days?: number;
       min_trips?: number;
