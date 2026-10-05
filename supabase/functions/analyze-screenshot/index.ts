@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient, SupabaseClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
+import { sanitizePreAnalysis, tokensMatch } from './preAnalyzed.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
 import {
   autoSaveNotesTag,
@@ -100,6 +101,9 @@ interface RequestBody {
   // screenshotDedup.ts) — lets recordOfferSignal dedup trips_raw offer rows
   // the same way the Maxymo CSV importer dedups its own content_hash.
   content_hash?: string;
+  // Structured analysis produced outside Gemini (see preAnalyzed.ts). Only honoured
+  // with a valid x-ingest-token header; sanitized field by field before use.
+  pre_analysis?: unknown;
 }
 
 interface ZoneRow {
@@ -122,6 +126,8 @@ interface EnvConfig {
   geminiKey: string | null;
   supabaseUrl: string | null;
   supabaseServiceKey: string | null;
+  /** Shared secret that enables the pre-analyzed mode. Unset => mode disabled (fail closed). */
+  preAnalysisToken: string | null;
 }
 
 function readEnv(): EnvConfig {
@@ -129,6 +135,7 @@ function readEnv(): EnvConfig {
     geminiKey: Deno.env.get('GEMINI_API_KEY') ?? null,
     supabaseUrl: Deno.env.get('SUPABASE_URL') ?? null,
     supabaseServiceKey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? null,
+    preAnalysisToken: Deno.env.get('PRE_ANALYSIS_TOKEN') ?? null,
   };
 }
 
@@ -188,6 +195,9 @@ async function handleRequest(req: Request): Promise<Response> {
     console.error('analyze-screenshot: rejected image_url outside storage bucket', body.image_url);
     return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'invalid_image_url') });
   }
+  if (body.pre_analysis !== undefined) {
+    return handlePreAnalyzed(req, env, body);
+  }
   if (!env.geminiKey) {
     console.error('analyze-screenshot: GEMINI_API_KEY not set in Edge Function secrets');
     return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'missing_api_key') });
@@ -226,20 +236,52 @@ async function handleRequest(req: Request): Promise<Response> {
     return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, geminiResult.reason) }, 502);
   }
 
-  await resolveZoneIfNeeded(geminiResult.analysis, body, client, zones);
+  return persistAnalysis(geminiResult.analysis, req, env, body, client, zones);
+}
+
+/**
+ * Everything that happens AFTER an analysis exists — shared by the Gemini path
+ * and the pre-analyzed path so both go through the exact same zone resolution,
+ * auto-save and offer-signal recording.
+ */
+async function persistAnalysis(
+  analysis: AnalysisResult,
+  req: Request,
+  env: EnvConfig,
+  body: RequestBody,
+  client: SupabaseClient | null,
+  zones: ZoneRow[],
+): Promise<Response> {
+  await resolveZoneIfNeeded(analysis, body, client, zones);
   // user_id for auto-save MUST come from the caller's own JWT, never from the
   // request-supplied image_url — that field is client-controlled and would
   // let anyone with a valid signed URL for someone else's screenshot (e.g. a
   // leaked link) attribute an auto-saved trip to that other account (IDOR).
   const authUserId = await getAuthenticatedUserId(req, env);
-  const autoSaved = await autoSaveTripIfConfident(
-    geminiResult.analysis,
-    body.image_url,
-    client,
-    authUserId
-  );
-  await recordOfferSignal(geminiResult.analysis, body.content_hash, client, authUserId);
-  return jsonResponse({ analysis: geminiResult.analysis, auto_saved: autoSaved });
+  const autoSaved = await autoSaveTripIfConfident(analysis, body.image_url!, client, authUserId);
+  await recordOfferSignal(analysis, body.content_hash, client, authUserId);
+  return jsonResponse({ analysis, auto_saved: autoSaved });
+}
+
+/**
+ * Pre-analyzed mode: skips Gemini entirely. Fail-closed gate (shared secret in the
+ * x-ingest-token header; no secret configured => disabled), then the payload is
+ * sanitized (preAnalyzed.ts) — never trusted as-is, the function is public.
+ * The caller must STILL present the driver's own JWT for user attribution.
+ */
+async function handlePreAnalyzed(req: Request, env: EnvConfig, body: RequestBody): Promise<Response> {
+  if (!tokensMatch(req.headers.get('x-ingest-token'), env.preAnalysisToken)) {
+    return jsonResponse({ error: 'pre_analysis not authorized' }, 403);
+  }
+  const analysis = sanitizePreAnalysis(body.pre_analysis);
+  if (!analysis) return jsonResponse({ error: 'invalid pre_analysis' }, 400);
+
+  const client = getServiceClient(env);
+  if (client && (await isRateLimited(client, 'analyze-screenshot', 60))) {
+    return jsonResponse({ analysis: fallbackAnalysis(body.zone_name, 'rate_limited') }, 429);
+  }
+  const zones = await loadZones(client);
+  return persistAnalysis(analysis, req, env, body, client, zones);
 }
 
 /**

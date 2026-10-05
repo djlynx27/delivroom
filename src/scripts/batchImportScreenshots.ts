@@ -50,6 +50,10 @@ interface ParsedArgs {
   accessToken: string;
   refreshToken: string;
   filter: string;
+  /** JSON map { "<file name>": <structured analysis> } — skips Gemini (see preAnalyzed.ts). */
+  analysisFile: string | undefined;
+  /** Shared secret matching the function's PRE_ANALYSIS_TOKEN secret (--ingest-token or env). */
+  ingestToken: string | undefined;
 }
 
 // Mirrors BulkScreenshotUploader.tsx's DEFAULT_FILTER — the pulled folders
@@ -71,13 +75,21 @@ function parseArgs(): ParsedArgs {
   const accessToken = get('--access-token');
   const refreshToken = get('--refresh-token');
   const filter = get('--filter') ?? DEFAULT_NAME_FILTER;
-  if (!dir || !accessToken || !refreshToken) {
+  const analysisFile = get('--analysis-file');
+  const ingestToken = get('--ingest-token') ?? process.env.PRE_ANALYSIS_TOKEN;
+  if (analysisFile && !ingestToken) {
     console.error(
-      'Usage: tsx src/scripts/batchImportScreenshots.ts --dir <path> --access-token <token> --refresh-token <token> [--filter maxymo]',
+      "--analysis-file exige --ingest-token (ou PRE_ANALYSIS_TOKEN dans l'env): sans lui, la fonction refuse le mode pré-analysé.",
     );
     process.exit(1);
   }
-  return { dir, accessToken, refreshToken, filter };
+  if (!dir || !accessToken || !refreshToken) {
+    console.error(
+      'Usage: tsx src/scripts/batchImportScreenshots.ts --dir <path> --access-token <token> --refresh-token <token> [--filter maxymo] [--analysis-file <json> --ingest-token <secret>]',
+    );
+    process.exit(1);
+  }
+  return { dir, accessToken, refreshToken, filter, analysisFile, ingestToken };
 }
 
 async function walkImageFiles(dir: string): Promise<string[]> {
@@ -134,7 +146,10 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
 }
 
 async function main() {
-  const { dir, accessToken, refreshToken, filter } = parseArgs();
+  const { dir, accessToken, refreshToken, filter, analysisFile, ingestToken } = parseArgs();
+  const preAnalyses: Map<string, unknown> | null = analysisFile
+    ? new Map(Object.entries(JSON.parse(readFileSync(analysisFile, 'utf-8')) as Record<string, unknown>))
+    : null;
 
   const url = process.env.VITE_SUPABASE_URL;
   const anonKey = process.env.VITE_SUPABASE_ANON_KEY ?? process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -191,7 +206,11 @@ async function main() {
     for (const row of data ?? []) knownHashes.add(row.content_hash);
   }
 
-  const pending = files.filter((f) => !knownHashes.has(hashByFile.get(f)!));
+  // With --analysis-file, only files that actually have a pre-computed analysis are sent
+  // (everything else stays untouched — never fall back to Gemini silently).
+  const pending = files.filter(
+    (f) => !knownHashes.has(hashByFile.get(f)!) && (!preAnalyses || preAnalyses.has(path.basename(f))),
+  );
   console.log(`[batch-import] ${pending.length} nouveau(x) fichier(s) à analyser (${files.length - pending.length} déjà en base)`);
 
   const pace = createPacer(ANALYZE_PACE_MS);
@@ -222,8 +241,15 @@ async function main() {
       if (signErr || !signed?.signedUrl) throw signErr ?? new Error('no signed url');
 
       await pace();
+      const preAnalysis = preAnalyses?.get(fileName);
       const { data, error: invokeErr } = await supabase.functions.invoke('analyze-screenshot', {
-        body: { image_url: signed.signedUrl, auto_zone: true, content_hash: contentHash },
+        body: {
+          image_url: signed.signedUrl,
+          auto_zone: true,
+          content_hash: contentHash,
+          ...(preAnalysis !== undefined ? { pre_analysis: preAnalysis } : {}),
+        },
+        ...(preAnalysis !== undefined && ingestToken ? { headers: { 'x-ingest-token': ingestToken } } : {}),
       });
       if (invokeErr) {
         const context = (invokeErr as { context?: unknown }).context;
