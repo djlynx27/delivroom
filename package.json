@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "type-check": "tsc -b --noEmit",
     "prepare": "husky",
+    "lab:normalize": "tsx --env-file=.env.local scripts/lab-score-normalizer.ts",
     "seed:synthetic": "tsx --env-file=.env.local src/scripts/seedSyntheticTrips.ts",
     "ingest:taxi-stands": "tsx --env-file=.env.local src/scripts/mapTaxiStands.ts",
     "ingest:mtl-trajet": "tsx --env-file=.env.local src/scripts/processMtlTrajet.ts",
