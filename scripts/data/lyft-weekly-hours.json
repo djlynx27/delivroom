@@ -1,0 +1,112 @@
+{
+  "weeks": [
+    {
+      "weekStart": "2026-02-02",
+      "onlineHours": 32.02
+    },
+    {
+      "weekStart": "2026-02-09",
+      "onlineHours": 48.63
+    },
+    {
+      "weekStart": "2026-02-16",
+      "onlineHours": 53.75
+    },
+    {
+      "weekStart": "2026-02-23",
+      "onlineHours": 35.07
+    },
+    {
+      "weekStart": "2026-03-02",
+      "onlineHours": 48.02
+    },
+    {
+      "weekStart": "2026-03-09",
+      "onlineHours": 48.58
+    },
+    {
+      "weekStart": "2026-03-16",
+      "onlineHours": 19.37
+    },
+    {
+      "weekStart": "2026-03-23",
+      "onlineHours": 54.12
+    },
+    {
+      "weekStart": "2026-03-30",
+      "onlineHours": 6.07
+    },
+    {
+      "weekStart": "2026-04-06",
+      "onlineHours": 44.15
+    },
+    {
+      "weekStart": "2026-04-13",
+      "onlineHours": 41.05
+    },
+    {
+      "weekStart": "2026-04-20",
+      "onlineHours": 52.13
+    },
+    {
+      "weekStart": "2026-04-27",
+      "onlineHours": 40.87
+    },
+    {
+      "weekStart": "2026-05-04",
+      "onlineHours": 45.27
+    },
+    {
+      "weekStart": "2026-05-11",
+      "onlineHours": 40.85
+    },
+    {
+      "weekStart": "2026-05-18",
+      "onlineHours": 19.65
+    },
+    {
+      "weekStart": "2026-07-13",
+      "onlineHours": 31.55
+    },
+    {
+      "weekStart": "2026-07-20",
+      "onlineHours": 69.6
+    },
+    {
+      "weekStart": "2026-07-27",
+      "onlineHours": 49.95
+    },
+    {
+      "weekStart": "2026-08-03",
+      "onlineHours": 5.47
+    },
+    {
+      "weekStart": "2026-08-17",
+      "onlineHours": 39.28
+    },
+    {
+      "weekStart": "2026-08-24",
+      "onlineHours": 68.22
+    },
+    {
+      "weekStart": "2026-08-31",
+      "onlineHours": 63.35
+    },
+    {
+      "weekStart": "2026-09-07",
+      "onlineHours": 49.63
+    },
+    {
+      "weekStart": "2026-09-14",
+      "onlineHours": 45.18
+    },
+    {
+      "weekStart": "2026-09-21",
+      "onlineHours": 47.23
+    },
+    {
+      "weekStart": "2026-09-28",
+      "onlineHours": 30.68
+    }
+  ]
+}
