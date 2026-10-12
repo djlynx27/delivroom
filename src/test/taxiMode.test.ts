@@ -264,3 +264,56 @@ describe('taxiEventBadge', () => {
     expect(taxiEventBadge({ name: 'X' })).toBeUndefined();
   });
 });
+
+describe('official Montréal taxi-stand anchoring (Option A)', () => {
+  const MTL_STAND_HUBS = [
+    'mtl-gare-centrale',
+    'mtl-centre-bell',
+    'mtl-berri-uqam',
+    'mtl-chum',
+    'mtl-yul',
+  ];
+
+  it('anchors exactly the 5 Montréal hubs on an official stand, none in Laval/Longueuil', () => {
+    const withStand = TAXI_HUBS.filter((h) => h.stand).map((h) => h.id);
+    expect(withStand.sort()).toEqual([...MTL_STAND_HUBS].sort());
+  });
+
+  it('uses the stand coordinates as the hub coordinates (YUL = Roméo-Vachon taxi basin)', () => {
+    const yul = TAXI_HUBS.find((h) => h.id === 'mtl-yul');
+    expect(yul?.stand?.code).toBe('5-35');
+    expect(haversineKm(45.45603, -73.74668, yul?.latitude ?? 0, yul?.longitude ?? 0)).toBeLessThan(0.05);
+  });
+
+  it('only picks public/shared stands, except the airport (single official line)', () => {
+    for (const h of TAXI_HUBS.filter((x) => x.stand && x.id !== 'mtl-yul')) {
+      expect(h.stand?.kind).not.toBe('Privé');
+    }
+  });
+
+  it('keeps the real zone id and score but navigates to the official stand', () => {
+    const out = recommend(
+      [zone('mtl-yul', 'aéroport', 45.4571, -73.7496, 'Aéroport Trudeau (YUL)')],
+      { 'mtl-yul': 96 },
+      [],
+      { latitude: 45.47, longitude: -73.74 }
+    );
+    const yul = out.find((z) => z.id === 'mtl-yul');
+    expect(yul?.score).toBe(96);
+    expect(yul?.latitude).toBe(45.45603);
+    expect(yul?.longitude).toBe(-73.74668);
+    expect(out.filter((z) => z.type === 'aéroport')).toHaveLength(1);
+  });
+
+  it('leaves a real zone without an official stand on its own coordinates', () => {
+    const out = recommend(
+      [zone('lvl-mm', 'métro', 45.5584, -73.7215, 'Station Montmorency')],
+      { 'lvl-mm': 57 },
+      [],
+      { latitude: 45.55, longitude: -73.72 }
+    );
+    const mm = out.find((z) => z.id === 'lvl-mm');
+    expect(mm?.latitude).toBe(45.5584);
+    expect(mm?.longitude).toBe(-73.7215);
+  });
+});

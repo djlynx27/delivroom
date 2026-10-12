@@ -25,6 +25,14 @@ import {
 
 export type TaxiHubKind = 'airport' | 'transit' | 'hospital' | 'arena' | 'mall';
 
+/** Official Ville de Montréal taxi stand (open data `postestaxi`, 2026-09). */
+export interface TaxiStand {
+  code: string;
+  kind: 'Public' | 'En commun' | 'Privé';
+  places: number;
+  address: string;
+}
+
 export interface TaxiHub {
   id: string;
   name: string;
@@ -32,27 +40,30 @@ export interface TaxiHub {
   kind: TaxiHubKind;
   latitude: number;
   longitude: number;
+  /** Set when latitude/longitude ARE an official stand's coordinates. */
+  stand?: TaxiStand;
 }
 
-// Coordinates verified against the official GTFS stops (STL, RTL, exo; 2026-10-12)
-// for the 7 transit hubs, and OSM geocoding for the rest (Place Bell, YUL, Gare
-// Centrale, Centre Bell, Berri-UQAM, CHUM, DIX30). The driver's original values
-// were 0.9-5.8 km off for Cartier, Le Carrefour, Sainte-Dorothée,
-// Charles-Le Moyne and Longueuil. "Candidats" taxi: that a point is an OFFICIAL
-// taxi stand is not verifiable remotely (the Ville de Montréal stand dataset
-// only covers the island: Gare Centrale, Berri-UQAM and CHUM sit within 30 m of
-// one) — confirm Laval/Longueuil on the ground.
+// Laval/Longueuil hubs: coordinates verified against the official GTFS stops
+// (STL, RTL, exo; 2026-10-12) — the driver's original values were 0.9-5.8 km
+// off for Cartier, Le Carrefour, Sainte-Dorothée, Charles-Le Moyne, Longueuil.
+// "Candidats" taxi there: the Ville de Montréal stand dataset only covers the
+// island, so an official Laval/Longueuil stand can't be confirmed remotely.
+// Montréal hubs (`stand`): coordinates are the nearest ACTIVE public/shared
+// official stand (postestaxi.geojson); private company posts are skipped (e.g.
+// the 12-place Taxelco post at Gare Centrale). YUL is the one exception: its
+// only official line is the airport-managed (private) taxi basin.
 export const TAXI_HUBS: readonly TaxiHub[] = [
   { id: 'lvl-carrefour', name: 'Terminus Le Carrefour', city_id: 'lvl', kind: 'transit', latitude: 45.5686, longitude: -73.7484 },
   { id: 'lvl-montmorency', name: 'Métro Montmorency', city_id: 'lvl', kind: 'transit', latitude: 45.5583, longitude: -73.721 },
   { id: 'lvl-place-bell', name: 'Place Bell', city_id: 'lvl', kind: 'arena', latitude: 45.5559, longitude: -73.7231 },
   { id: 'lvl-cartier', name: 'Métro Cartier', city_id: 'lvl', kind: 'transit', latitude: 45.5598, longitude: -73.6826 },
   { id: 'lvl-rem-ste-dorothee', name: 'REM Sainte-Dorothée', city_id: 'lvl', kind: 'transit', latitude: 45.5233, longitude: -73.8617 },
-  { id: 'mtl-yul', name: 'Aéroport YUL (arrivées)', city_id: 'mtl', kind: 'airport', latitude: 45.4657, longitude: -73.7455 },
-  { id: 'mtl-gare-centrale', name: 'Gare Centrale', city_id: 'mtl', kind: 'transit', latitude: 45.5002, longitude: -73.5661 },
-  { id: 'mtl-centre-bell', name: 'Centre Bell', city_id: 'mtl', kind: 'arena', latitude: 45.4951, longitude: -73.5698 },
-  { id: 'mtl-berri-uqam', name: 'Terminus Berri-UQAM', city_id: 'mtl', kind: 'transit', latitude: 45.5153, longitude: -73.559 },
-  { id: 'mtl-chum', name: 'CHUM', city_id: 'mtl', kind: 'hospital', latitude: 45.5112, longitude: -73.5574 },
+  { id: 'mtl-yul', name: 'Aéroport YUL (bassin taxis)', city_id: 'mtl', kind: 'airport', latitude: 45.45603, longitude: -73.74668, stand: { code: '5-35', kind: 'Privé', places: 400, address: '975 boul. Roméo-Vachon, ligne et bassin Taxis et Limousines' } },
+  { id: 'mtl-gare-centrale', name: 'Gare Centrale', city_id: 'mtl', kind: 'transit', latitude: 45.5005, longitude: -73.56554, stand: { code: '20-943', kind: 'Public', places: 3, address: '777 De la Gauchetière O / boul. Robert-Bourassa' } },
+  { id: 'mtl-centre-bell', name: 'Centre Bell', city_id: 'mtl', kind: 'arena', latitude: 45.4957, longitude: -73.57292, stand: { code: '20-681', kind: 'Public', places: 3, address: "boul. René-Lévesque O / rue Lucien-L'Allier" } },
+  { id: 'mtl-berri-uqam', name: 'Terminus Berri-UQAM', city_id: 'mtl', kind: 'transit', latitude: 45.51536, longitude: -73.55875, stand: { code: '21-402', kind: 'Public', places: 6, address: 'rue Saint-Hubert / rue Sainte-Catherine E' } },
+  { id: 'mtl-chum', name: 'CHUM', city_id: 'mtl', kind: 'hospital', latitude: 45.51101, longitude: -73.55767, stand: { code: '21-911', kind: 'Public', places: 11, address: "rue Sanguinet / rue De la Gauchetière E (poste d'attente du CHUM)" } },
   { id: 'lng-terminus', name: 'Terminus Longueuil', city_id: 'lng', kind: 'transit', latitude: 45.524, longitude: -73.5215 },
   { id: 'lng-dix30', name: 'Quartier DIX30', city_id: 'lng', kind: 'mall', latitude: 45.4455, longitude: -73.435 },
   { id: 'lng-charles-le-moyne', name: 'Hôpital Charles-Le Moyne', city_id: 'lng', kind: 'hospital', latitude: 45.497, longitude: -73.4866 },
@@ -165,7 +176,15 @@ function collectHubs({ zones, scores, now }: BuildInput): Scored[] {
         (h) => haversineKm(h.latitude, h.longitude, z.latitude, z.longitude) <= HUB_ZONE_MATCH_KM
       )
   );
-  const hubs: Scored[] = real.map((z) => ({ ...z, score: scores.get(z.id) ?? 0 }));
+  // A real zone sitting on a stand-anchored hub keeps its id/score/name but
+  // navigates to the official stand (no second row for the same place).
+  const anchor = (z: Zone): Point => TAXI_HUBS.find(
+    (h) => h.stand && haversineKm(h.latitude, h.longitude, z.latitude, z.longitude) <= HUB_ZONE_MATCH_KM
+  ) ?? z;
+  const hubs: Scored[] = real.map((z) => {
+    const { latitude, longitude } = anchor(z);
+    return { ...z, latitude, longitude, score: scores.get(z.id) ?? 0 };
+  });
   for (const h of TAXI_HUBS) {
     const covered = real.some(
       (z) => haversineKm(h.latitude, h.longitude, z.latitude, z.longitude) <= HUB_ZONE_MATCH_KM
