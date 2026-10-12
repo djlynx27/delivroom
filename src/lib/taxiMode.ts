@@ -34,17 +34,20 @@ export interface TaxiHub {
   longitude: number;
 }
 
-// Coordinates cross-checked against OpenStreetMap geocoding (2026-10-12).
-// "Candidats" taxi: that a given point is an OFFICIAL taxi stand is not
-// verifiable remotely — confirm on the ground. Where the driver's supplied
-// value was > 800 m off OSM (Cartier, Le Carrefour, Sainte-Dorothée,
-// Charles-Le Moyne, Longueuil) the OSM value is used.
+// Coordinates verified against the official GTFS stops (STL, RTL, exo; 2026-10-12)
+// for the 7 transit hubs, and OSM geocoding for the rest (Place Bell, YUL, Gare
+// Centrale, Centre Bell, Berri-UQAM, CHUM, DIX30). The driver's original values
+// were 0.9-5.8 km off for Cartier, Le Carrefour, Sainte-Dorothée,
+// Charles-Le Moyne and Longueuil. "Candidats" taxi: that a point is an OFFICIAL
+// taxi stand is not verifiable remotely (the Ville de Montréal stand dataset
+// only covers the island: Gare Centrale, Berri-UQAM and CHUM sit within 30 m of
+// one) — confirm Laval/Longueuil on the ground.
 export const TAXI_HUBS: readonly TaxiHub[] = [
   { id: 'lvl-carrefour', name: 'Terminus Le Carrefour', city_id: 'lvl', kind: 'transit', latitude: 45.5686, longitude: -73.7484 },
-  { id: 'lvl-montmorency', name: 'Métro Montmorency', city_id: 'lvl', kind: 'transit', latitude: 45.5579, longitude: -73.7222 },
+  { id: 'lvl-montmorency', name: 'Métro Montmorency', city_id: 'lvl', kind: 'transit', latitude: 45.5583, longitude: -73.721 },
   { id: 'lvl-place-bell', name: 'Place Bell', city_id: 'lvl', kind: 'arena', latitude: 45.5559, longitude: -73.7231 },
   { id: 'lvl-cartier', name: 'Métro Cartier', city_id: 'lvl', kind: 'transit', latitude: 45.5598, longitude: -73.6826 },
-  { id: 'lvl-rem-ste-dorothee', name: 'REM Sainte-Dorothée', city_id: 'lvl', kind: 'transit', latitude: 45.5232, longitude: -73.8588 },
+  { id: 'lvl-rem-ste-dorothee', name: 'REM Sainte-Dorothée', city_id: 'lvl', kind: 'transit', latitude: 45.5233, longitude: -73.8617 },
   { id: 'mtl-yul', name: 'Aéroport YUL (arrivées)', city_id: 'mtl', kind: 'airport', latitude: 45.4657, longitude: -73.7455 },
   { id: 'mtl-gare-centrale', name: 'Gare Centrale', city_id: 'mtl', kind: 'transit', latitude: 45.5002, longitude: -73.5661 },
   { id: 'mtl-centre-bell', name: 'Centre Bell', city_id: 'mtl', kind: 'arena', latitude: 45.4951, longitude: -73.5698 },
