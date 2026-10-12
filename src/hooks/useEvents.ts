@@ -44,11 +44,23 @@ export function isDemandRelevantEvent(event: AppEvent, now: Date) {
   return supportsNightlife && (hasLargeCrowd || hasStrongDemandSignal);
 }
 
-export function useEvents(cityId?: string) {
+// Only events that ended in the last day or are still to come matter for
+// scoring/badges. Without this bound the table (2 184 rows, mostly transit
+// delay alerts) hit PostgREST's 1 000-row cap and, ordered by start_at, the
+// NEWEST rows were the ones dropped -- Longueuil lost every event after
+// 2026-09-30.
+const EVENTS_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+
+export function useEvents(cityId?: string, enabled = true) {
   return useQuery<AppEvent[]>({
     queryKey: ['events', cityId ?? 'all'],
+    enabled,
     queryFn: async () => {
-      let q = supabase.from('events').select('*').order('start_at');
+      let q = supabase
+        .from('events')
+        .select('*')
+        .gte('end_at', new Date(Date.now() - EVENTS_LOOKBACK_MS).toISOString())
+        .order('start_at');
       if (cityId) q = q.eq('city_id', cityId);
       const { data, error } = await q;
       if (error) throw error;
