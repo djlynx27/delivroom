@@ -222,6 +222,31 @@ describe('buildTaxiRecommendations — events', () => {
     expect(out.filter((z) => z.taxiTier === 'event')).toHaveLength(1);
   });
 
+  it('does not let a far event (8 km) outrank a near hub; a near event still wins', () => {
+    // Driver in Saint-Léonard, Longueuil terminus delay ~8 km away.
+    const origin = { latitude: 45.595, longitude: -73.59 };
+    const lng = event({
+      id: 'lng',
+      name: 'Retard majeur — Terminus Longueuil',
+      venue: '',
+      latitude: 45.524,
+      longitude: -73.5215,
+      category: 'transit',
+    });
+    const zones = [zone('near-hub', 'transport', 45.6, -73.59, 'Hub proche')];
+    const far = recommend(zones, { 'near-hub': 60 }, [lng], origin);
+    expect(far[0]?.id).toBe('near-hub');
+    // past the 7 km hero cap the far event is dropped, not promoted
+    expect(far.some((z) => z.id === 'taxi-evt:lng')).toBe(false);
+    // 5 km away: still listed (as an event) but ranked under the near hub
+    const mid = event({ id: 'mid', name: 'Concert', venue: '', latitude: 45.56, longitude: -73.52 });
+    const midOut = recommend(zones, { 'near-hub': 60 }, [mid], origin);
+    expect(midOut[0]?.id).toBe('near-hub');
+    expect(midOut.find((z) => z.id === 'taxi-evt:mid')?.taxiTier).toBe('event');
+    const near = recommend(zones, { 'near-hub': 60 }, [event()], ORIGIN);
+    expect(near[0]?.taxiTier).toBe('event');
+  });
+
   it('keeps events beyond the hub radius (10 km) out of the list', () => {
     const far = event({ id: 'far', name: 'Far event', latitude: 45.6, longitude: -73.2 });
     expect(recommend([], {}, [far]).some((z) => z.name.includes('Far event'))).toBe(false);

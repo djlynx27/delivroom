@@ -101,6 +101,11 @@ const SCORE_INHERIT_MAX_KM = 3;
 export const NEUTRAL_HUB_SCORE = 50;
 export const EVENT_MAX_KM = 10;
 export const EVENT_LEAD_MINUTES = 45;
+// Events farther than this lose their top-of-list priority (ESTIMATED; the
+// driver reported an 8.3 km "guaranteed" Longueuil pick as too much deadhead).
+export const EVENT_PRIORITY_KM = 3;
+// On top of the shared 3 pts/km: ~10 pts/km in total past the priority radius.
+const FAR_EVENT_EXTRA_PENALTY_PER_KM = 7;
 // ESTIMATED: events sort first regardless; this only sets the badge value.
 export const EVENT_PRIORITY_SCORE = 95;
 const EVENT_DEDUPE_KM = 0.15;
@@ -347,15 +352,25 @@ export function buildTaxiRecommendations(input: BuildInput): TaxiRecommendation[
   );
   const built = live.flatMap((e) => toEventRow(e, hubs, input) ?? []);
   const consumed = new Set(built.flatMap((b) => b.consumedHubId ?? []));
-  const eventRows = built.map((b) => b.row).sort((a, b) => a.distKm - b.distKm);
+  const rows = built.map((b) => b.row);
+  // Only nearby events get absolute priority; a far one competes with the hubs
+  // under the same per-km penalty (deadhead km eat the event's payoff).
+  const eventRows = rows.filter((r) => r.distKm <= EVENT_PRIORITY_KM).sort((a, b) => a.distKm - b.distKm);
+  const farEvents = rows
+    .filter((r) => r.distKm > EVENT_PRIORITY_KM)
+    .map((r) => ({ ...r, score: r.score - FAR_EVENT_EXTRA_PENALTY_PER_KM * (r.distKm - EVENT_PRIORITY_KM) }));
 
+  const pool: Array<Scored & { taxiTier?: TaxiTier; eventEndAt?: string }> = [
+    ...hubs.filter((h) => !consumed.has(h.id)),
+    ...farEvents,
+  ];
   const hubRows = rankByProximityPenalizedScore(
     origin.latitude,
     origin.longitude,
-    hubs.filter((h) => !consumed.has(h.id)),
+    pool,
     MAX_HERO_ZONE_DISTANCE_KM,
     DISTANCE_PENALTY_PER_KM
-  ).map((z): TaxiRecommendation => ({ ...z, taxiTier: 'hub' }));
+  ).map((z): TaxiRecommendation => ({ ...z, taxiTier: z.taxiTier ?? 'hub' }));
 
   return [...eventRows, ...hubRows];
 }
