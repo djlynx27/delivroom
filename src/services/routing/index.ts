@@ -1,5 +1,6 @@
 import { getGoogleMapsNavUrl } from '@/lib/hotspots';
 import { logger } from '@/lib/logger';
+import { isVirtualTaxiId } from '@/lib/taxiMode';
 import { supabase } from '@/integrations/supabase/client';
 import { fetchOsrmRoute, fetchRoute } from './mapboxDirections';
 import type {
@@ -156,7 +157,11 @@ export function logNavEvent(
         origin_lng: origin?.lng ?? null,
         dest_lat: destination.latitude,
         dest_lng: destination.longitude,
-        dest_zone_id: destination.id === 'navigate-target' ? null : destination.id,
+        // Virtual taxi hubs/events aren't rows in `zones` (FK on dest_zone_id).
+        dest_zone_id:
+          destination.id === 'navigate-target' || isVirtualTaxiId(destination.id)
+            ? null
+            : destination.id,
         dest_label: destination.name,
       });
     })

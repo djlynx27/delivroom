@@ -41,6 +41,7 @@ import { useArrivalCountdown } from '@/hooks/useArrivalCountdown';
 import { nearestCityId, useAutoCity } from '@/hooks/useAutoCity';
 import { useCityId } from '@/hooks/useCityId';
 import { useDemandScores } from '@/hooks/useDemandScores';
+import { useEvents } from '@/hooks/useEvents';
 import { useGasBoard } from '@/hooks/useGasBoard';
 import { useHaptics } from '@/hooks/useHaptics';
 import { useNotifications } from '@/hooks/useNotifications';
@@ -53,6 +54,7 @@ import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserL
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
 import { isLabBuild } from '@/lib/env';
+import { buildTaxiRecommendations, taxiEventBadge } from '@/lib/taxiMode';
 import {
   DISTANCE_PENALTY_PER_KM,
   findNearestZone,
@@ -219,6 +221,9 @@ export default function DriveScreen() {
     conservativePresence,
     demandWindow,
   });
+  // Lab taxi mode needs events from every city (a hub in Laval can be the
+  // right call from Montréal); disabled in the commercial build.
+  const { data: taxiEvents = [] } = useEvents(undefined, isLabBuild());
   const { canNavigate: canTrustNav, badge: navTrustBadge } = useNavTrustState(
     isLocationLive,
     hasLiveScores
@@ -377,6 +382,19 @@ export default function DriveScreen() {
     // skeleton instead (see hasPreciseFix gate below `noZonesAvailable`).
     if (!hasPreciseFix || !location) return [];
 
+    // Lab = taxi only: hubs + in-progress/imminent events, events first. The
+    // commercial build below is untouched. Lyft saturation/scoring tweaks are
+    // intentionally skipped here (see lib/taxiMode.ts).
+    if (isLabBuild()) {
+      return buildTaxiRecommendations({
+        zones,
+        scores,
+        events: taxiEvents,
+        now: new Date(),
+        origin: location,
+      });
+    }
+
     // Displayed score -- what the driver sees on the badge. Never adjusted
     // for distance here, so it keeps meaning "demand right now"; the
     // distance penalty is applied only inside rankByProximityPenalizedScore
@@ -402,7 +420,7 @@ export default function DriveScreen() {
       DISTANCE_PENALTY_PER_KM,
       isLabBuild() // taxi bias is Lab-only; commercial keeps the original order
     );
-  }, [zones, scores, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
+  }, [zones, scores, taxiEvents, saturatedZoneIds, driversByZone, location, hasPreciseFix]);
 
   const marketRadarZones = useMemo(
     () =>
@@ -419,7 +437,8 @@ export default function DriveScreen() {
   // Reweight scores based on driver objective (rideshare vs delivery favor
   // different zone types) — see scoringEngine.reweightZonesByDriverMode
   const modeZones = useMemo(
-    () => reweightZonesByDriverMode(rankedZones, driverMode),
+    // Lab taxi mode: the rideshare/delivery reweighting would demote event rows.
+    () => (isLabBuild() ? rankedZones : reweightZonesByDriverMode(rankedZones, driverMode)),
     [rankedZones, driverMode]
   );
 
@@ -445,7 +464,9 @@ export default function DriveScreen() {
   const nextZones = modeZones
     .filter((z) => !heroZone || z.id !== heroZone.id)
     .slice(0, 6);
-  const heroEventBadge = heroZone ? zoneEventBadge.get(heroZone.id) : undefined;
+  const heroEventBadge = heroZone
+    ? (zoneEventBadge.get(heroZone.id) ?? taxiEventBadge(heroZone))
+    : undefined;
 
   // Inverse Proximity Spotter: a tactical 50-150m offset from the hero
   // zone's coordinate, toward whichever cell of the Lyft nearby-drivers grid
@@ -455,7 +476,9 @@ export default function DriveScreen() {
   // when it's active -- the displayed zone name/score/distance stay the
   // zone's own, only the nav *destination* moves.
   const heroMicroSpot = useMemo(() => {
-    if (!heroZone) return null;
+    // Lab taxi mode: the micro-spot offset comes from the Lyft nearby-drivers
+    // grid, and a taxi stand's coordinate must stay exact.
+    if (!heroZone || isLabBuild()) return null;
     return computeMicroSpot(heroZone, lyftSignalByZone.get(heroZone.id)?.nearbyDriversGrid);
   }, [heroZone, lyftSignalByZone]);
   const heroNavTarget: RouteCandidateZone | null =
@@ -948,11 +971,13 @@ export default function DriveScreen() {
                   <WazeIcon className="w-6 h-6 flex-shrink-0" /> Waze
                 </Button>
                 {/* Platform arbitrage for hero zone */}
-                <PlatformArbitrage
-                  zoneId={heroZone.id}
-                  zoneScore={heroZone.score}
-                  compact={false}
-                />
+                {!isLabBuild() && (
+                  <PlatformArbitrage
+                    zoneId={heroZone.id}
+                    zoneScore={heroZone.score}
+                    compact={false}
+                  />
+                )}
               </div>
             </>
           ) : scoresLoading || !hasPreciseFix ? (
