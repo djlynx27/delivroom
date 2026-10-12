@@ -23,6 +23,7 @@ import { useWeather } from '@/hooks/useWeather';
 import { useZoneScores } from '@/hooks/useZoneScores';
 import { supabase } from '@/integrations/supabase/client';
 import { type ZoneHistory } from '@/lib/aiAgents';
+import { isLabBuild } from '@/lib/env';
 import { getDriverFingerprint } from '@/lib/driverPreferences';
 import {
   findSimilarContextsForZoneContext,
@@ -31,6 +32,7 @@ import {
 import {
   applyHabitBoost,
   computeSuccessProbabilityScore,
+  computeTaxiBaseScore,
 } from '@/lib/lyftStrategy';
 import { getObservedZoneScore } from '@/lib/observedScore';
 import {
@@ -450,7 +452,8 @@ export function useDemandScores(
 
       return [...latestByZone.values()];
     },
-    enabled: !!cityId && zones.length > 0,
+    // Lab (taxi) build: no Lyft signals at all (see computeTaxiBaseScore).
+    enabled: !isLabBuild() && !!cityId && zones.length > 0,
     staleTime: 60_000,
   });
 
@@ -464,7 +467,7 @@ export function useDemandScores(
     null
   );
   useEffect(() => {
-    if (!cityId) return;
+    if (!cityId || isLabBuild()) return;
 
     const channel = supabase
       .channel(`platform-signals-${cityId}`)
@@ -798,13 +801,15 @@ export function useDemandScores(
               zone.latitude,
               zone.longitude
             );
-      const successScore = computeSuccessProbabilityScore({
-        demandContextScore,
-        distanceKm,
-        demandLevel: lyftSignal?.demandLevel,
-        estimatedWaitMin: lyftSignal?.estimatedWaitMin,
-        surgeActive: lyftSignal?.surgeActive,
-      });
+      const successScore = isLabBuild()
+        ? computeTaxiBaseScore(demandContextScore)
+        : computeSuccessProbabilityScore({
+            demandContextScore,
+            distanceKm,
+            demandLevel: lyftSignal?.demandLevel,
+            estimatedWaitMin: lyftSignal?.estimatedWaitMin,
+            surgeActive: lyftSignal?.surgeActive,
+          });
       const habitSignal = userPingSignalByZone.get(zone.id);
       const habitBoost = applyHabitBoost({
         score: successScore.score,

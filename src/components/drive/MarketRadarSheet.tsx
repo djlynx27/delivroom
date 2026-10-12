@@ -25,6 +25,8 @@ interface MarketRadarSheetProps {
   demandWindow: DemandWindow;
   onDemandWindowChange: (window: DemandWindow) => void;
   bestGasStation: RankedStation | null;
+  /** Lab (taxi) build: the wait view is Lyft-only data, so it is not offered. */
+  hideWait?: boolean;
 }
 
 type RadarView = 'wait' | 'saturation' | 'pitstops';
@@ -125,8 +127,19 @@ export function MarketRadarSheet({
   demandWindow,
   onDemandWindowChange,
   bestGasStation,
+  hideWait = false,
 }: MarketRadarSheetProps) {
-  const [view, setView] = useState<RadarView>('wait');
+  const [view, setView] = useState<RadarView>(hideWait ? 'saturation' : 'wait');
+  const views = hideWait
+    ? ([
+        { key: 'saturation', label: 'Saturation' },
+        { key: 'pitstops', label: 'Pit-Stops' },
+      ] as const)
+    : ([
+        { key: 'wait', label: 'Attente' },
+        { key: 'saturation', label: 'Saturation' },
+        { key: 'pitstops', label: 'Pit-Stops' },
+      ] as const);
 
   return (
     <Sheet>
@@ -145,13 +158,7 @@ export function MarketRadarSheet({
         </SheetHeader>
 
         <div className="flex rounded-xl border border-border bg-muted/30 p-1 gap-1 mt-3">
-          {(
-            [
-              { key: 'wait', label: 'Attente' },
-              { key: 'saturation', label: 'Saturation' },
-              { key: 'pitstops', label: 'Pit-Stops' },
-            ] as const
-          ).map(({ key, label }) => (
+          {views.map(({ key, label }) => (
             <button
               key={key}
               onClick={() => setView(key)}

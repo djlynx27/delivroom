@@ -1,4 +1,5 @@
 import {
+  computeTaxiBaseScore,
   applyHabitBoost,
   computeProximityFactor,
   computeSuccessProbabilityScore,
@@ -60,5 +61,25 @@ describe('lyftStrategy', () => {
     expect(boosted.score).toBe(55);
     expect(ignored.applied).toBe(false);
     expect(ignored.score).toBe(72);
+  });
+});
+
+describe('computeTaxiBaseScore (Lab)', () => {
+  it('returns the demand context as-is, clamped to 0-100', () => {
+    expect(computeTaxiBaseScore(70).score).toBe(70);
+    expect(computeTaxiBaseScore(140).score).toBe(100);
+    expect(computeTaxiBaseScore(-5).score).toBe(0);
+  });
+
+  it('does not apply the rideshare driver-supply model (a 70 stays 70, not ~15)', () => {
+    const rideshare = computeSuccessProbabilityScore({ demandContextScore: 70, distanceKm: 3 });
+    expect(rideshare.score).toBeLessThan(40);
+    expect(computeTaxiBaseScore(70).score).toBe(70);
+  });
+
+  it('leaves proximity neutral (the Lab ranking already penalizes distance)', () => {
+    const r = computeTaxiBaseScore(70);
+    expect(r.proximityFactor).toBe(1);
+    expect(r.driverSupply).toBe(0);
   });
 });

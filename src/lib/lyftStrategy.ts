@@ -80,6 +80,23 @@ export function computeSuccessProbabilityScore({
   };
 }
 
+/**
+ * Lab (taxi) base score: the demand context as-is. computeSuccessProbabilityScore
+ * models rideshare driver supply (demand / (supply + 1) x proximity) and, even
+ * with no Lyft signal, collapses a 70 to ~15 -- which made distance dominate
+ * the Lab ranking. Proximity is already penalized at ranking time, so it is
+ * neutral (1) here.
+ */
+export function computeTaxiBaseScore(demandContextScore: number) {
+  const score = Math.round(clamp(demandContextScore, 0, 100));
+  return {
+    successProbability: round(score / 100, 4),
+    score,
+    driverSupply: 0,
+    proximityFactor: 1,
+  };
+}
+
 export function applyHabitBoost({
   score,
   similarity,

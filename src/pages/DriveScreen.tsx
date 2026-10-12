@@ -198,8 +198,8 @@ export default function DriveScreen() {
     );
     return () => clearInterval(interval);
   }, []);
-  const [conservativePresence, setConservativePresence] = useState(() =>
-    getConservativePresencePreference()
+  const [conservativePresence, setConservativePresence] = useState(
+    () => !isLabBuild() && getConservativePresencePreference()
   );
   const [demandWindow, setDemandWindow] = useState<DemandWindow>('30m');
   const {
@@ -683,6 +683,9 @@ export default function DriveScreen() {
         <QuickDecideWidget />
       </div>
 
+      {/* Rideshare/Lyft controls: hidden in the Lab (taxi-only) build */}
+      {!isLabBuild() && (
+        <>
       {/* Multi-platform online tracker + switch suggestions */}
       <div className="px-4 mt-2">
         <PlatformSwitchBanner driverMode={driverMode} />
@@ -763,6 +766,8 @@ export default function DriveScreen() {
           </div>
         </button>
       </div>
+        </>
+      )}
 
       {/* Statut chauffeur : Occupé / Libre */}
       <div className="px-4 mt-2">
@@ -1013,6 +1018,7 @@ export default function DriveScreen() {
           demandWindow={demandWindow}
           onDemandWindowChange={setDemandWindow}
           bestGasStation={bestGasStation}
+          hideWait={isLabBuild()}
         />
 
         <Button
