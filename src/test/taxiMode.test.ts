@@ -3,6 +3,7 @@ import type { Zone } from '@/hooks/useSupabase';
 import {
   TAXI_HUBS,
   buildTaxiRecommendations,
+  isHubUsable,
   isVirtualTaxiId,
   taxiEventBadge,
 } from '@/lib/taxiMode';
@@ -55,13 +56,14 @@ function recommend(
   zones: Zone[],
   scores: Record<string, number>,
   events: AppEvent[] = [],
-  origin = ORIGIN
+  origin = ORIGIN,
+  now = NOW
 ) {
   return buildTaxiRecommendations({
     zones,
     scores: new Map(Object.entries(scores)),
     events,
-    now: NOW,
+    now,
     origin,
   });
 }
@@ -265,33 +267,68 @@ describe('taxiEventBadge', () => {
   });
 });
 
-describe('official Montréal taxi-stand anchoring (Option A)', () => {
-  const MTL_STAND_HUBS = [
-    'mtl-gare-centrale',
-    'mtl-centre-bell',
-    'mtl-berri-uqam',
-    'mtl-chum',
-    'mtl-yul',
-  ];
+describe('official Montréal stands (verified against postestaxi, 15 posts)', () => {
+  const stands = TAXI_HUBS.filter((h) => h.stand);
 
-  it('anchors exactly the 5 Montréal hubs on an official stand, none in Laval/Longueuil', () => {
-    const withStand = TAXI_HUBS.filter((h) => h.stand).map((h) => h.id);
-    expect(withStand.sort()).toEqual([...MTL_STAND_HUBS].sort());
+  it('has 15 stand-anchored hubs, all in Montréal, with unique stand codes', () => {
+    expect(stands).toHaveLength(15);
+    expect(stands.every((h) => h.city_id === 'mtl')).toBe(true);
+    const codes = stands.map((h) => h.stand?.code);
+    expect(new Set(codes).size).toBe(15);
   });
 
-  it('uses the stand coordinates as the hub coordinates (YUL = Roméo-Vachon taxi basin)', () => {
-    const yul = TAXI_HUBS.find((h) => h.id === 'mtl-yul');
-    expect(yul?.stand?.code).toBe('5-35');
-    expect(haversineKm(45.45603, -73.74668, yul?.latitude ?? 0, yul?.longitude ?? 0)).toBeLessThan(0.05);
+  it('excludes the 1-place post 9-933 and the duplicate Mansfield entry', () => {
+    const codes = stands.map((h) => h.stand?.code);
+    expect(codes).not.toContain('9-933');
+    expect(codes.filter((c) => c === '20-696')).toHaveLength(1);
   });
 
-  it('only picks public/shared stands, except the airport (single official line)', () => {
-    for (const h of TAXI_HUBS.filter((x) => x.stand && x.id !== 'mtl-yul')) {
-      expect(h.stand?.kind).not.toBe('Privé');
-    }
+  it('keeps Laval and Longueuil hubs without a stand claim (no dataset covers them)', () => {
+    const others = TAXI_HUBS.filter((h) => h.city_id !== 'mtl');
+    expect(others.length).toBeGreaterThanOrEqual(8);
+    expect(others.every((h) => h.stand === undefined)).toBe(true);
   });
 
-  it('keeps the real zone id and score but navigates to the official stand', () => {
+  it('uses the YUL taxi basin coordinates (post 5-35)', () => {
+    const yul = TAXI_HUBS.find((h) => h.stand?.code === '5-35');
+    expect(haversineKm(45.45603, -73.746683, yul?.latitude ?? 0, yul?.longitude ?? 0)).toBeLessThan(0.05);
+  });
+});
+
+describe('isHubUsable — rules engine', () => {
+  const byCode = (code: string) => TAXI_HUBS.find((h) => h.stand?.code === code);
+  // 2026-10-12T17:00Z = 13:00 EDT ; 2026-10-13T00:30Z = 20:30 EDT ; 2026-10-13T04:30Z = 00:30 EDT
+  const AFTERNOON = new Date('2026-10-12T17:00:00.000Z');
+  const EVENING = new Date('2026-10-13T00:30:00.000Z');
+  const AFTER_MIDNIGHT = new Date('2026-10-13T04:30:00.000Z');
+
+  it('never uses a private company post (20-437 Taxelco)', () => {
+    const taxelco = byCode('20-437');
+    expect(taxelco).toBeDefined();
+    expect(taxelco && isHubUsable(taxelco, EVENING)).toBe(false);
+  });
+
+  it('allows the airport basin (the one official YUL line) although it is private', () => {
+    const yul = byCode('5-35');
+    expect(yul && isHubUsable(yul, AFTERNOON)).toBe(true);
+  });
+
+  it('respects the 18:00-minuit window of post 21-403 in Toronto time', () => {
+    const timed = byCode('21-403');
+    expect(timed).toBeDefined();
+    expect(timed && isHubUsable(timed, AFTERNOON)).toBe(false);
+    expect(timed && isHubUsable(timed, EVENING)).toBe(true);
+    expect(timed && isHubUsable(timed, AFTER_MIDNIGHT)).toBe(false);
+  });
+
+  it('keeps hubs without a stand always usable', () => {
+    const laval = TAXI_HUBS.find((h) => h.id === 'lvl-montmorency');
+    expect(laval && isHubUsable(laval, AFTERNOON)).toBe(true);
+  });
+});
+
+describe('stand anchoring in recommendations', () => {
+  it('keeps the real zone id and score but navigates to the official stand (YUL)', () => {
     const out = recommend(
       [zone('mtl-yul', 'aéroport', 45.4571, -73.7496, 'Aéroport Trudeau (YUL)')],
       { 'mtl-yul': 96 },
@@ -301,8 +338,26 @@ describe('official Montréal taxi-stand anchoring (Option A)', () => {
     const yul = out.find((z) => z.id === 'mtl-yul');
     expect(yul?.score).toBe(96);
     expect(yul?.latitude).toBe(45.45603);
-    expect(yul?.longitude).toBe(-73.74668);
+    expect(yul?.longitude).toBe(-73.746683);
     expect(out.filter((z) => z.type === 'aéroport')).toHaveLength(1);
+  });
+
+  it('anchors the Gare Centrale zone on the usable public 15-place post (20-696), not the private one', () => {
+    const out = recommend(
+      [zone('mtl-gc', 'transport', 45.5003, -73.5672, 'Gare Centrale')],
+      { 'mtl-gc': 68 }
+    );
+    const gc = out.find((z) => z.id === 'mtl-gc');
+    expect(gc?.latitude).toBe(45.49987);
+    expect(gc?.longitude).toBe(-73.568365);
+  });
+
+  it('hides post 21-403 at 13:00 and shows it at 20:30 (Vieux-Montréal)', () => {
+    const vieux = { latitude: 45.5056, longitude: -73.5536 };
+    const day = recommend([], {}, [], vieux, new Date('2026-10-12T17:00:00.000Z'));
+    const eve = recommend([], {}, [], vieux, new Date('2026-10-13T00:30:00.000Z'));
+    expect(day.some((z) => z.name.includes('21-403'))).toBe(false);
+    expect(eve.some((z) => z.name.includes('21-403'))).toBe(true);
   });
 
   it('leaves a real zone without an official stand on its own coordinates', () => {
@@ -317,3 +372,4 @@ describe('official Montréal taxi-stand anchoring (Option A)', () => {
     expect(mm?.longitude).toBe(-73.7215);
   });
 });
+
