@@ -10,6 +10,8 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const PAGE = 1000
+// ~967k lignes (≈240 Mo), recalculable — exclue du backup régulier
+const EXCLUDED = new Set(['zone_context_vectors'])
 
 const url = process.env.VITE_SUPABASE_URL
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -28,7 +30,7 @@ async function listTables(): Promise<string[]> {
     typeof spec === 'object' && spec !== null && 'definitions' in spec
       ? (spec as { definitions: Record<string, unknown> }).definitions
       : {}
-  return Object.keys(defs)
+  return Object.keys(defs).filter((t) => !EXCLUDED.has(t))
 }
 
 async function dumpTable(table: string): Promise<unknown[]> {
