@@ -53,3 +53,6 @@ artifacts/
 *.apk
 *.idsig
 *.keystore.*
+
+# Backups de données (trajets/GPS) — jamais commiter
+backups/
