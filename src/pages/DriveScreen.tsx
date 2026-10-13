@@ -54,6 +54,7 @@ import { haversineKm, useHasPreciseFix, useUserLocation } from '@/hooks/useUserL
 import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
 import { isLabBuild } from '@/lib/env';
+import { getHoliday } from '@/lib/holidayEngine';
 import { buildTaxiRecommendations, taxiEventBadge } from '@/lib/taxiMode';
 import {
   DISTANCE_PENALTY_PER_KM,
@@ -648,6 +649,8 @@ export default function DriveScreen() {
     }
   }
 
+  const holiday = isLabBuild() ? getHoliday(new Date()) : null;
+
   return (
     <div
       className="flex flex-col h-full pb-36 bg-background text-foreground overflow-y-auto"
@@ -669,6 +672,11 @@ export default function DriveScreen() {
           }
         />
         <OfflineBadge className="mt-2" />
+        {holiday && (
+          <p className="mt-2 rounded-md bg-amber-500/15 px-3 py-1.5 text-xs text-amber-600 dark:text-amber-400">
+            ⚠️ {holiday.name} — activité commerciale réduite, pondération affaires baissée
+          </p>
+        )}
       </div>
 
       {/* Shift tally — running $/h based on actual fares logged today */}

@@ -5,6 +5,7 @@ import {
 } from '@/hooks/useEvents';
 import type { Zone } from '@/hooks/useSupabase';
 import { haversineKm } from '@/hooks/useUserLocation';
+import { holidayMultiplierForType } from '@/lib/holidayEngine';
 import {
   DISTANCE_PENALTY_PER_KM,
   MAX_HERO_ZONE_DISTANCE_KM,
@@ -261,7 +262,8 @@ function collectHubs({ zones, scores, now }: BuildInput): Scored[] {
       )
     );
   }
-  return hubs;
+  // Holidays cut workday-driven hubs (offices/clinics/commerce) only.
+  return hubs.map((h) => ({ ...h, score: h.score * holidayMultiplierForType(h.type, now) }));
 }
 
 // Repeated alerts for the same place (e.g. one "Retard majeur" row per

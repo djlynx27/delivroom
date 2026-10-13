@@ -10,7 +10,7 @@ import {
 import { haversineKm } from '@/hooks/useUserLocation';
 import { describe, expect, it } from 'vitest';
 
-const NOW = new Date('2026-10-12T22:00:00.000Z');
+const NOW = new Date('2026-10-14T22:00:00.000Z');
 
 function zone(
   id: string,
@@ -37,8 +37,8 @@ function event(overrides: Partial<AppEvent> = {}): AppEvent {
     city_id: 'mtl',
     latitude: 45.4961,
     longitude: -73.5693,
-    start_at: '2026-10-12T21:00:00.000Z',
-    end_at: '2026-10-13T00:00:00.000Z',
+    start_at: '2026-10-14T21:00:00.000Z',
+    end_at: '2026-10-15T00:00:00.000Z',
     capacity: 21000,
     demand_impact: 5,
     boost_multiplier: 1.15,
@@ -170,16 +170,16 @@ describe('buildTaxiRecommendations — events', () => {
       name: 'Concert soon',
       latitude: 45.51,
       longitude: -73.56,
-      start_at: '2026-10-12T22:30:00.000Z',
-      end_at: '2026-10-13T01:00:00.000Z',
+      start_at: '2026-10-14T22:30:00.000Z',
+      end_at: '2026-10-15T01:00:00.000Z',
     });
     const later = event({
       id: 'later',
       name: 'Concert later',
       latitude: 45.505,
       longitude: -73.575,
-      start_at: '2026-10-12T23:30:00.000Z',
-      end_at: '2026-10-13T02:00:00.000Z',
+      start_at: '2026-10-14T23:30:00.000Z',
+      end_at: '2026-10-15T02:00:00.000Z',
     });
     const names = recommend([], {}, [soon, later]).map((z) => z.name);
     expect(names.some((n) => n.includes('Concert soon'))).toBe(true);
@@ -194,8 +194,8 @@ describe('buildTaxiRecommendations — events', () => {
       capacity: 0,
       latitude: 45.5,
       longitude: -73.6,
-      start_at: '2026-10-12T12:00:00.000Z',
-      end_at: '2026-10-12T23:00:00.000Z',
+      start_at: '2026-10-14T12:00:00.000Z',
+      end_at: '2026-10-14T23:00:00.000Z',
     });
     const out = recommend([], {}, [holiday]);
     expect(out.some((z) => z.name.includes('Action de Grâces'))).toBe(false);
@@ -214,8 +214,8 @@ describe('buildTaxiRecommendations — events', () => {
       [],
       {},
       [
-        event({ ...base, id: 'a', start_at: '2026-10-12T21:00:00.000Z', end_at: '2026-10-13T00:00:00.000Z' }),
-        event({ ...base, id: 'b', start_at: '2026-10-12T21:30:00.000Z', end_at: '2026-10-13T00:30:00.000Z' }),
+        event({ ...base, id: 'a', start_at: '2026-10-14T21:00:00.000Z', end_at: '2026-10-15T00:00:00.000Z' }),
+        event({ ...base, id: 'b', start_at: '2026-10-14T21:30:00.000Z', end_at: '2026-10-15T00:30:00.000Z' }),
       ],
       { latitude: 45.52, longitude: -73.52 }
     );
@@ -322,10 +322,10 @@ describe('official Montréal stands (verified against postestaxi, 15 posts)', ()
 
 describe('isHubUsable — rules engine', () => {
   const byCode = (code: string) => TAXI_HUBS.find((h) => h.stand?.code === code);
-  // 2026-10-12T17:00Z = 13:00 EDT ; 2026-10-13T00:30Z = 20:30 EDT ; 2026-10-13T04:30Z = 00:30 EDT
-  const AFTERNOON = new Date('2026-10-12T17:00:00.000Z');
-  const EVENING = new Date('2026-10-13T00:30:00.000Z');
-  const AFTER_MIDNIGHT = new Date('2026-10-13T04:30:00.000Z');
+  // 2026-10-14T17:00Z = 13:00 EDT ; 2026-10-15T00:30Z = 20:30 EDT ; 2026-10-15T04:30Z = 00:30 EDT
+  const AFTERNOON = new Date('2026-10-14T17:00:00.000Z');
+  const EVENING = new Date('2026-10-15T00:30:00.000Z');
+  const AFTER_MIDNIGHT = new Date('2026-10-15T04:30:00.000Z');
 
   it('never uses a private company post (20-437 Taxelco)', () => {
     const taxelco = byCode('20-437');
@@ -379,8 +379,8 @@ describe('stand anchoring in recommendations', () => {
 
   it('hides post 21-403 at 13:00 and shows it at 20:30 (Vieux-Montréal)', () => {
     const vieux = { latitude: 45.5056, longitude: -73.5536 };
-    const day = recommend([], {}, [], vieux, new Date('2026-10-12T17:00:00.000Z'));
-    const eve = recommend([], {}, [], vieux, new Date('2026-10-13T00:30:00.000Z'));
+    const day = recommend([], {}, [], vieux, new Date('2026-10-14T17:00:00.000Z'));
+    const eve = recommend([], {}, [], vieux, new Date('2026-10-15T00:30:00.000Z'));
     expect(day.some((z) => z.name.includes('21-403'))).toBe(false);
     expect(eve.some((z) => z.name.includes('21-403'))).toBe(true);
   });
