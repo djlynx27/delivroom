@@ -101,6 +101,8 @@ export const HUB_ZONE_MATCH_KM = 0.4;
 const SCORE_INHERIT_MAX_KM = 3;
 export const NEUTRAL_HUB_SCORE = 50;
 export const EVENT_MAX_KM = 10;
+// Lab search ring: tight by default (deadhead), widened only when it comes up empty.
+export const LAB_RADIUS_STEPS_KM: readonly number[] = [5, MAX_HERO_ZONE_DISTANCE_KM, EVENT_MAX_KM];
 export const EVENT_LEAD_MINUTES = 45;
 // Events farther than this lose their top-of-list priority (ESTIMATED; the
 // driver reported an 8.3 km "guaranteed" Longueuil pick as too much deadhead).
@@ -357,22 +359,29 @@ export function buildTaxiRecommendations(input: BuildInput): TaxiRecommendation[
   const rows = built.map((b) => b.row);
   // Only nearby events get absolute priority; a far one competes with the hubs
   // under the same per-km penalty (deadhead km eat the event's payoff).
-  const eventRows = rows.filter((r) => r.distKm <= EVENT_PRIORITY_KM).sort((a, b) => a.distKm - b.distKm);
-  const farEvents = rows
-    .filter((r) => r.distKm > EVENT_PRIORITY_KM)
-    .map((r) => ({ ...r, score: r.score - FAR_EVENT_EXTRA_PENALTY_PER_KM * (r.distKm - EVENT_PRIORITY_KM) }));
+  const pickRing = (radiusKm: number): TaxiRecommendation[] => {
+    const inRing = rows.filter((r) => r.distKm <= radiusKm);
+    const eventRows = inRing.filter((r) => r.distKm <= EVENT_PRIORITY_KM).sort((a, b) => a.distKm - b.distKm);
+    const farEvents = inRing
+      .filter((r) => r.distKm > EVENT_PRIORITY_KM)
+      .map((r) => ({ ...r, score: r.score - FAR_EVENT_EXTRA_PENALTY_PER_KM * (r.distKm - EVENT_PRIORITY_KM) }));
+    const pool: Array<Scored & { taxiTier?: TaxiTier; eventEndAt?: string }> = [
+      ...hubs.filter((h) => !consumed.has(h.id)),
+      ...farEvents,
+    ];
+    const hubRows = rankByProximityPenalizedScore(
+      origin.latitude,
+      origin.longitude,
+      pool,
+      radiusKm,
+      DISTANCE_PENALTY_PER_KM
+    ).map((z): TaxiRecommendation => ({ ...z, taxiTier: z.taxiTier ?? 'hub' }));
+    return [...eventRows, ...hubRows];
+  };
 
-  const pool: Array<Scored & { taxiTier?: TaxiTier; eventEndAt?: string }> = [
-    ...hubs.filter((h) => !consumed.has(h.id)),
-    ...farEvents,
-  ];
-  const hubRows = rankByProximityPenalizedScore(
-    origin.latitude,
-    origin.longitude,
-    pool,
-    MAX_HERO_ZONE_DISTANCE_KM,
-    DISTANCE_PENALTY_PER_KM
-  ).map((z): TaxiRecommendation => ({ ...z, taxiTier: z.taxiTier ?? 'hub' }));
-
-  return [...eventRows, ...hubRows];
+  for (const radiusKm of LAB_RADIUS_STEPS_KM) {
+    const out = pickRing(radiusKm);
+    if (out.length > 0) return out;
+  }
+  return [];
 }

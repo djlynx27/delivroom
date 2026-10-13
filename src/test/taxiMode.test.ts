@@ -238,11 +238,11 @@ describe('buildTaxiRecommendations — events', () => {
     expect(far[0]?.id).toBe('near-hub');
     // past the 7 km hero cap the far event is dropped, not promoted
     expect(far.some((z) => z.id === 'taxi-evt:lng')).toBe(false);
-    // 5 km away: still listed (as an event) but ranked under the near hub
+    // ~5.1 km away: outside the 5 km Lab ring while a hub is in range
     const mid = event({ id: 'mid', name: 'Concert', venue: '', latitude: 45.56, longitude: -73.52 });
     const midOut = recommend(zones, { 'near-hub': 60 }, [mid], origin);
     expect(midOut[0]?.id).toBe('near-hub');
-    expect(midOut.find((z) => z.id === 'taxi-evt:mid')?.taxiTier).toBe('event');
+    expect(midOut.some((z) => z.id === 'taxi-evt:mid')).toBe(false);
     const near = recommend(zones, { 'near-hub': 60 }, [event()], ORIGIN);
     expect(near[0]?.taxiTier).toBe('event');
   });
@@ -398,3 +398,46 @@ describe('stand anchoring in recommendations', () => {
   });
 });
 
+describe('Lab radius ring and event time window', () => {
+  const SL = { latitude: 45.595, longitude: -73.59 }; // Saint-Léonard
+  const near = zone('near-hub', 'transport', 45.6, -73.59, 'Hub proche');
+
+  it('ignores an event starting in 2 h at 2 km', () => {
+    const late = event({
+      id: 'late',
+      venue: '',
+      latitude: 45.613,
+      longitude: -73.59,
+      start_at: '2026-10-15T00:00:00.000Z', // NOW + 2 h
+      end_at: '2026-10-15T03:00:00.000Z',
+    });
+    const out = recommend([near], { 'near-hub': 60 }, [late], SL);
+    expect(out.some((z) => z.id === 'taxi-evt:late')).toBe(false);
+  });
+
+  it('puts an event ending in 15 min at ~2.8 km on top', () => {
+    const ending = event({
+      id: 'ending',
+      venue: '',
+      latitude: 45.62,
+      longitude: -73.59,
+      start_at: '2026-10-14T19:00:00.000Z',
+      end_at: '2026-10-14T22:15:00.000Z', // NOW + 15 min
+    });
+    const out = recommend([near], { 'near-hub': 99 }, [ending], SL);
+    expect(out[0]?.id).toBe('taxi-evt:ending');
+  });
+
+  it('excludes a hub at 5.5 km while closer ones exist', () => {
+    const far = zone('far-hub', 'transport', 45.6445, -73.59, 'Hub loin');
+    const out = recommend([near, far], { 'near-hub': 50, 'far-hub': 100 }, [], SL);
+    expect(out.some((z) => z.id === 'near-hub')).toBe(true);
+    expect(out.some((z) => z.id === 'far-hub')).toBe(false);
+  });
+
+  it('widens the ring when nothing is within 5 km', () => {
+    const far = zone('far-hub', 'transport', 45.6445, -73.59, 'Hub loin');
+    const out = recommend([far], { 'far-hub': 100 }, [], SL);
+    expect(out.some((z) => z.id === 'far-hub')).toBe(true);
+  });
+});
