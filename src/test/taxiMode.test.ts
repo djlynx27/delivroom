@@ -203,9 +203,9 @@ describe('buildTaxiRecommendations — events', () => {
 
   it('collapses repeated events at the same place into one row', () => {
     const base = {
-      name: 'Retard majeur — Terminus Longueuil',
-      latitude: 45.524,
-      longitude: -73.5215,
+      name: 'Retard majeur — Terminus Henri-Bourassa',
+      latitude: 45.5469,
+      longitude: -73.6674,
       category: 'transit',
       capacity: 12000,
       boost_multiplier: 1.45,
@@ -217,7 +217,7 @@ describe('buildTaxiRecommendations — events', () => {
         event({ ...base, id: 'a', start_at: '2026-10-14T21:00:00.000Z', end_at: '2026-10-15T00:00:00.000Z' }),
         event({ ...base, id: 'b', start_at: '2026-10-14T21:30:00.000Z', end_at: '2026-10-15T00:30:00.000Z' }),
       ],
-      { latitude: 45.52, longitude: -73.52 }
+      { latitude: 45.545, longitude: -73.665 }
     );
     expect(out.filter((z) => z.taxiTier === 'event')).toHaveLength(1);
   });
@@ -454,8 +454,19 @@ describe('river crossing — Terminus Longueuil vs Montréal hubs', () => {
     expect(out.some((z) => z.id === 'lng-tl')).toBe(false);
   });
 
-  it('still offers Longueuil when nothing on this side is in range', () => {
-    const out = recommend([terminus], { 'lng-tl': 100 }, [], { latitude: 45.52, longitude: -73.52 });
-    expect(out[0]?.id).toBe('lng-tl');
+  it('never returns Longueuil / Université de Sherbrooke hubs or events, from any origin', () => {
+    const univ = { ...zone('lng-univ', 'transport', 45.5236, -73.5176, 'Station Longueuil / Université de Sherbrooke'), city_id: 'lng' } as Zone;
+    const evt = event({ id: 'ev-lng', name: 'Concert', venue: 'Place Longueuil', city_id: 'lng', latitude: 45.5236, longitude: -73.5176 });
+    const scores = { 'lng-tl': 100, 'lng-univ': 100, 'mtl-berri': 60 };
+    const origins = [
+      { latitude: 45.5617, longitude: -73.5636 }, // Jardin botanique
+      NOTRE_DAME,
+      { latitude: 45.52, longitude: -73.52 }, // right next to the terminus
+    ];
+    for (const o of origins) {
+      const out = recommend([terminus, univ, berri], scores, [evt], o);
+      expect(out.some((z) => /longueuil|universit[ée] de sherbrooke/i.test(z.name))).toBe(false);
+      expect(out.some((z) => z.id === 'lng-tl' || z.id === 'lng-univ')).toBe(false);
+    }
   });
 });

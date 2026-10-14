@@ -265,7 +265,17 @@ function collectHubs({ zones, scores, now }: BuildInput): Scored[] {
     );
   }
   // Holidays cut workday-driven hubs (offices/clinics/commerce) only.
-  return hubs.map((h) => ({ ...h, score: h.score * holidayMultiplierForType(h.type, now) }));
+  return hubs
+    .filter((h) => !isExcludedPlace(h.name))
+    .map((h) => ({ ...h, score: h.score * holidayMultiplierForType(h.type, now) }));
+}
+
+// Driver decision (2026-10-14): never suggest these, whatever the distance or
+// score — the straight-line/same-side heuristics kept letting them through.
+// "Métro Sherbrooke" (Montréal) stays; only the Rive-Sud university stop is out.
+const EXCLUDED_PLACE_RE = /longueuil|universit[ée] de sherbrooke/i;
+export function isExcludedPlace(name: string): boolean {
+  return EXCLUDED_PLACE_RE.test(name);
 }
 
 // Repeated alerts for the same place (e.g. one "Retard majeur" row per
@@ -353,6 +363,7 @@ export function buildTaxiRecommendations(input: BuildInput): TaxiRecommendation[
   const live = dedupeEvents(
     [...getActiveEvents(events, now), ...getStartingSoonEvents(events, now, EVENT_LEAD_MINUTES)]
       .filter((e) => !e.is_holiday && e.capacity > 0)
+      .filter((e) => !isExcludedPlace(`${e.name} ${e.venue ?? ''}`))
   );
   const built = live.flatMap((e) => toEventRow(e, hubs, input) ?? []);
   const consumed = new Set(built.flatMap((b) => b.consumedHubId ?? []));
