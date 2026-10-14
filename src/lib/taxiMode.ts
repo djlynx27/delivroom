@@ -359,16 +359,32 @@ export function buildTaxiRecommendations(input: BuildInput): TaxiRecommendation[
   const rows = built.map((b) => b.row);
   // Only nearby events get absolute priority; a far one competes with the hubs
   // under the same per-km penalty (deadhead km eat the event's payoff).
+  const side = hubs.reduce<Scored | undefined>(
+    (best, h) =>
+      !best ||
+      haversineKm(origin.latitude, origin.longitude, h.latitude, h.longitude) <
+        haversineKm(origin.latitude, origin.longitude, best.latitude, best.longitude)
+        ? h
+        : best,
+    undefined
+  )?.city_id;
   const pickRing = (radiusKm: number): TaxiRecommendation[] => {
     const inRing = rows.filter((r) => r.distKm <= radiusKm);
     const eventRows = inRing.filter((r) => r.distKm <= EVENT_PRIORITY_KM).sort((a, b) => a.distKm - b.distKm);
     const farEvents = inRing
       .filter((r) => r.distKm > EVENT_PRIORITY_KM)
       .map((r) => ({ ...r, score: r.score - FAR_EVENT_EXTRA_PENALTY_PER_KM * (r.distKm - EVENT_PRIORITY_KM) }));
-    const pool: Array<Scored & { taxiTier?: TaxiTier; eventEndAt?: string }> = [
+    const candidates: Array<Scored & { taxiTier?: TaxiTier; eventEndAt?: string }> = [
       ...hubs.filter((h) => !consumed.has(h.id)),
       ...farEvents,
     ];
+    // As-the-crow-flies lies across the river: Terminus Longueuil is ~3 km from
+    // Vieux-Montréal but ~7 km by the bridge. Same-side picks first; the other
+    // shore only shows when nothing on this side is in the ring.
+    const sameSide = candidates.filter((c) => c.city_id === side);
+    const pool = sameSide.some((c) => haversineKm(origin.latitude, origin.longitude, c.latitude, c.longitude) <= radiusKm)
+      ? sameSide
+      : candidates;
     const hubRows = rankByProximityPenalizedScore(
       origin.latitude,
       origin.longitude,

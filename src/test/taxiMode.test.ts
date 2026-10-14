@@ -441,3 +441,21 @@ describe('Lab radius ring and event time window', () => {
     expect(out.some((z) => z.id === 'far-hub')).toBe(true);
   });
 });
+
+describe('river crossing — Terminus Longueuil vs Montréal hubs', () => {
+  const NOTRE_DAME = { latitude: 45.5075, longitude: -73.5545 }; // rue Notre-Dame, Vieux-Port
+  const terminus = { ...zone('lng-tl', 'transport', 45.5243, -73.5215, 'Terminus Longueuil'), city_id: 'lng' } as Zone;
+  const berri = zone('mtl-berri', 'transport', 45.5154, -73.5588, 'Berri-UQAM');
+  const gare = zone('mtl-gare', 'transport', 45.5, -73.5662, 'Gare Centrale');
+
+  it('keeps Longueuil out of the list while same-side hubs are in range, even at score 100', () => {
+    const out = recommend([terminus, berri, gare], { 'lng-tl': 100, 'mtl-berri': 60, 'mtl-gare': 60 }, [], NOTRE_DAME);
+    expect(out[0]?.city_id).toBe('mtl');
+    expect(out.some((z) => z.id === 'lng-tl')).toBe(false);
+  });
+
+  it('still offers Longueuil when nothing on this side is in range', () => {
+    const out = recommend([terminus], { 'lng-tl': 100 }, [], { latitude: 45.52, longitude: -73.52 });
+    expect(out[0]?.id).toBe('lng-tl');
+  });
+});
