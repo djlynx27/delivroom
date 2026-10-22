@@ -123,7 +123,16 @@ serve(async (req: Request) => {
         if (requestCount > 0) await sleep(REQUEST_SPACING_MS);
         requestCount++;
 
-        const feed = await fetchFeedWithFailover(agency, type, primaryKey, secondaryKey);
+        // Network-level failures (TLS, DNS, connect) throw from fetch, unlike HTTP
+        // error statuses which fetchFeedWithFailover already turns into null.
+        // Degrade the same way so one unreachable feed doesn't abort the other
+        // five (Sentry 7794668871: a bad upstream cert failed the whole sync).
+        let feed: GtfsFeedMessage | null = null;
+        try {
+          feed = await fetchFeedWithFailover(agency, type, primaryKey, secondaryKey);
+        } catch (feedErr) {
+          console.warn(`[gtfs-alerts-sync] ${agency}/${type} unreachable:`, feedErr);
+        }
         if (!feed) continue;
 
         allRows.push(...feedToEventRows(feed, agency, nowMs, zones as ZoneRow[]));
