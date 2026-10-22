@@ -1,1 +1,6 @@
 npx lint-staged
+
+# Migrations Supabase immuables: modifier/supprimer/renommer = bloqué (ajout OK)
+if git diff --cached --name-status --diff-filter=MDR -- supabase/migrations | grep -q .; then
+  echo "❌ Migration existante modifiée. Crée une nouvelle migration."; exit 1
+fi
