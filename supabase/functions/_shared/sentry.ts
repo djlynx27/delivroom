@@ -27,6 +27,21 @@ function ensureInit(): boolean {
 }
 
 /**
+ * supabase-js errors (PostgrestError) are plain objects, not Error instances,
+ * and several functions do `if (error) throw error`. Sentry then has no
+ * message or stack and files them all under one untitled "<anonymous>" issue
+ * (Sentry 7735914809). Wrap them so the title carries the PostgREST code+message.
+ */
+export function toError(err: unknown): Error {
+  if (err instanceof Error) return err;
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const { code, message } = err as { code?: unknown; message: unknown };
+    return new Error(`${code ? `[${String(code)}] ` : ''}${String(message)}`);
+  }
+  return new Error(String(err));
+}
+
+/**
  * Capture an exception. Adds the function slug as a tag so we can filter in
  * the Sentry UI. Falls back to console.error when Sentry is not configured.
  */
@@ -44,7 +59,7 @@ export function captureEdgeException(
     for (const [key, value] of Object.entries(extra)) {
       scope.setExtra(key, value);
     }
-    Sentry.captureException(err);
+    Sentry.captureException(toError(err));
   });
 }
 
