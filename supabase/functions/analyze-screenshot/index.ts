@@ -4,6 +4,7 @@ import { captureEdgeException } from '../_shared/sentry.ts';
 import { isRateLimited } from '../_shared/rateLimit.ts';
 import { sanitizePreAnalysis, tokensMatch } from './preAnalyzed.ts';
 import { lenientJsonParse } from '../_shared/jsonParse.ts';
+import { fuzzyMatchAddress, guessCityId } from './addressMatch.ts';
 import {
   autoSaveNotesTag,
   buildOfferSignalInsert,
@@ -631,101 +632,6 @@ async function resolveOneAddress(
   return null;
 }
 
-const CITY_KEYWORDS: Record<string, string[]> = {
-  mtl: [
-    'montreal', 'montréal', 'mtl',
-    'saint-laurent', 'st-laurent', 'st laurent', 'saint laurent',
-    'saint-léonard', 'st-léonard', 'saint leonard', 'st leonard',
-    'verdun', 'outremont', 'westmount', 'lasalle', 'anjou',
-    'rivière-des-prairies', 'riviere-des-prairies', 'rdp',
-    'pointe-aux-trembles', 'pat',
-    'plateau', 'rosemont', 'villeray', 'parc-extension', 'parc ex',
-    'mile end', 'mile-end', 'côte-des-neiges', 'cote-des-neiges', 'cdn',
-    'notre-dame-de-grâce', 'ndg',
-    'hochelaga', 'maisonneuve', 'mercier', 'ahuntsic', 'cartierville',
-    'lachine', 'dorval', 'pierrefonds', 'roxboro', 'kirkland',
-    'pointe-claire', 'baie-d\'urfé', 'beaconsfield', 'sainte-anne-de-bellevue',
-    'griffintown', 'sud-ouest', 'sud ouest',
-  ],
-  lvl: ['laval', 'chomedey', 'sainte-rose', 'ste-rose', 'sainte-dorothée',
-    'duvernay', 'fabreville', 'auteuil', 'pont-viau', 'vimont', 'laval-ouest',
-    'laval-des-rapides', 'saint-vincent-de-paul', 'saint-françois'],
-  lng: ['longueuil', 'brossard', 'saint-hubert', 'st-hubert', 'saint-lambert',
-    'st-lambert', 'greenfield park', 'lemoyne', 'boucherville',
-    'saint-bruno', 'st-bruno', 'rive-sud', 'rive sud', 'south shore'],
-  trb: ['terrebonne', 'lachenaie', 'mascouche', 'la plaine'],
-  sth: ['sainte-thérèse', 'ste-thérèse', 'ste therese'],
-  blv: ['blainville'],
-  bsb: ['boisbriand'],
-  rsm: ['rosemère', 'rosemere'],
-  bdf: ['bois-des-filion', 'bois des filion'],
-};
-
-function guessCityId(address: string): string | null {
-  const lower = address.toLowerCase();
-  // Score each city by counting keyword hits; pick the highest
-  let bestCity: string | null = null;
-  let bestScore = 0;
-  for (const [cityId, keywords] of Object.entries(CITY_KEYWORDS)) {
-    for (const kw of keywords) {
-      if (lower.includes(kw) && kw.length > bestScore) {
-        bestCity = cityId;
-        bestScore = kw.length;
-      }
-    }
-  }
-  return bestCity;
-}
-
-function fuzzyMatchAddress(address: string, zones: ZoneRow[]): ZoneRow | null {
-  const cityId = guessCityId(address);
-  const candidates = cityId ? zones.filter((z) => z.city_id === cityId) : zones;
-  if (!candidates.length) return null;
-
-  // Strip the trailing city tag so "Boulevard X, Laval" doesn't make every Laval
-  // zone match on the word "laval"
-  const street = stripCityTag(address).toLowerCase();
-
-  // Score each candidate zone by how many of its name tokens appear in the address.
-  // Longer matched tokens score higher.
-  let best: ZoneRow | null = null;
-  let bestScore = 0;
-  for (const zone of candidates) {
-    const score = scoreZoneAgainstAddress(zone.name, street);
-    if (score > bestScore) {
-      best = zone;
-      bestScore = score;
-    }
-  }
-  // Require a meaningful match (at least one ≥4-char token hit) to avoid false positives
-  return bestScore >= 4 ? best : null;
-}
-
-const CITY_TAG_RE = /,\s*(?:laval|longueuil|montréal|montreal|mtl|terrebonne|blainville|boisbriand|rosemère|rosemere|bois-des-filion|sainte-thérèse|ste-thérèse|ste thérèse|qc|québec|quebec|canada)[\s,]*$/iu;
-
-function stripCityTag(address: string): string {
-  return address.replace(CITY_TAG_RE, '').trim();
-}
-
-function scoreZoneAgainstAddress(zoneName: string, lowerAddress: string): number {
-  const tokens = zoneName
-    .toLowerCase()
-    .split(/[\s\-']+/)
-    .filter((t) => t.length >= 3 && !STOPWORDS.has(t));
-  let score = 0;
-  for (const token of tokens) {
-    if (lowerAddress.includes(token)) {
-      score += token.length;
-    }
-  }
-  return score;
-}
-
-const STOPWORDS = new Set([
-  'rue', 'boul', 'boulevard', 'bd', 'avenue', 'av', 'place', 'gare',
-  'station', 'centre', 'ville', 'sainte', 'saint', 'ste', 'st', 'de',
-  'la', 'le', 'les', 'du', 'des', 'cégep', 'cegep', 'parc',
-]);
 
 async function logDiscovery(
   client: SupabaseClient,
