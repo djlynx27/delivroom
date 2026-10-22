@@ -125,22 +125,18 @@ interface Zone {
 // self-assignable across separate call sites in this version, which made a
 // pinned param type fail `deno check` even though the value at the one call
 // site is exactly right.
+// Uses get_prior_surge_states_bulk (one index probe per zone). The previous
+// inline query ordered the whole table by captured_at, which seq-scanned ~1M
+// rows every cycle and timed out (Sentry 7720723821).
 async function loadPriorSurgeState<
-  T extends { from: (table: string) => { select: (columns: string) => any } },
+  T extends { rpc: (fn: string, args: Record<string, unknown>) => any },
 >(supabase: T, zoneIds: string[]): Promise<Map<string, PriorSurgeState>> {
-  const { data, error } = await supabase
-    .from('zone_context_vectors')
-    .select('zone_id, surge_class, surge_multiplier, captured_at')
-    .in('zone_id', zoneIds)
-    .order('captured_at', { ascending: false })
-    .limit(zoneIds.length * 3);
+  const { data, error } = await supabase.rpc('get_prior_surge_states_bulk', { p_zone_ids: zoneIds });
   if (error) throw new Error(`Prior surge state lookup failed: ${error.message}`);
 
   const byZone = new Map<string, PriorSurgeState>();
   for (const row of (data ?? []) as Array<PriorSurgeState & { zone_id: string }>) {
-    if (!byZone.has(row.zone_id)) {
-      byZone.set(row.zone_id, { surge_class: row.surge_class, surge_multiplier: row.surge_multiplier });
-    }
+    byZone.set(row.zone_id, { surge_class: row.surge_class, surge_multiplier: row.surge_multiplier });
   }
   return byZone;
 }
