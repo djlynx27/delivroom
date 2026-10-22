@@ -245,6 +245,16 @@ function logSupabaseSyncError(context: string, error: unknown) {
   console.error(`[${context}] Supabase sync failed:`, error);
 }
 
+const AUTH_ERROR_MARKERS = [
+  'jwt',
+  'row-level security',
+  'permission denied',
+  'not authenticated',
+  '401',
+  '403',
+] as const;
+const NETWORK_ERROR_MARKERS = ['failed to fetch', 'network request failed'] as const;
+
 function getLearningSyncFailureMessage(error: unknown, fallback: string) {
   if (
     typeof navigator !== 'undefined' &&
@@ -257,21 +267,11 @@ function getLearningSyncFailureMessage(error: unknown, fallback: string) {
   const message = getErrorMessage(error, fallback);
   const normalizedMessage = message.toLowerCase();
 
-  if (
-    normalizedMessage.includes('jwt') ||
-    normalizedMessage.includes('row-level security') ||
-    normalizedMessage.includes('permission denied') ||
-    normalizedMessage.includes('not authenticated') ||
-    normalizedMessage.includes('401') ||
-    normalizedMessage.includes('403')
-  ) {
+  if (AUTH_ERROR_MARKERS.some((marker) => normalizedMessage.includes(marker))) {
     return 'Connexion cloud absente ou expiree. Donnees locales sauvegardees.';
   }
 
-  if (
-    normalizedMessage.includes('failed to fetch') ||
-    normalizedMessage.includes('network request failed')
-  ) {
+  if (NETWORK_ERROR_MARKERS.some((marker) => normalizedMessage.includes(marker))) {
     return 'Reseau cloud temporairement indisponible. Donnees locales sauvegardees.';
   }
 

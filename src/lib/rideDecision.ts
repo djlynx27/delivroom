@@ -172,16 +172,23 @@ function checkForcedFloorSkip(
   metrics: ForcedFloorMetrics,
   platform: 'rideshare' | 'delivery',
 ): string | null {
-  const { dollarsPerKm: dpk, effectiveHourlyRate: eff } = metrics;
+  return platform === 'delivery'
+    ? checkDeliveryFloor(metrics)
+    : checkRideshareFloors(ctx, metrics);
+}
 
-  if (platform === 'delivery') {
-    // Delivery keeps the original combined floor (both metrics bad at once).
-    if (dpk !== null && eff !== null && dpk < FLOOR_PER_KM_DELIVERY && eff < FLOOR_HOURLY_DELIVERY) {
-      return `Floor absolu franchi : $${dpk.toFixed(2)}/km ET $${eff.toFixed(0)}/h sous les seuils ($${FLOOR_PER_KM_DELIVERY.toFixed(2)}/km, $${FLOOR_HOURLY_DELIVERY}/h) — perte nette`;
-    }
-    return null;
+function checkDeliveryFloor({ dollarsPerKm: dpk, effectiveHourlyRate: eff }: ForcedFloorMetrics): string | null {
+  // Delivery keeps the original combined floor (both metrics bad at once).
+  if (dpk !== null && eff !== null && dpk < FLOOR_PER_KM_DELIVERY && eff < FLOOR_HOURLY_DELIVERY) {
+    return `Floor absolu franchi : $${dpk.toFixed(2)}/km ET $${eff.toFixed(0)}/h sous les seuils ($${FLOOR_PER_KM_DELIVERY.toFixed(2)}/km, $${FLOOR_HOURLY_DELIVERY}/h) — perte nette`;
   }
+  return null;
+}
 
+function checkRideshareFloors(
+  ctx: RideOfferContext,
+  { dollarsPerKm: dpk, effectiveHourlyRate: eff }: ForcedFloorMetrics,
+): string | null {
   // Rideshare: two independent, unconditional floors — either one alone
   // forces a skip, since a great number on the other metric doesn't
   // compensate for undercutting vehicle cost or wasting idle time.

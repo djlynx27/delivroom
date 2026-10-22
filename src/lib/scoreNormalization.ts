@@ -108,22 +108,31 @@ export interface RankAgreement {
   inversions: number;
 }
 
+type PairKind = 'concordant' | 'discordant' | 'tiedRawOnly' | 'tiedNormOnly' | 'tiedBoth';
+
+function classifyPair(dr: number, dn: number): PairKind {
+  if (dr === 0 && dn === 0) return 'tiedBoth';
+  if (dr === 0) return 'tiedRawOnly';
+  if (dn === 0) return 'tiedNormOnly';
+  return dr === dn ? 'concordant' : 'discordant';
+}
+
 export function rankAgreement(raws: readonly number[], normalized: readonly number[]): RankAgreement {
-  let concordant = 0;
-  let discordant = 0;
-  let tiedRawOnly = 0;
-  let tiedNormOnly = 0;
+  const counts: Record<PairKind, number> = {
+    concordant: 0,
+    discordant: 0,
+    tiedRawOnly: 0,
+    tiedNormOnly: 0,
+    tiedBoth: 0,
+  };
   for (let i = 0; i < raws.length; i++) {
     for (let j = i + 1; j < raws.length; j++) {
       const dr = Math.sign((raws[i] ?? 0) - (raws[j] ?? 0));
       const dn = Math.sign((normalized[i] ?? 0) - (normalized[j] ?? 0));
-      if (dr === 0 && dn === 0) continue;
-      if (dr === 0) tiedRawOnly++;
-      else if (dn === 0) tiedNormOnly++;
-      else if (dr === dn) concordant++;
-      else discordant++;
+      counts[classifyPair(dr, dn)]++;
     }
   }
+  const { concordant, discordant, tiedRawOnly, tiedNormOnly } = counts;
   const denom = Math.sqrt(
     (concordant + discordant + tiedRawOnly) * (concordant + discordant + tiedNormOnly)
   );

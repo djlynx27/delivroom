@@ -45,6 +45,12 @@ function hourInRange(hour: number, range: [number, number]): boolean {
 
 function computeScore(zoneType: string, hour: number, dayOfWeek: number): number {
   const base = BASE_SCORES[zoneType] ?? 50;
+  const multiplier = combinedMultiplier(zoneType, hour, dayOfWeek);
+  const variation = Math.floor(Math.random() * 21) - 10; // ±10
+  return Math.max(0, Math.min(100, Math.round(base * multiplier + variation)));
+}
+
+function combinedMultiplier(zoneType: string, hour: number, dayOfWeek: number): number {
   const isWeekday = dayOfWeek >= 1 && dayOfWeek <= 5;
   const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
@@ -57,9 +63,7 @@ function computeScore(zoneType: string, hour: number, dayOfWeek: number): number
       multiplier *= m.types[zoneType];
     }
   }
-
-  const variation = Math.floor(Math.random() * 21) - 10; // ±10
-  return Math.max(0, Math.min(100, Math.round(base * multiplier + variation)));
+  return multiplier;
 }
 
 export interface SimulationProgress {

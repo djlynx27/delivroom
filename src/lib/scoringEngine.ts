@@ -425,9 +425,10 @@ const ZONE_PROFILES: Record<string, ZoneProfile> = {
   },
   'Station Berri-UQAM': {
     pattern: (h, d) => {
-      if (d >= 1 && d <= 5 && ((h >= 7 && h <= 9) || (h >= 17 && h <= 19)))
-        return 8;
-      if (d >= 1 && d <= 5 && h >= 10 && h <= 16) return 5;
+      const weekday = d >= 1 && d <= 5;
+      const rush = (h >= 7 && h <= 9) || (h >= 17 && h <= 19);
+      if (weekday && rush) return 8;
+      if (weekday && h >= 10 && h <= 16) return 5;
       return 3;
     },
   },
@@ -828,14 +829,17 @@ export function calculateWeightedDemandScore(
   );
 }
 
+/** OpenWeather condition-id ranges: thunderstorm, rain (heavy), snow. */
+const SEVERE_WEATHER_ID_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [200, 232],
+  [502, 531],
+  [600, 622],
+];
+
 export function getWeatherMultiplier(weather: WeatherCondition | null): number {
   if (!weather) return 1.0;
   const { weatherId, temp } = weather;
-  if (
-    (weatherId >= 502 && weatherId <= 531) ||
-    (weatherId >= 600 && weatherId <= 622) ||
-    (weatherId >= 200 && weatherId <= 232)
-  ) {
+  if (SEVERE_WEATHER_ID_RANGES.some(([lo, hi]) => weatherId >= lo && weatherId <= hi)) {
     return 1.4;
   }
   if (weatherId >= 300 && weatherId <= 501) {

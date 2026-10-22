@@ -11,7 +11,7 @@
     "install:apk": "adb install -r android/app/build/outputs/apk/debug/app-debug.apk",
     "backup:db": "tsx --env-file=.env.local scripts/backup-data.ts",
     "restore:db": "tsx --env-file=.env.local scripts/restore-data.ts",
-    "lint": "eslint src --max-warnings 74",
+    "lint": "eslint src --max-warnings 66",
     "lint:strict": "eslint src --max-warnings 0",
     "test": "vitest",
     "test:run": "vitest run",

@@ -113,13 +113,13 @@ export function parseOfferText(rawText: string): ParsedOffer {
   // One leg = ride only (pickup section not shown). Two+ legs = pickup then ride.
   const [pickup, ride] = legs.length >= 2 ? legs : [undefined, legs[0]];
 
-  return {
-    fare,
-    pickupKm: pickup?.km ?? null,
-    pickupMin: pickup?.minutes ?? null,
-    rideKm: ride?.km ?? null,
-    rideMin: ride?.minutes ?? null,
-  };
+  const p = legFields(pickup);
+  const r = legFields(ride);
+  return { fare, pickupKm: p.km, pickupMin: p.min, rideKm: r.km, rideMin: r.min };
+}
+
+function legFields(leg: Leg | undefined): { km: number | null; min: number | null } {
+  return { km: leg?.km ?? null, min: leg?.minutes ?? null };
 }
 
 /** Runs Tesseract.js on an image and returns the parsed offer fields.

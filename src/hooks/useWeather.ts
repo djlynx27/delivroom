@@ -49,6 +49,27 @@ export interface WeatherData {
   demandBoostPoints: number;
 }
 
+type WeatherMeta = { icon: string; description: string; isBadWeather: boolean };
+
+const WMO_CLEAR: WeatherMeta = { icon: '☀️', description: 'Dégagé', isBadWeather: false };
+const WMO_THUNDERSTORM: WeatherMeta = { icon: '⛈️', description: 'Orage', isBadWeather: true };
+const WMO_THUNDERSTORM_HAIL: WeatherMeta = {
+  icon: '⛈️',
+  description: 'Orage avec grêle',
+  isBadWeather: true,
+};
+const WMO_OVERCAST: WeatherMeta = { icon: '🌥️', description: 'Nuageux', isBadWeather: false };
+/** [highest WMO code of the band, meta] — checked in order. */
+const WMO_BANDS: ReadonlyArray<readonly [number, WeatherMeta]> = [
+  [3, { icon: '⛅', description: 'Partiellement nuageux', isBadWeather: false }],
+  [48, { icon: '🌫️', description: 'Brouillard', isBadWeather: true }],
+  [57, { icon: '🌧️', description: 'Bruine', isBadWeather: true }],
+  [67, { icon: '🌧️', description: 'Pluie', isBadWeather: true }],
+  [77, { icon: '🌨️', description: 'Neige', isBadWeather: true }],
+  [82, { icon: '🌧️', description: 'Averses', isBadWeather: true }],
+  [86, { icon: '🌨️', description: 'Averses de neige', isBadWeather: true }],
+];
+
 /** Map WMO weather codes to icon + description */
 function getWeatherMeta(code: number): {
   icon: string;
@@ -56,31 +77,11 @@ function getWeatherMeta(code: number): {
   isBadWeather: boolean;
 } {
   // WMO Weather interpretation codes
-  if (code === 0)
-    return { icon: '☀️', description: 'Dégagé', isBadWeather: false };
-  if (code <= 3)
-    return {
-      icon: '⛅',
-      description: 'Partiellement nuageux',
-      isBadWeather: false,
-    };
-  if (code <= 48)
-    return { icon: '🌫️', description: 'Brouillard', isBadWeather: true };
-  if (code <= 57)
-    return { icon: '🌧️', description: 'Bruine', isBadWeather: true };
-  if (code <= 67)
-    return { icon: '🌧️', description: 'Pluie', isBadWeather: true };
-  if (code <= 77)
-    return { icon: '🌨️', description: 'Neige', isBadWeather: true };
-  if (code <= 82)
-    return { icon: '🌧️', description: 'Averses', isBadWeather: true };
-  if (code <= 86)
-    return { icon: '🌨️', description: 'Averses de neige', isBadWeather: true };
-  if (code === 95)
-    return { icon: '⛈️', description: 'Orage', isBadWeather: true };
-  if (code <= 99)
-    return { icon: '⛈️', description: 'Orage avec grêle', isBadWeather: true };
-  return { icon: '🌥️', description: 'Nuageux', isBadWeather: false };
+  if (code === 0) return WMO_CLEAR;
+  if (code === 95) return WMO_THUNDERSTORM;
+  const band = WMO_BANDS.find(([maxCode]) => code <= maxCode);
+  if (band) return band[1];
+  return code <= 99 ? WMO_THUNDERSTORM_HAIL : WMO_OVERCAST;
 }
 
 /**
