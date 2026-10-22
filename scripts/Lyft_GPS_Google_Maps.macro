@@ -203,7 +203,7 @@
   "m_constraintList": [],
   "m_description": "",
   "m_descriptionOpen": false,
-  "m_enabled": false,
+  "m_enabled": true,
   "m_excludeLog": false,
   "m_headingColor": 0,
   "m_isOrCondition": false,
