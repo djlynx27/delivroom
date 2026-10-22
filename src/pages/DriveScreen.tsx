@@ -727,7 +727,7 @@ export default function DriveScreen() {
                 setDriverMode(key);
                 vibrate('navigation');
               }}
-              className={`flex-1 text-[13px] font-display font-semibold py-3 min-h-11 rounded-lg transition-colors ${
+              className={`flex-1 text-[13px] font-display font-semibold py-3 min-h-12 rounded-lg transition-colors ${
                 driverMode === key
                   ? `${activeClass} shadow-sm`
                   : 'text-muted-foreground hover:text-foreground'
@@ -1067,7 +1067,7 @@ export default function DriveScreen() {
           <Button
             size="sm"
             variant="outline"
-            className="gap-1.5 flex-shrink-0 h-9"
+            className="gap-1.5 flex-shrink-0 h-12"
             onClick={() => {
               void handleManualLocate();
             }}

@@ -54,13 +54,13 @@ function ChipRow({
 }) {
   const currentNum = parseFloat(current);
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-2">
       {values.map((v) => (
         <button
           key={v}
           type="button"
           onClick={() => onPick(v)}
-          className={`min-h-[36px] px-2 rounded-md text-xs font-mono border transition-colors ${
+          className={`min-h-12 px-3 rounded-md text-xs font-mono border transition-colors ${
             currentNum === v
               ? 'bg-primary text-primary-foreground border-primary'
               : 'bg-muted/40 border-border text-muted-foreground hover:bg-muted'
@@ -92,11 +92,11 @@ function QuickDecideHeaderActions({
   onReset: () => void;
 }) {
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-2">
       <Button
         size="sm"
         variant="outline"
-        className={`h-7 gap-1 text-xs ${scanning ? 'animate-pulse' : ''}`}
+        className={`h-12 gap-1 text-xs ${scanning ? 'animate-pulse' : ''}`}
         onClick={onScanClick}
         disabled={scanning}
       >
@@ -107,7 +107,7 @@ function QuickDecideHeaderActions({
         <Button
           size="sm"
           variant={listening ? 'default' : 'outline'}
-          className={`h-7 gap-1 text-xs ${listening ? 'animate-pulse' : ''}`}
+          className={`h-12 gap-1 text-xs ${listening ? 'animate-pulse' : ''}`}
           onClick={onVoice}
         >
           <Mic className="w-3 h-3" />
@@ -115,7 +115,7 @@ function QuickDecideHeaderActions({
         </Button>
       )}
       {showReset && (
-        <Button size="sm" variant="ghost" className="h-7 gap-1 text-xs" onClick={onReset}>
+        <Button size="sm" variant="ghost" className="h-12 gap-1 text-xs" onClick={onReset}>
           <Eraser className="w-3 h-3" /> Reset
         </Button>
       )}
@@ -345,7 +345,7 @@ export function QuickDecideWidget() {
   return (
     <Card className="bg-card border-border">
       <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-display flex items-center gap-2 justify-between">
+        <CardTitle className="text-sm font-display flex flex-wrap items-center gap-2 justify-between">
           <span className="flex items-center gap-2">
             <Zap className="w-4 h-4 text-primary" /> Décider en 3 sec
           </span>
@@ -381,6 +381,7 @@ export function QuickDecideWidget() {
                 type="button"
                 size="sm"
                 variant={active ? 'default' : 'outline'}
+                className="h-12"
                 aria-pressed={active}
                 onClick={() => setIsHypra(name === 'Hypra')}
               >
@@ -397,6 +398,7 @@ export function QuickDecideWidget() {
                 type="button"
                 size="sm"
                 variant={hypraMode === mode ? 'default' : 'outline'}
+                className="h-12"
                 aria-pressed={hypraMode === mode}
                 onClick={() => setHypraMode(mode)}
               >
@@ -464,7 +466,7 @@ export function QuickDecideWidget() {
           <Button
             onClick={logHypraCall}
             variant="outline"
-            className="w-full gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
+            className="w-full h-14 gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
           >
             <Check className="w-4 h-4" />
             J'ai pris cet appel Hypra
@@ -472,11 +474,11 @@ export function QuickDecideWidget() {
         )}
 
         {decision && (
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-3">
             <Button
               onClick={() => logRideToShift()}
               variant="outline"
-              className="gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
+              className="h-14 gap-2 border-green-500/40 text-green-300 hover:bg-green-500/10"
             >
               <Check className="w-4 h-4" />
               J'ai pris cette course
@@ -484,7 +486,7 @@ export function QuickDecideWidget() {
             <Button
               onClick={declineOffer}
               variant="outline"
-              className="gap-2 border-red-500/40 text-red-300 hover:bg-red-500/10"
+              className="h-14 gap-2 border-red-500/40 text-red-300 hover:bg-red-500/10"
             >
               <X className="w-4 h-4" />
               Je refuse
