@@ -754,11 +754,11 @@ git commit -m "fix(scoring): use Gaussian distance decay for event boosts client
 
 **Files:** none (verification only)
 
-- [ ] **Step 1: Confirm both engines agree on shape**
+- [x] **Step 1: Confirm both engines agree on shape** — verified 2026-10-22: Deno eventBoost 8/8 + Vitest scoringEngine 98/98; same formula (sigma = radius/2)
 
 Using the same zone/event coordinates in both the Deno test (Task 4) and a manual Vitest run (Task 6), verify the two engines produce the same *shape* of curve (monotonically decreasing, ~13.5% remaining at the nominal radius) even though their aggregation strategies intentionally differ (server sums across events and caps at 25; client takes the max across events and caps at 30 — this divergence already existed before this plan and is out of scope to unify, per the approved spec's Non-goals).
 
-- [ ] **Step 2: Confirm the full pipeline end-to-end on the live project**
+- [x] **Step 2: Confirm the full pipeline end-to-end on the live project** — verified 2026-10-22 via rolled-back DO block on prod: far event → `evt-*` zone (type événements, score 77), event inside a real zone → no zone, cleanup after end_at+2h → zone removed, 0 leftovers. Top-10 read query not run.
 
 Re-run Task 2 Step 3's qualifying-event insert against `hibzhsjgipybfihhzpxr`. Then:
 
@@ -775,7 +775,7 @@ Expected: the test event's zone (`evt-*`) appears in the normal top-10-by-score 
 
 Clean up the test event (`DELETE FROM public.events WHERE name = 'Test Festival'`, which cascades to the zone) when done.
 
-- [ ] **Step 3: Final full-suite check**
+- [ ] **Step 3: Final full-suite check** — 2026-10-22: type-check OK, 936/936 tests, lint 0 errors but 75 warnings > max 74 (pre-existing, not from this feature)
 
 Run: `npm run type-check && npm run lint && npm run test:run`
 Expected: 0 errors, baseline warning count, all tests passing.
