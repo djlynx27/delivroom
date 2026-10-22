@@ -92,15 +92,21 @@ export function currentWeekMinute(now: Date): number {
   return day * MINUTES_PER_DAY + hour * 60 + minute;
 }
 
-function pointToWeekMinute(point: HoursPoint): number | null {
-  if (!Number.isInteger(point.day) || point.day < 0 || point.day > 6) return null;
-  const raw = point.time?.padStart(4, '0');
+/** "HHMM" (zéro-padded) → minutes depuis minuit, ou null si invalide. */
+function parseHhmm(time: string | undefined): number | null {
+  const raw = time?.padStart(4, '0');
   if (!raw || raw.length !== 4) return null;
   const hour = Number.parseInt(raw.slice(0, 2), 10);
   const minute = Number.parseInt(raw.slice(2), 10);
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
   if (hour > 24 || minute > 59) return null;
-  return point.day * MINUTES_PER_DAY + hour * 60 + minute;
+  return hour * 60 + minute;
+}
+
+function pointToWeekMinute(point: HoursPoint): number | null {
+  if (!Number.isInteger(point.day) || point.day < 0 || point.day > 6) return null;
+  const minutes = parseHhmm(point.time);
+  return minutes === null ? null : point.day * MINUTES_PER_DAY + minutes;
 }
 
 function formatWeekMinute(weekMinute: number): string {
