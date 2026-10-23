@@ -28,6 +28,7 @@ import {
   useNavigate,
 } from 'react-router-dom';
 import { toast } from 'sonner';
+import { isLabBuild } from '@/lib/env';
 
 const DriveScreen = lazy(() => import('@/pages/DriveScreen'));
 const TodayScreen = lazy(() => import('@/pages/TodayScreen'));
@@ -48,6 +49,7 @@ const AdminZoneDiscoveriesScreen = lazy(
 const AdminDriverOpsScreen = lazy(
   () => import('@/pages/AdminDriverOpsScreen')
 );
+const ProspectionScreen = lazy(() => import('@/pages/ProspectionScreen'));
 const GasScreen = lazy(() => import('@/pages/GasScreen'));
 const NavigateScreen = lazy(() => import('@/pages/NavigateScreen'));
 const NotFound = lazy(() => import('./pages/NotFound.tsx'));
@@ -241,6 +243,10 @@ function AppContent() {
           <Route path="/planning" element={<PlanningScreen />} />
           <Route path="/zones" element={<ZonesScreen />} />
           <Route path="/gas" element={<GasScreen />} />
+          <Route
+            path="/prospection"
+            element={isLabBuild() ? <ProspectionScreen /> : <NotFound />}
+          />
           <Route path="/navigate" element={<NavigateScreen />} />
           <Route path="/app/launch-gps" element={<NavigateScreen />} />
           <Route path="/events" element={<EventsScreen />} />

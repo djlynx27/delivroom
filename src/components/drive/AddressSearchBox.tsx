@@ -215,6 +215,11 @@ export function AddressSearchBox({
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
+          onKeyDown={(e) => {
+            // Enter = take the top suggestion (ponytail: no arrow-key highlight, add when needed).
+            const [top] = suggestions;
+            if (e.key === 'Enter' && top) handleSelect(top);
+          }}
           placeholder="Chercher une adresse ou un lieu…"
           className="border-0 bg-transparent h-auto p-0 text-[14px] focus-visible:ring-0 focus-visible:ring-offset-0"
         />

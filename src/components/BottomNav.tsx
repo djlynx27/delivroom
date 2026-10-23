@@ -6,9 +6,11 @@ import {
   Fuel,
   Layers,
   Map,
+  Route,
   PartyPopper,
   Settings,
 } from 'lucide-react';
+import { isLabBuild } from '@/lib/env';
 import { NavLink } from 'react-router-dom';
 
 const navItems = [
@@ -17,6 +19,9 @@ const navItems = [
   { path: '/planning', icon: Map, label: 'planning' },
   { path: '/events', icon: PartyPopper, label: 'events' },
   { path: '/zones', icon: Layers, label: 'zones' },
+  ...(isLabBuild()
+    ? ([{ path: '/prospection', icon: Route, label: 'prospection' }] as const)
+    : []),
   { path: '/gas', icon: Fuel, label: 'gas' },
   { path: '/admin', icon: Settings, label: 'admin' },
 ] as const;
