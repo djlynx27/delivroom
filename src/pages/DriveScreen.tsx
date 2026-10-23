@@ -55,6 +55,7 @@ import { getDemandClass } from '@/lib/demandUtils';
 import { computeMicroSpot } from '@/lib/spotter';
 import { isLabBuild } from '@/lib/env';
 import { getHoliday } from '@/lib/holidayEngine';
+import { auditSuggestion } from '@/lib/suggestionAudit';
 import { buildTaxiRecommendations, taxiEventBadge } from '@/lib/taxiMode';
 import {
   DISTANCE_PENALTY_PER_KM,
@@ -468,6 +469,16 @@ export default function DriveScreen() {
   const heroEventBadge = heroZone
     ? (zoneEventBadge.get(heroZone.id) ?? taxiEventBadge(heroZone))
     : undefined;
+  // Lab only: sanity-check the hero pick (see lib/suggestionAudit.ts).
+  const heroAudit =
+    isLabBuild() && heroZone && location
+      ? auditSuggestion({
+          hero: { ...heroZone, eventEndAt: heroEventBadge?.end_at },
+          others: nextZones,
+          origin: location,
+          now: new Date(),
+        })
+      : null;
 
   // Inverse Proximity Spotter: a tactical 50-150m offset from the hero
   // zone's coordinate, toward whichever cell of the Lyft nearby-drivers grid
@@ -923,6 +934,24 @@ export default function DriveScreen() {
                   <p className="text-[20px] font-display font-semibold text-muted-foreground">
                     📍 {heroDistance.toFixed(1)} km
                   </p>
+                )}
+                {heroAudit && (
+                  <div
+                    className={`rounded-lg px-2.5 py-1 text-[12px] font-semibold ${
+                      heroAudit.level === 'ok'
+                        ? 'bg-emerald-500/15 text-emerald-400'
+                        : heroAudit.level === 'warn'
+                          ? 'bg-amber-500/15 text-amber-300'
+                          : 'bg-red-500/15 text-red-400'
+                    }`}
+                  >
+                    {heroAudit.level === 'ok' ? '🟢 Signal propre' : '⚠️ Suggestion douteuse'}
+                    {heroAudit.reasons.map((r) => (
+                      <p key={r} className="font-normal">
+                        {r}
+                      </p>
+                    ))}
+                  </div>
                 )}
                 {heroEventBadge && (
                   <EventBoostBadge
