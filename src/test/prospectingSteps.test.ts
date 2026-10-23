@@ -26,6 +26,7 @@ describe('buildProspectingSteps', () => {
     expect(steps.map((s) => s.isDestination)).toEqual([false, false, true]);
     for (const s of steps) {
       expect(s.url).toContain(`destination=${s.zone.latitude},${s.zone.longitude}`);
+      expect(s.url).toContain('avoid=highways');
       expect(s.url).not.toContain('waypoints');
       expect(s.url).not.toContain('origin=');
     }

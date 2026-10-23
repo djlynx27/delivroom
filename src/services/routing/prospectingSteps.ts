@@ -39,7 +39,8 @@ export function buildProspectingSteps(
     return {
       zone,
       legKm,
-      url: getGoogleMapsNavUrl(zone.name, zone.latitude, zone.longitude),
+      // Boulevards over highways: no stuck-in-the-tunnel risk, can still catch pings.
+      url: `${getGoogleMapsNavUrl(zone.name, zone.latitude, zone.longitude)}&avoid=highways`,
       isDestination: i === stops.length - 1,
     };
   });
