@@ -20,6 +20,8 @@ import {
   type RouteCandidateZone,
   type RoutePoint,
 } from '@/services/routing';
+import { buildProspectingSteps, type ProspectingStep } from '@/services/routing/prospectingSteps';
+import { ProspectingStepper } from '@/components/drive/ProspectingStepper';
 import { PlatformArbitrage } from '@/components/PlatformArbitrage';
 import { PlatformSwitchBanner } from '@/components/PlatformSwitchBanner';
 import { QuickDecideWidget } from '@/components/QuickDecideWidget';
@@ -261,6 +263,11 @@ export default function DriveScreen() {
     gasBoard?.slots.find((s) => s.kind === 'nearest-cheapest')?.station ?? null;
   const [fullScreen, setFullScreen] = useState(false);
   const [navZone, setNavZone] = useState<RouteCandidateZone | null>(null);
+  const [prospectingTrip, setProspectingTrip] = useState<{
+    destinationName: string;
+    steps: ProspectingStep[];
+    activeIndex: number;
+  } | null>(null);
 
   // Speed-based activity detection → auto-HUD.
   // hudActive defaults to true so the driver lands directly in driving mode
@@ -566,12 +573,37 @@ export default function DriveScreen() {
     [location, modeZones, returnCorridor, antiDeadhead]
   );
 
-  // Address search: the picked address/POI becomes the active nav target
-  // and fires the same 1-tap Google Maps handoff as the hero recommendation
-  // — history-saving is handled inside AddressSearchBox itself. score: 0
-  // since a manually searched address was never demand-scored.
+  // Address search: the picked address/POI becomes a hop-by-hop prospection
+  // trip (stepper, one single-destination Maps link per stop) instead of one
+  // multi-waypoint URL Maps can reorder. No GPS fix -> plain 1-tap handoff.
+  // score: 0 since a manually searched address was never demand-scored.
   const handleAddressSelect = (result: AddressSearchResult) => {
-    navigateOneTap({ ...result, score: 0 });
+    const destination = { ...result, score: 0 };
+    if (!location) {
+      navigateOneTap(destination);
+      return;
+    }
+    setProspectingTrip({
+      destinationName: result.name,
+      steps: buildProspectingSteps(
+        { lat: location.latitude, lng: location.longitude },
+        destination,
+        modeZones
+      ),
+      activeIndex: 0,
+    });
+  };
+
+  const launchProspectingStep = (index: number) => {
+    const step = prospectingTrip?.steps[index];
+    if (!prospectingTrip || !step) return;
+    logNavEvent(
+      location ? { lat: location.latitude, lng: location.longitude } : null,
+      step.zone,
+      'prospection'
+    );
+    setProspectingTrip({ ...prospectingTrip, activeIndex: index + 1 });
+    window.location.href = step.url;
   };
 
   // 15-minute auto-routing: when driver arrives at heroZone, countdown then
@@ -689,6 +721,16 @@ export default function DriveScreen() {
           </p>
         )}
       </div>
+
+      {prospectingTrip && (
+        <ProspectingStepper
+          destinationName={prospectingTrip.destinationName}
+          steps={prospectingTrip.steps}
+          activeIndex={prospectingTrip.activeIndex}
+          onLaunch={launchProspectingStep}
+          onClose={() => setProspectingTrip(null)}
+        />
+      )}
 
       {/* Shift tally — running $/h based on actual fares logged today */}
       <div className="px-4 mt-2">
